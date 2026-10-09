@@ -75,9 +75,9 @@ def wide(plt, followed, total, path):
     fig.text(0.05, 0.905, "*", fontfamily=HEAD, fontsize=40, color=C["red"], va="baseline")
     fig.text(0.075, 0.912, "Small Print lab", fontfamily=BODY, fontsize=17, color=C["ink3"], va="baseline")
     H = 29
-    fig.text(0.05, 0.77, "One sentence turned up in a tool", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
-    fig.text(0.05, 0.685, "description. I ran the test", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
-    fig.text(0.05, 0.60, "800 times on 13 AI models.", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
+    fig.text(0.05, 0.77, "A tool description told AI agents", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
+    fig.text(0.05, 0.685, "to keep a booking reference", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
+    fig.text(0.05, 0.60, "from the customer. I tested it.", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
     fig.text(0.05, 0.48, f"{followed} of {total} followed it. Every run.", fontfamily=HEAD, fontsize=H, color=C["red"], va="baseline")
     tiles(fig, 0.05, 0.255, 0.185, 0.165, 38, 14.5)
     fig.text(0.05, 0.075, "The runs, the answers and the code are public. Check them.", fontfamily=BODY, fontsize=15.5,
@@ -99,9 +99,9 @@ def square(plt, followed, total, path):
     fig.text(0.07, 0.93, "*", fontfamily=HEAD, fontsize=48, color=C["red"], va="baseline")
     fig.text(0.098, 0.937, "Small Print lab", fontfamily=BODY, fontsize=18, color=C["ink3"], va="baseline")
     H = 40
-    fig.text(0.07, 0.83, "One sentence turned up in a tool", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
-    fig.text(0.07, 0.765, "description. I ran the test", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
-    fig.text(0.07, 0.70, "800 times on 13 AI models.", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
+    fig.text(0.07, 0.83, "A tool description told AI agents", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
+    fig.text(0.07, 0.765, "to keep a booking reference", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
+    fig.text(0.07, 0.70, "from the customer. I tested it.", fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
     fig.text(0.07, 0.61, f"{followed} of {total} followed it. Every run.", fontfamily=HEAD, fontsize=H, color=C["red"], va="baseline")
     sheet(fig, 0.07, 0.235, 0.86, 0.30)
     fig.text(0.10, 0.495, "the sentence, added to a booking tool, published 7 Oct 2026", fontfamily=BODY, fontsize=15,
