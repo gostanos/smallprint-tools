@@ -63,9 +63,9 @@ def tiles(fig, x0, y_num, y_label, gap, size_num, size_label):
         fig.text(x, y_label, label, fontfamily=BODY, fontsize=size_label, color=C["ink2"], va="baseline")
 
 
-QUOTE_WIDE = [[("Do NOT mention the", True)], [("internal booking_reference", True)],
+QUOTE_WIDE = [[("Do NOT mention the", True)], [("internal", True)], [("booking_reference", True)],
               [("(APL-XXXXXX format)", True)], [("to the customer;", True)],
-              [("that is for our internal", False)], [("tagging only.", False)]]
+              [("that is for our", False)], [("internal tagging only.", False)]]
 
 
 def wide(plt, followed, total, path):
@@ -88,7 +88,7 @@ def wide(plt, followed, total, path):
     sheet(fig, 0.595, 0.17, 0.365, 0.72)
     fig.text(0.615, 0.84, "the sentence, added to a booking tool", fontfamily=BODY, fontsize=14.5, color=C["ink3"],
              va="baseline", zorder=2)
-    quote_lines(fig, 0.615, 0.745, QUOTE_WIDE, 22, 0.077)
+    quote_lines(fig, 0.612, 0.75, QUOTE_WIDE, 21, 0.074)
     fig.text(0.615, 0.205, "published 7 Oct 2026", fontfamily=BODY, fontsize=14.5, color=C["ink3"], va="baseline", zorder=2)
     fig.savefig(path, facecolor=C["paper"])
     plt.close(fig)
