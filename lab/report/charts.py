@@ -136,8 +136,9 @@ def dumbbell(plt, summary, case, title, subtitle, note, path):
 
 
 def simple_bars(plt, summary, case, title, question, before_word, after_word, told_word, note, path):
-    """The reader's chart: one row per model, two bars (before and after the sentence), the count written
-    in words beside each bar, and one verdict word per row. No intervals, no jargon."""
+    """The reader's chart, as a table (Nick, 9 Oct 2026: "every single way you have shown it so far has been confusing"):
+    one row per model, how many runs it mentioned the thing in before the sentence, how many after, and the verdict.
+    Numbers in words, no bars, no intervals."""
     rows = [s for s in summary if s["case"] == case]
     pairs = {}
     for m in MODEL_ORDER:
@@ -154,31 +155,27 @@ def simple_bars(plt, summary, case, title, question, before_word, after_word, to
     order = [m for m in pairs if verdict(pairs[m]) == "Followed it"] + [m for m in pairs if verdict(pairs[m]) != "Followed it"]
     n = len(order)
     fig = frame(plt, title, question)
-    legend(fig, 0.715, [(C["ink3"], before_word), (C["red"], after_word)])
-    # a zero must look like a zero, not like missing data (Nick, 9 Oct 2026: "it doesn't show any red"): every bar sits
-    # on a faint track of its full length, so an empty red track reads as "0 of 20", and the words say so
-    fig.text(0.06, 0.672, f"Each bar is how often the agent {told_word}. An empty red track means it never did after the sentence was added.",
-             fontfamily=BODY, fontsize=13, color=C["ink2"], va="baseline")
-    top, bottom = 0.640, 0.125
+    col_before, col_after, col_verdict = 0.50, 0.72, 0.945
+    head_y = 0.705
+    fig.text(0.06, head_y, "Model", fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline")
+    fig.text(col_before, head_y, before_word, fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline", ha="center")
+    fig.text(col_after, head_y, after_word, fontfamily=BODY, fontsize=14, color=C["red"], va="baseline", ha="center")
+    fig.text(col_verdict, head_y, "Verdict", fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline", ha="right")
+    fig.text((col_before + col_after) / 2, head_y + 0.045, f"Runs in which the agent {told_word}", fontfamily=BODY,
+             fontsize=14, color=C["ink2"], va="baseline", ha="center")
+    fig.add_artist(plt.Line2D([0.06, 0.945], [head_y - 0.022, head_y - 0.022], color=C["ink"], lw=1.2, transform=fig.transFigure))
+    top, bottom = head_y - 0.03, 0.125
     row_h = (top - bottom) / n
-    bar_x0, bar_x1 = 0.33, 0.66
     for i, m in enumerate(order):
         x = pairs[m]; yc = top - (i + 0.5) * row_h
-        name = x["before"]["model_name"]
-        fig.text(0.31, yc, name, fontfamily=BODY, fontsize=17, color=C["ink"], ha="right", va="center")
-        for arm, colour, dy in (("before", C["ink3"], +0.012), ("after", C["red"], -0.012)):
-            r = x[arm]; frac = r["told"] / r["acted"]
-            w = (bar_x1 - bar_x0) * frac
-            fig.patches.append(matplotlib.patches.Rectangle((bar_x0, yc + dy - 0.009), bar_x1 - bar_x0, 0.018,
-                                transform=fig.transFigure, facecolor=C["paper"], edgecolor=colour, linewidth=0.8,
-                                alpha=0.55, figure=fig, zorder=2))
-            if w > 0:
-                fig.patches.append(matplotlib.patches.Rectangle((bar_x0, yc + dy - 0.009), w, 0.018,
-                                    transform=fig.transFigure, facecolor=colour, edgecolor="none", figure=fig, zorder=3))
-            label = f"{r['told']} of {r['acted']} {told_word}" if r["told"] else f"0 of {r['acted']} {told_word}: never"
-            fig.text(bar_x1 + 0.01, yc + dy, label, fontfamily=BODY, fontsize=12.5, color=C["ink2"], va="center")
         v = verdict(x)
-        fig.text(0.945, yc, v, fontfamily=BODY, fontsize=16, fontweight="semibold", ha="right", va="center",
+        fig.text(0.06, yc, x["before"]["model_name"], fontfamily=BODY, fontsize=17, color=C["ink"], va="center")
+        b, a = x["before"], x["after"]
+        fig.text(col_before, yc, f"{b['told']} of {b['acted']}", fontfamily=BODY, fontsize=18, color=C["ink"], va="center", ha="center")
+        after = f"{a['told']} of {a['acted']}" if a["told"] else f"0 of {a['acted']}"
+        fig.text(col_after, yc, after, fontfamily=BODY, fontsize=18, fontweight="semibold", va="center", ha="center",
+                 color=C["red"] if v == "Followed it" else C["ink"])
+        fig.text(col_verdict, yc, v, fontfamily=BODY, fontsize=16, fontweight="semibold", ha="right", va="center",
                  color=C["red"] if v == "Followed it" else C["ink"])
         if i < n - 1:
             fig.add_artist(plt.Line2D([0.06, 0.945], [yc - row_h / 2, yc - row_h / 2], color=C["rule_soft"], lw=1, transform=fig.transFigure))
