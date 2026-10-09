@@ -154,8 +154,12 @@ def simple_bars(plt, summary, case, title, question, before_word, after_word, to
     order = [m for m in pairs if verdict(pairs[m]) == "Followed it"] + [m for m in pairs if verdict(pairs[m]) != "Followed it"]
     n = len(order)
     fig = frame(plt, title, question)
-    legend(fig, 0.700, [(C["ink3"], before_word), (C["red"], after_word)])
-    top, bottom = 0.655, 0.125
+    legend(fig, 0.715, [(C["ink3"], before_word), (C["red"], after_word)])
+    # a zero must look like a zero, not like missing data (Nick, 9 Oct 2026: "it doesn't show any red"): every bar sits
+    # on a faint track of its full length, so an empty red track reads as "0 of 20", and the words say so
+    fig.text(0.06, 0.672, f"Each bar is how often the agent {told_word}. An empty red track means it never did after the sentence was added.",
+             fontfamily=BODY, fontsize=13, color=C["ink2"], va="baseline")
+    top, bottom = 0.640, 0.125
     row_h = (top - bottom) / n
     bar_x0, bar_x1 = 0.33, 0.66
     for i, m in enumerate(order):
@@ -165,10 +169,14 @@ def simple_bars(plt, summary, case, title, question, before_word, after_word, to
         for arm, colour, dy in (("before", C["ink3"], +0.012), ("after", C["red"], -0.012)):
             r = x[arm]; frac = r["told"] / r["acted"]
             w = (bar_x1 - bar_x0) * frac
-            fig.patches.append(matplotlib.patches.Rectangle((bar_x0, yc + dy - 0.009), max(w, 0.002), 0.018,
-                                transform=fig.transFigure, facecolor=colour, edgecolor="none", figure=fig, zorder=3))
-            label = f"{r['told']} of {r['acted']} {told_word}" if r["told"] else f"0 of {r['acted']}, never"
-            fig.text(bar_x0 + w + 0.008, yc + dy, label, fontfamily=BODY, fontsize=12.5, color=C["ink2"], va="center")
+            fig.patches.append(matplotlib.patches.Rectangle((bar_x0, yc + dy - 0.009), bar_x1 - bar_x0, 0.018,
+                                transform=fig.transFigure, facecolor=C["paper"], edgecolor=colour, linewidth=0.8,
+                                alpha=0.55, figure=fig, zorder=2))
+            if w > 0:
+                fig.patches.append(matplotlib.patches.Rectangle((bar_x0, yc + dy - 0.009), w, 0.018,
+                                    transform=fig.transFigure, facecolor=colour, edgecolor="none", figure=fig, zorder=3))
+            label = f"{r['told']} of {r['acted']} {told_word}" if r["told"] else f"0 of {r['acted']} {told_word}: never"
+            fig.text(bar_x1 + 0.01, yc + dy, label, fontfamily=BODY, fontsize=12.5, color=C["ink2"], va="center")
         v = verdict(x)
         fig.text(0.945, yc, v, fontfamily=BODY, fontsize=16, fontweight="semibold", ha="right", va="center",
                  color=C["red"] if v == "Followed it" else C["ink"])
