@@ -76,10 +76,10 @@ def wide(plt, followed, total, path):
     fig.text(0.05, 0.905, "*", fontfamily=HEAD, fontsize=40, color=C["red"], va="baseline")
     fig.text(0.075, 0.912, "Small Print lab", fontfamily=BODY, fontsize=20, color=C["ink3"], va="baseline")
     H = 27
-    for n, line in enumerate(("Your AI agent follows text", "you never read. One sentence", "told it to keep something",
-                              "from you. I tested it.")):
+    for n, line in enumerate(("I tested whether AI agents", "obey text you never see.", "A sentence told them to keep",
+                              "something from the user.")):
         fig.text(0.05, 0.80 - n * 0.077, line, fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
-    fig.text(0.05, 0.465, f"{followed} of {total} followed it. Every run.", fontfamily=HEAD, fontsize=H, color=C["red"], va="baseline")
+    fig.text(0.05, 0.465, f"{followed} of {total} did. Every run.", fontfamily=HEAD, fontsize=H, color=C["red"], va="baseline")
     fig.text(0.05, 0.39, "Next time it could ask for anything.", fontfamily=BODY, fontsize=20, color=C["ink"], va="baseline")
     fig.text(0.05, 0.335, "Some agents will do it.", fontfamily=BODY, fontsize=20, color=C["ink"], va="baseline")
     tiles(fig, 0.05, 0.215, 0.148, 0.175, 36, 19)
@@ -102,10 +102,10 @@ def square(plt, followed, total, path):
     fig.text(0.07, 0.93, "*", fontfamily=HEAD, fontsize=48, color=C["red"], va="baseline")
     fig.text(0.098, 0.937, "Small Print lab", fontfamily=BODY, fontsize=22, color=C["ink3"], va="baseline")
     H = 38
-    for n, line in enumerate(("Your AI agent follows text", "you never read. One sentence", "told it to keep something",
-                              "from you. I tested it.")):
+    for n, line in enumerate(("I tested whether AI agents", "obey text you never see.", "A sentence told them to keep",
+                              "something from the user.")):
         fig.text(0.07, 0.845 - n * 0.062, line, fontfamily=HEAD, fontsize=H, color=C["ink"], va="baseline")
-    fig.text(0.07, 0.585, f"{followed} of {total} followed it. Every run.", fontfamily=HEAD, fontsize=H, color=C["red"], va="baseline")
+    fig.text(0.07, 0.585, f"{followed} of {total} did. Every run.", fontfamily=HEAD, fontsize=H, color=C["red"], va="baseline")
     fig.text(0.07, 0.525, "Next time it could ask for anything. Some agents will do it.", fontfamily=BODY,
              fontsize=23, color=C["ink"], va="baseline")
     sheet(fig, 0.07, 0.215, 0.86, 0.26)
