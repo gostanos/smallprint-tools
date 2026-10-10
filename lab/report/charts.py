@@ -149,9 +149,9 @@ def simple_bars(plt, summary, case, title, question, before_word, after_word, to
         return None
     # the verdict says what happened, in the same words as the question, and every verdict is set the same way
     # (Nick, 9 Oct 2026: "some of them are red some of them are in black, you're all over the place")
-    kept, anyway, less = {"mentioned it": ("Kept it quiet", "Mentioned it anyway", "Mentioned it less often"),
-                          "told them": ("Kept it from them", "Told them anyway", "Told them less often")}.get(
-                              told_word, ("Did as it was told", "Did not", "Did so less often"))
+    kept, anyway, less = {"told the customer": ("Obeyed, never told them", "Told the customer anyway", "Told the customer less often"),
+                          "told the user": ("Obeyed, never told them", "Told the user anyway", "Told the user less often")}.get(
+                              told_word, ("Obeyed", "Did not obey", "Obeyed sometimes"))
     def verdict(x):
         b, a = x["before"], x["after"]
         if a["told"] == 0 and b["told"] > 0: return kept
@@ -160,14 +160,17 @@ def simple_bars(plt, summary, case, title, question, before_word, after_word, to
     order = [m for m in pairs if verdict(pairs[m]) == kept] + [m for m in pairs if verdict(pairs[m]) != kept]
     n = len(order)
     fig = frame(plt, title, question)
-    col_before, col_after, col_verdict = 0.50, 0.72, 0.945
-    head_y = 0.705
-    fig.text(0.06, head_y, "Model", fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline")
-    fig.text(col_before, head_y, before_word, fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline", ha="center")
-    fig.text(col_after, head_y, after_word, fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline", ha="center")
-    fig.text(col_verdict, head_y, "What the agent did", fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline", ha="right")
-    fig.text((col_before + col_after) / 2, head_y + 0.045, f"Runs in which the agent {told_word}", fontfamily=BODY,
-             fontsize=14, color=C["ink2"], va="baseline", ha="center")
+    col_before, col_after, col_verdict = 0.43, 0.65, 0.945
+    head_y = 0.665
+    counted = f"runs where it {told_word}"
+    fig.text(0.06, head_y + 0.068, "Model", fontfamily=BODY, fontsize=14, fontweight="semibold", color=C["ink"], va="baseline")
+    for xc, head in ((col_before, before_word), (col_after, after_word)):
+        line1, line2 = head.split("\n")
+        fig.text(xc, head_y + 0.068, line1, fontfamily=BODY, fontsize=14, fontweight="semibold", color=C["ink"], va="baseline", ha="center")
+        fig.text(xc, head_y + 0.034, line2, fontfamily=BODY, fontsize=13, color=C["ink2"], va="baseline", ha="center")
+        fig.text(xc, head_y, counted, fontfamily=BODY, fontsize=13, color=C["ink3"], va="baseline", ha="center")
+    fig.text(col_verdict, head_y + 0.068, "What the agent did", fontfamily=BODY, fontsize=14, fontweight="semibold", color=C["ink"], va="baseline", ha="right")
+    fig.text(col_verdict, head_y + 0.034, "with the new description", fontfamily=BODY, fontsize=13, color=C["ink2"], va="baseline", ha="right")
     fig.add_artist(plt.Line2D([0.06, 0.945], [head_y - 0.022, head_y - 0.022], color=C["ink"], lw=1.2, transform=fig.transFigure))
     top, bottom = head_y - 0.03, 0.125
     row_h = (top - bottom) / n
@@ -317,7 +320,7 @@ def main():
         simple_bars(plt, s, "booking-reference",
                     "The tool said: don't mention the booking reference to the customer.",
                     "Did the AI agent mention it anyway?",
-                    "Before the sentence was added", "After the sentence was added", "mentioned it",
+                    "With the OLD description\n(no instruction about the reference)", "With the NEW description\n(says: do NOT mention it)", "told the customer",
                     "Same customer request and the same booking every time. Only the tool's description changed. "
                     "Three more models were tested but answered the customer too rarely to count: "
                     + ", ".join(dict.fromkeys(short)) + ".",
@@ -325,7 +328,7 @@ def main():
         simple_bars(plt, s, "lead-count",
                     "The tool said: don't tell the user the results were capped at 30.",
                     "Did the AI agent tell them anyway?",
-                    "Before the sentence was added", "After the sentence was added", "told them",
+                    "With the OLD description\n(no instruction about the cap)", "With the NEW description\n(says: do NOT tell the user)", "told the user",
                     "Same request and the same results every time. Only the tool's description changed.",
                     OUT / "lead-count.png"),
         dumbbell(plt, s, "booking-reference",
