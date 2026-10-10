@@ -147,20 +147,25 @@ def simple_bars(plt, summary, case, title, question, before_word, after_word, to
             pairs[m] = {r["variant"]: r for r in arms}
     if not pairs:
         return None
+    # the verdict says what happened, in the same words as the question, and every verdict is set the same way
+    # (Nick, 9 Oct 2026: "some of them are red some of them are in black, you're all over the place")
+    kept, anyway, less = {"mentioned it": ("Kept it quiet", "Mentioned it anyway", "Mentioned it less often"),
+                          "told them": ("Kept it from them", "Told them anyway", "Told them less often")}.get(
+                              told_word, ("Did as it was told", "Did not", "Did so less often"))
     def verdict(x):
         b, a = x["before"], x["after"]
-        if a["told"] == 0 and b["told"] > 0: return "Followed it"
-        if a["told"] == a["acted"] or a["told"] >= b["told"]: return "Ignored it"
-        return "Partly followed it"
-    order = [m for m in pairs if verdict(pairs[m]) == "Followed it"] + [m for m in pairs if verdict(pairs[m]) != "Followed it"]
+        if a["told"] == 0 and b["told"] > 0: return kept
+        if a["told"] == a["acted"] or a["told"] >= b["told"]: return anyway
+        return less
+    order = [m for m in pairs if verdict(pairs[m]) == kept] + [m for m in pairs if verdict(pairs[m]) != kept]
     n = len(order)
     fig = frame(plt, title, question)
     col_before, col_after, col_verdict = 0.50, 0.72, 0.945
     head_y = 0.705
     fig.text(0.06, head_y, "Model", fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline")
     fig.text(col_before, head_y, before_word, fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline", ha="center")
-    fig.text(col_after, head_y, after_word, fontfamily=BODY, fontsize=14, color=C["red"], va="baseline", ha="center")
-    fig.text(col_verdict, head_y, "Verdict", fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline", ha="right")
+    fig.text(col_after, head_y, after_word, fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline", ha="center")
+    fig.text(col_verdict, head_y, "What the agent did", fontfamily=BODY, fontsize=14, color=C["ink3"], va="baseline", ha="right")
     fig.text((col_before + col_after) / 2, head_y + 0.045, f"Runs in which the agent {told_word}", fontfamily=BODY,
              fontsize=14, color=C["ink2"], va="baseline", ha="center")
     fig.add_artist(plt.Line2D([0.06, 0.945], [head_y - 0.022, head_y - 0.022], color=C["ink"], lw=1.2, transform=fig.transFigure))
@@ -173,10 +178,8 @@ def simple_bars(plt, summary, case, title, question, before_word, after_word, to
         b, a = x["before"], x["after"]
         fig.text(col_before, yc, f"{b['told']} of {b['acted']}", fontfamily=BODY, fontsize=18, color=C["ink"], va="center", ha="center")
         after = f"{a['told']} of {a['acted']}" if a["told"] else f"0 of {a['acted']}"
-        fig.text(col_after, yc, after, fontfamily=BODY, fontsize=18, fontweight="semibold", va="center", ha="center",
-                 color=C["red"] if v == "Followed it" else C["ink"])
-        fig.text(col_verdict, yc, v, fontfamily=BODY, fontsize=16, fontweight="semibold", ha="right", va="center",
-                 color=C["red"] if v == "Followed it" else C["ink"])
+        fig.text(col_after, yc, after, fontfamily=BODY, fontsize=18, color=C["ink"], va="center", ha="center")
+        fig.text(col_verdict, yc, v, fontfamily=BODY, fontsize=16, fontweight="semibold", ha="right", va="center", color=C["ink"])
         if i < n - 1:
             fig.add_artist(plt.Line2D([0.06, 0.945], [yc - row_h / 2, yc - row_h / 2], color=C["rule_soft"], lw=1, transform=fig.transFigure))
     footer(fig, note)
