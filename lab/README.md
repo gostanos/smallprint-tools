@@ -1,5 +1,7 @@
 # Disclosure lab
 
+The write-up of the results, in plain words, is at https://smallprint.dev/blog/one-sentence-four-of-eight-agents.
+
 The lab asks one question and measures the answer instead of arguing it. When a tool's own description tells an agent not to mention a fact to the person it is helping, does the agent leave it out?
 
 Small Print grades a change to a tool description high when the new text adds a sentence telling the agent not to mention
