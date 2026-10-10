@@ -75,6 +75,10 @@ rule applied to every model that fell short. Those still short are named in the 
 
 Every rate carries a Wilson 95% confidence interval.
 
+## What you need
+
+Python 3.11 or newer with two libraries, `pip install mlx-lm matplotlib` (the runs here used mlx-lm 0.31.1 and 0.32.0 on mlx 0.32.x, on an Apple silicon Mac; MLX runs only there), and Node 18 or newer for the stub server. The Claude arm needs the `claude` command signed in to a plan. The local models download from Hugging Face on first use (Qwen3 4B 4-bit is about 2.5 GB). Nothing else is installed, and nothing in the lab reaches the internet except those downloads and, for the Claude arm, Anthropic's API.
+
 ## Running it
 
 ```bash
