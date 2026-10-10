@@ -149,8 +149,8 @@ def simple_bars(plt, summary, case, title, question, before_word, after_word, to
         return None
     # the verdict says what happened, in the same words as the question, and every verdict is set the same way
     # (Nick, 9 Oct 2026: "some of them are red some of them are in black, you're all over the place")
-    kept, anyway, less = {"told the customer": ("Obeyed, never told them", "Told the customer anyway", "Told the customer less often"),
-                          "told the user": ("Obeyed, never told them", "Told the user anyway", "Told the user less often")}.get(
+    kept, anyway, less = {"gave the customer the reference": ("Obeyed: never gave it", "Gave it anyway", "Gave it less often"),
+                          "told the user about the cap": ("Obeyed: never told them", "Told them anyway", "Told them less often")}.get(
                               told_word, ("Obeyed", "Did not obey", "Obeyed sometimes"))
     def verdict(x):
         b, a = x["before"], x["after"]
@@ -162,15 +162,17 @@ def simple_bars(plt, summary, case, title, question, before_word, after_word, to
     fig = frame(plt, title, question)
     col_before, col_after, col_verdict = 0.43, 0.65, 0.945
     head_y = 0.665
-    counted = f"runs where it {told_word}"
+    counted = f"runs where the agent {told_word}"
     fig.text(0.06, head_y + 0.068, "Model", fontfamily=BODY, fontsize=14, fontweight="semibold", color=C["ink"], va="baseline")
     for xc, head in ((col_before, before_word), (col_after, after_word)):
         line1, line2 = head.split("\n")
         fig.text(xc, head_y + 0.068, line1, fontfamily=BODY, fontsize=14, fontweight="semibold", color=C["ink"], va="baseline", ha="center")
         fig.text(xc, head_y + 0.034, line2, fontfamily=BODY, fontsize=13, color=C["ink2"], va="baseline", ha="center")
-        fig.text(xc, head_y, counted, fontfamily=BODY, fontsize=13, color=C["ink3"], va="baseline", ha="center")
+    # what both number columns count, said once, between them
+    fig.text((col_before + col_after) / 2, head_y, f"Both columns: {counted}", fontfamily=BODY, fontsize=13,
+             color=C["ink3"], va="baseline", ha="center")
     fig.text(col_verdict, head_y + 0.068, "What the agent did", fontfamily=BODY, fontsize=14, fontweight="semibold", color=C["ink"], va="baseline", ha="right")
-    fig.text(col_verdict, head_y + 0.034, "with the new description", fontfamily=BODY, fontsize=13, color=C["ink2"], va="baseline", ha="right")
+    fig.text(col_verdict, head_y + 0.034, "once the sentence was there", fontfamily=BODY, fontsize=13, color=C["ink2"], va="baseline", ha="right")
     fig.add_artist(plt.Line2D([0.06, 0.945], [head_y - 0.022, head_y - 0.022], color=C["ink"], lw=1.2, transform=fig.transFigure))
     top, bottom = head_y - 0.03, 0.125
     row_h = (top - bottom) / n
@@ -319,16 +321,16 @@ def main():
     made = [
         simple_bars(plt, s, "booking-reference",
                     "The tool said: don't mention the booking reference to the customer.",
-                    "Did the AI agent mention it anyway?",
-                    "With the OLD description\n(no instruction about the reference)", "With the NEW description\n(says: do NOT mention it)", "told the customer",
+                    "The booking tool returns an internal reference number. Did the agent pass it on to the customer?",
+                    "OLD description\nsays nothing about the reference", "NEW description\nsays: do NOT mention it to the customer", "gave the customer the reference",
                     "Same customer request and the same booking every time. Only the tool's description changed. "
                     "Three more models were tested but answered the customer too rarely to count: "
                     + ", ".join(dict.fromkeys(short)) + ".",
                     OUT / "booking-reference.png"),
         simple_bars(plt, s, "lead-count",
                     "The tool said: don't tell the user the results were capped at 30.",
-                    "Did the AI agent tell them anyway?",
-                    "With the OLD description\n(no instruction about the cap)", "With the NEW description\n(says: do NOT tell the user)", "told the user",
+                    "The search tool returns 30 of 1,174 matches. Did the agent tell the user about the cap?",
+                    "OLD description\nsays nothing about the cap", "NEW description\nsays: do NOT tell the user", "told the user about the cap",
                     "Same request and the same results every time. Only the tool's description changed.",
                     OUT / "lead-count.png"),
         dumbbell(plt, s, "booking-reference",
