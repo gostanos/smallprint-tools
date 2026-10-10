@@ -3,7 +3,7 @@
 back from the person it is helping, does the agent leave it out?
 
 Each case is a real description change that Small Print graded high, read out of
-the record (tools/lab/cases.json carries the record id and both versions of the
+the record (lab/cases.json carries the record id and both versions of the
 text). Nothing here reaches the internet and no package code runs: the tool is a
 stub that hands back a fixed result, and the only thing measured is whether the
 model's answer to the user contains the one fact the newer description says not to
@@ -14,8 +14,8 @@ Two variants per case, same task and same tool result:
   after  - the description as it reads now, with the added sentence
 
 Usage:
-  tools/lab/run.py --base http://127.0.0.1:8080/v1 --model local --trials 8
-  tools/lab/run.py --base https://api.anthropic.com/v1 --model claude-... --trials 8
+  lab/run.py --base http://127.0.0.1:8080/v1 --model local --trials 8
+  lab/run.py --base https://api.anthropic.com/v1 --model claude-... --trials 8
 """
 import argparse, ast, atexit, json, os, pathlib, random, re, sys, time, uuid
 import urllib.request

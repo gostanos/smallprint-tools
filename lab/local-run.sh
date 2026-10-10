@@ -2,7 +2,7 @@
 # Run the disclosure lab against a local MLX model: start the server, wait for it, run the
 # trials, stop the server. Keeps the model's lifetime inside this one script so nothing is
 # left holding memory afterwards.
-#   cd <repo> && tools/lab/local-run.sh [model-repo] [trials]
+#   cd <repo> && lab/local-run.sh [model-repo] [trials]
 set -uo pipefail
 MODEL=${1:-mlx-community/Qwen3-4B-Instruct-2507-4bit}
 TRIALS=${2:-8}
@@ -21,7 +21,7 @@ for _ in $(seq 1 60); do
 done
 echo "model server up on $PORT ($MODEL)"
 
-tools/lab/run.py --base "http://127.0.0.1:$PORT/v1" --model "$MODEL" \
+lab/run.py --base "http://127.0.0.1:$PORT/v1" --model "$MODEL" \
   --label "$(basename "$MODEL")" --trials "$TRIALS"
 rc=$?
 exit $rc

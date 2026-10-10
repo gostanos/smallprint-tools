@@ -78,23 +78,23 @@ Every rate carries a Wilson 95% confidence interval.
 ## Running it
 
 ```bash
-cd <repo> && python tools/lab/selftest.py
+cd <repo> && python lab/selftest.py
 ```
 
 ```bash
-cd <repo> && tools/lab/claude-run.sh 10 sonnet
+cd <repo> && lab/claude-run.sh 10 sonnet
 ```
 
 ```bash
-cd <repo> && python tools/lab/run.py --local --model mlx-community/Qwen3-4B-Instruct-2507-4bit --label qwen3-4b --trials 20 --temp 0.7
+cd <repo> && python lab/run.py --local --model mlx-community/Qwen3-4B-Instruct-2507-4bit --label qwen3-4b --trials 20 --temp 0.7
 ```
 
 ```bash
-cd <repo> && python tools/lab/run.py --local --model mlx-community/gpt-oss-20b-MXFP4-Q8 --label gptoss-20b --trials 10 --temp 0.7 --reasoning-effort low
+cd <repo> && python lab/run.py --local --model mlx-community/gpt-oss-20b-MXFP4-Q8 --label gptoss-20b --trials 10 --temp 0.7 --reasoning-effort low
 ```
 
 ```bash
-cd <repo> && python tools/lab/report/build.py --charts
+cd <repo> && python lab/report/build.py --charts
 ```
 
 Every run writes `runs/final/<time>-<label>.jsonl`, one row per trial with the full answer, and beside it an

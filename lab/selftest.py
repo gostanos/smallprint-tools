@@ -3,7 +3,7 @@
 run.py deleted a function that sat between two others (disclosed, then takes_tools), and only a model run
 found out. This finds out in a second.
 
-  python tools/lab/selftest.py
+  python lab/selftest.py
 """
 import json, sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))

@@ -2,7 +2,7 @@
 # The Claude arm of the disclosure lab, through a real MCP server.
 #
 # Each trial is a fresh headless Claude session that has exactly one tool: the case's tool, served by
-# tools/lab/mcp-stub/server.mjs with the description from the version under test. It runs in an empty
+# lab/mcp-stub/server.mjs with the description from the version under test. It runs in an empty
 # temporary directory with every built-in tool off (--tools ""), no skills or slash commands, no MCP server
 # but the lab's (--strict-mcp-config), and no user or local settings (--setting-sources project). The
 # session's own startup report, which lists the tools it had, is kept on every row as proof.
@@ -14,7 +14,7 @@
 # Needs the CLI signed in once (it uses the plan, not an API key):
 #   claude          # then /login
 # Then:
-#   cd <repo> && tools/lab/claude-run.sh <trials> [model] [case-id]
+#   cd <repo> && lab/claude-run.sh <trials> [model] [case-id]
 set -uo pipefail
 TRIALS=${1:-5}
 MODEL=${2:-}

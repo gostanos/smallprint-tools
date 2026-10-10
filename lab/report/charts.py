@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Draws the lab's charts from report/data/summary.json and report/data/record.json.
 
-  python tools/lab/report/charts.py
+  python lab/report/charts.py
 
 Set in Small Print's own ground, type and colour (docs/DESIGN.md, apps/web/app/globals.css): cool grey ground,
 Libre Caslon Text for headings, Archivo for everything read, Courier Prime only where text is quoted from a

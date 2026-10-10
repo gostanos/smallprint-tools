@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A stub MCP server for the disclosure lab. It serves one tool out of tools/lab/cases.json,
+// A stub MCP server for the disclosure lab. It serves one tool out of lab/cases.json,
 // with the description from whichever version the run is testing, and answers every call with
 // that case's canned result. Nothing is fetched, nothing is written, no package code runs.
 //

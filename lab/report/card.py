@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The share card for the lab article: the link preview on X and elsewhere, and a square for messages.
 
-  python tools/lab/report/card.py
+  python lab/report/card.py
 
 House style (docs/DESIGN.md): cool grey ground, Libre Caslon Text for the statement, Archivo for labels, Courier
 Prime only for the quoted small print, which sits on a white sheet, the one panel. The red asterisk is the mark.

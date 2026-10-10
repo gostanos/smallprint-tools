@@ -3,7 +3,7 @@
 case's check from cases.json, and prints how many answers told the user the fact the newer text says not to mention.
 Adds a `disclosed` field in place, so a run captured by any arm is scored the same way.
 
-  tools/lab/score.py tools/lab/runs/<file>.jsonl
+  lab/score.py lab/runs/<file>.jsonl
 """
 import json, pathlib, sys
 from run import disclosed

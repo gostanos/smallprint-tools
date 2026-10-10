@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Builds the lab report's data and charts from tools/lab/runs/final.
+"""Builds the lab report's data and charts from lab/runs/final.
 
-  python tools/lab/report/build.py
+  python lab/report/build.py
 
 Rules it enforces, because a published number has to survive a reader checking it:
   - only runs in runs/final count; the pilot is never read
