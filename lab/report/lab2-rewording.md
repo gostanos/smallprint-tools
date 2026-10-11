@@ -70,5 +70,5 @@ again at 5:00 PM ET, ending at 5:15 PM ET.
 
 What this does not show is why. The runs say what each model did with five wordings of the same instruction from the
 same place; they do not say what any model was trained to do, and this report does not claim it. Together with lab 0
-(the same sentence in the system prompt flipped all three Claude models) the two labs say the sender decides it and the
-wording does not, for these models on this case.
+(the same sentence in the system prompt flipped all three Claude models) the two labs say that whether the sentence comes from the tool's text or
+from the system prompt decides it, and the wording does not, for these models on this case.
