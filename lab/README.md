@@ -19,6 +19,16 @@ The lab asks one question and measures the answer instead of arguing it. When a 
 Small Print grades a change to a tool description high when the new text adds a sentence telling the agent not to mention
 something to the user. This lab tests whether such sentences change what agents actually say.
 
+## The labs after the first one (11 Oct 2026)
+
+Follow-ups run on the same harness, cases and scoring rule, each with its own report under `report/` and its rows in
+`runs/final/` under that day's file prefixes. `report/lab-table.py <prefix> <variants>` recomputes any of them.
+
+- **Lab 2, rewording** (`report/lab2-rewording.md`, variants `reword:bare,reword:plain,reword:polite,reword:strong,reword:reason`,
+  files `2026-10-11T14xx` to `T17xx`): the sentence written five ways, in the tool's text. Nothing changed with the wording.
+
+The card for it is in `report/charts/lab2-card-wide.png` and `lab2-card-square.png`, drawn by `report/card2.py`.
+
 ## The cases
 
 `cases.json` is built from Small Print's record, not written by hand. Each case is a real description change
