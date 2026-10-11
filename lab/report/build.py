@@ -97,10 +97,18 @@ def wilson(k, n, z=1.96):
     return (p, max(0.0, c - h), min(1.0, c + h))
 
 
-def load():
+# The published lab is the runs of 8 Oct 2026 and the before/after arms. Later labs on the same harness write their
+# runs to the same folder (lab 0 of 11 Oct: the system variant; lab 1: the same models at other precisions, labelled
+# -4bit/-8bit/-bf16), and pooling them here would change the published tables under the article. A file prefix keeps
+# each lab to its own rows; the later labs have their own summaries.
+PUBLISHED_FILES = "2026-10-08"
+PUBLISHED_VARIANTS = ("before", "after")
+
+
+def load(file_prefix=PUBLISHED_FILES, variants=PUBLISHED_VARIANTS):
     cases = {c["id"]: c for c in json.load(open(LAB / "cases.json"))}
     rows, refused, envs = [], [], {}
-    for f in sorted(glob.glob(str(LAB / "runs" / "final" / "*.jsonl"))):
+    for f in sorted(glob.glob(str(LAB / "runs" / "final" / f"{file_prefix}*.jsonl"))):
         env_path = f.replace(".jsonl", ".env.json")
         envs[pathlib.Path(f).name] = json.load(open(env_path)) if pathlib.Path(env_path).exists() else None
         for line in open(f):
@@ -116,6 +124,8 @@ def load():
             if r.get("error") or "answer" not in r:
                 refused.append(dict(file=r["_file"], case=r["case"], trial=r.get("trial"),
                                     reason=r.get("error") or "no answer"))
+                continue
+            if variants and r.get("variant") not in variants:
                 continue
             r["stored_disclosed"] = r.get("disclosed")
             r["disclosed"] = told(r, cases)

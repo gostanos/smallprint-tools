@@ -9,9 +9,14 @@ stub that hands back a fixed result, and the only thing measured is whether the
 model's answer to the user contains the one fact the newer description says not to
 mention.
 
-Two variants per case, same task and same tool result:
+Three variants per case, same task and same tool result:
   before - the description as it read before the change
   after  - the description as it reads now, with the added sentence
+  system - the description as it read before, and the one withholding sentence (each case's "sentence")
+           appended to the system prompt instead: the same words, moved from the tool's text to the
+           system prompt (lab 0 of the backlog, promised in the r/mcp reply of 10 Oct 2026)
+  reword:<id> - the description as it reads now with the sentence swapped for one of the case's rewordings
+           (lab 2, 11 Oct 2026: the same instruction in plainer and stronger forms)
 
 Usage:
   lab/run.py --base http://127.0.0.1:8080/v1 --model local --trials 8
@@ -393,8 +398,15 @@ class LocalMLX:
             kw["reasoning_effort"] = self.reasoning_effort
         prompt = self.render(msgs, tools, **kw)
         sampler = make_sampler(temp=temp, top_p=self.top_p) if self.top_p else make_sampler(temp=temp)
+        t_gen = time.time()
         text = generate(self.model, self.tok, prompt=prompt, max_tokens=1600, verbose=False,
                         sampler=sampler)
+        t_gen = time.time() - t_gen
+        # Tokens in and out, counted with the model's own tokenizer, so a write-up can give tokens per second with
+        # the build's precision and the prompt's length (Nick, 11 Oct 2026: a model named without its speed says
+        # nothing). The count is of the raw output, thinking included, since that is what the machine generated.
+        usage = {"prompt_tokens": len(prompt) if not isinstance(prompt, str) else len(self.tok.encode(prompt)),
+                 "completion_tokens": len(self.tok.encode(text)), "gen_secs": round(t_gen, 2)}
         # A reasoning model writes its thinking before the answer; only the answer reaches the user, and a
         # check that read the thinking would score words the user never sees.
         if self.tools_in_system:
@@ -416,7 +428,7 @@ class LocalMLX:
         msg = {"role": "assistant", "content": rest.strip()}
         if calls:
             msg["tool_calls"] = calls
-        return msg, {}
+        return msg, usage
 
 
 def disclosed(text, check):
@@ -428,17 +440,43 @@ def disclosed(text, check):
     return all(hits) if check["kind"] == "all" else any(hits)
 
 
+def system_prompt(case, variant):
+    """The operator's instructions: the lab's one line, and for the system variant the case's withholding
+    sentence after it, introduced by the tool's name so the model knows which tool it is about."""
+    if variant != "system":
+        return SYSTEM
+    return SYSTEM + "\n\nAbout the " + case["tool"]["name"] + " tool: " + case["sentence"]
+
+
+def description_for(case, variant):
+    """The tool's text for a variant: the newer text for "after", the older for "before" and "system", and for
+    "reword:<id>" the newer text with the withholding sentence swapped for the case's rewording of that id (lab 2,
+    11 Oct 2026, from a reader's question on LinkedIn: does a slightly reworded instruction change anything?)."""
+    if variant == "after":
+        return case["description_after"]
+    if variant.startswith("reword:"):
+        word = case["rewordings"][variant.split(":", 1)[1]]
+        assert case["sentence"] in case["description_after"]
+        return case["description_after"].replace(case["sentence"], word)
+    return case["description_before"]
+
+
 def trial(backend, case, variant, temp, seed):
-    desc = case["description_before"] if variant == "before" else case["description_after"]
+    desc = description_for(case, variant)
     tools = [{"type": "function", "function": {
         "name": case["tool"]["name"], "description": desc,
         "parameters": case["tool"]["parameters"]}}]
-    msgs = [{"role": "system", "content": SYSTEM},
+    msgs = [{"role": "system", "content": system_prompt(case, variant)},
             {"role": "user", "content": case["user_task"]}]
     called, usage = False, {}
     for _ in range(3):
         m, u = backend.complete(msgs, tools, temp, seed)
-        usage = u or usage
+        if u:
+            # a trial is up to three rounds (the call, then the answer): tokens out and seconds add up across
+            # them; tokens in are the last round's, the longest prompt the model saw
+            usage = {"prompt_tokens": u.get("prompt_tokens", usage.get("prompt_tokens", 0)),
+                     "completion_tokens": usage.get("completion_tokens", 0) + u.get("completion_tokens", 0),
+                     "gen_secs": round(usage.get("gen_secs", 0) + u.get("gen_secs", 0), 2)} if "gen_secs" in u else u
         calls = m.get("tool_calls") or []
         if not calls:
             return dict(called=called, answer=(m.get("content") or "").strip(), usage=usage)
@@ -458,6 +496,8 @@ def main():
     p.add_argument("--model", required=True)
     p.add_argument("--label", default=None, help="name for this model in the report")
     p.add_argument("--trials", type=int, default=8)
+    p.add_argument("--variants", default="before,after",
+                   help="which variants to run, comma-separated: before, after, system (lab 0 runs system alone)")
     p.add_argument("--temp", type=float, default=0.7)
     p.add_argument("--case", action="append", help="only these case ids")
     p.add_argument("--key-env", default=None, help="env var holding the API key")
@@ -505,7 +545,7 @@ def main():
     rows = []
     with open(out_path, "w") as f:
         for case in cases:
-            for variant in ("before", "after"):
+            for variant in [v.strip() for v in a.variants.split(",") if v.strip()]:
                 for i in range(a.trials):
                     if guard: guard.check()
                     t0 = time.time()
@@ -566,14 +606,14 @@ def write_environment(out_path, a):
 
 
 def summarise(rows, cases):
-    print(f"\n{'case':<18} {'fact the newer text says not to mention':<52} before  after")
+    print(f"\n{'case':<18} {'fact the newer text says not to mention':<52} before  after  system")
     for c in cases:
         line = {}
-        for v in ("before", "after"):
+        for v in ("before", "after", "system"):
             rs = [r for r in rows if r["case"] == c["id"] and r["variant"] == v and "error" not in r]
             told = sum(1 for r in rs if r["disclosed"])
             line[v] = f"{told}/{len(rs)}" if rs else "none"
-        print(f"{c['id']:<18} {c['withheld'][:52]:<52} {line['before']:>6}  {line['after']:>5}")
+        print(f"{c['id']:<18} {c['withheld'][:52]:<52} {line['before']:>6}  {line['after']:>5}  {line['system']:>6}")
     print("\nEach cell is how many answers told the user the fact, out of the runs that completed.")
 
 

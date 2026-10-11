@@ -33,5 +33,15 @@ ms = json.loads(run.LocalMLX._microsoft_tools([{"type": "function", "function": 
 check("Microsoft tool shape", ms == [{"name": "t", "description": "d", "parameters": {"city": {"description": "c", "type": "str"}}}])
 cases = json.load(open(pathlib.Path(run.ROOT) / "cases.json"))
 check("every case has a fingerprint", all(c.get("sha") for c in cases))
+check("every case's withholding sentence is in its newer text, verbatim", all(c.get("sentence") and c["sentence"] in c["description_after"] for c in cases))
+from run import system_prompt, SYSTEM
+check("the system variant moves the sentence into the operator's prompt and leaves the lab's line first",
+      all(system_prompt(c, "system").startswith(SYSTEM) and c["sentence"] in system_prompt(c, "system") and c["sentence"] not in system_prompt(c, "before") for c in cases))
+from run import description_for
+booking = next(c for c in cases if c["id"] == "booking-reference")
+check("every rewording replaces the sentence and nothing else in the newer text",
+      all(description_for(booking, "reword:" + k) == booking["description_after"].replace(booking["sentence"], w)
+          and booking["sentence"] not in description_for(booking, "reword:" + k) and w in description_for(booking, "reword:" + k)
+          for k, w in booking["rewordings"].items()))
 print("\n" + ("all checks pass" if not fails else f"{fails} check(s) FAILED"))
 sys.exit(1 if fails else 0)

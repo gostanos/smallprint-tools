@@ -22,14 +22,14 @@ def main(path):
             f.write(json.dumps(r) + "\n")
 
     blank = sum(1 for r in rows if not (r.get("answer") or "").strip())
-    print(f"{'case':<20} {'fact the newer text says not to mention':<46} {'before':>7} {'after':>6}")
+    print(f"{'case':<20} {'fact the newer text says not to mention':<46} {'before':>7} {'after':>6} {'system':>7}")
     for cid in dict.fromkeys(r["case"] for r in rows):
         cells = {}
-        for v in ("before", "after"):
+        for v in ("before", "after", "system"):
             rs = [r for r in rows if r["case"] == cid and r["variant"] == v
                   and (r.get("answer") or "").strip()]
             cells[v] = f"{sum(1 for r in rs if r['disclosed'])}/{len(rs)}" if rs else "none"
-        print(f"{cid:<20} {cases[cid]['withheld'][:46]:<46} {cells['before']:>7} {cells['after']:>6}")
+        print(f"{cid:<20} {cases[cid]['withheld'][:46]:<46} {cells['before']:>7} {cells['after']:>6} {cells['system']:>7}")
     print(f"\n{len(rows)} trials, {blank} with no answer"
           )
 

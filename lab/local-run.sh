@@ -6,6 +6,8 @@
 set -uo pipefail
 MODEL=${1:-mlx-community/Qwen3-4B-Instruct-2507-4bit}
 TRIALS=${2:-8}
+# anything after the two takes goes to run.py as it is, for example --variants system (lab 0)
+shift 2 2>/dev/null || shift $#
 PORT=8099
 LOG=${TMPDIR:-/tmp}/smallprint-lab-mlx.log
 PY=python
@@ -22,6 +24,6 @@ done
 echo "model server up on $PORT ($MODEL)"
 
 lab/run.py --base "http://127.0.0.1:$PORT/v1" --model "$MODEL" \
-  --label "$(basename "$MODEL")" --trials "$TRIALS"
+  --label "$(basename "$MODEL")" --trials "$TRIALS" "$@"
 rc=$?
 exit $rc

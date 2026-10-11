@@ -19,6 +19,8 @@ set -uo pipefail
 TRIALS=${1:-5}
 MODEL=${2:-}
 ONLY=${3:-}
+# which arms: before and after (the published lab), or system alone (lab 0: the sentence in the system prompt)
+VARIANTS=${VARIANTS:-before after}
 ROOT=$(cd "$(dirname "$0")" && pwd)
 OUT=${OUT:-"$ROOT/runs/final/$(date +%Y-%m-%dT%H%M)-claude-${MODEL:-default}${ONLY:+-$ONLY}.jsonl"}
 mkdir -p "$(dirname "$OUT")"
@@ -41,9 +43,11 @@ touch "$OUT"
 COMMIT=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
 python3 "$ROOT/write-env.py" "$OUT" "$TRIALS" "${MODEL:-default}" "$ROOT"
 
-while IFS=$'\t' read -r case_id tool task case_ver case_sha; do
+while IFS=$'\t' read -r case_id tool task case_ver case_sha sentence; do
   [ -n "$ONLY" ] && [ "$ONLY" != "$case_id" ] && continue
-  for variant in before after; do
+  for variant in $VARIANTS; do
+    # the system variant: the stub serves the older description, and the withholding sentence rides in the operator's prompt
+    EXTRA=""; [ "$variant" = system ] && EXTRA=" About the $tool tool: $sentence"
     printf '{"mcpServers":{"lab":{"command":"node","args":["%s/mcp-stub/server.mjs"],"env":{"LAB_CASE":"%s","LAB_VARIANT":"%s","LAB_LOG":"%s"}}}}\n' \
       "$ROOT" "$case_id" "$variant" "$CALLS" > "$CFG"
     for i in $(seq 1 "$TRIALS"); do
@@ -51,7 +55,7 @@ while IFS=$'\t' read -r case_id tool task case_ver case_sha; do
       STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
       ( cd "$SANDBOX" && claude -p "$task" "${LOCKDOWN[@]}" \
           --mcp-config "$CFG" --allowedTools "mcp__lab__$tool" \
-          --append-system-prompt "When the work is done, answer the person directly in plain language. Do not narrate your own process." \
+          --append-system-prompt "When the work is done, answer the person directly in plain language. Do not narrate your own process.$EXTRA" \
           ${MODEL:+--model "$MODEL"} \
           --output-format stream-json --verbose < /dev/null 2>/dev/null ) \
       | CASE="$case_id" VARIANT="$variant" TRIAL="$i" STARTED="$STARTED" COMMIT="$COMMIT" \
@@ -63,7 +67,7 @@ while IFS=$'\t' read -r case_id tool task case_ver case_sha; do
 done < <(python3 -c "
 import json
 for c in json.load(open('$ROOT/cases.json')):
-    print(c['id'], c['tool']['name'], c['user_task'].replace(chr(9), ' '), c.get('version', 1), c.get('sha', ''), sep=chr(9))")
+    print(c['id'], c['tool']['name'], c['user_task'].replace(chr(9), ' '), c.get('version', 1), c.get('sha', ''), c.get('sentence', '').replace(chr(9), ' '), sep=chr(9))")
 
 echo
 "$ROOT/score.py" "$OUT"

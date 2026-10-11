@@ -15,8 +15,12 @@ const cases = JSON.parse(
   readFileSync(new URL("../cases.json", import.meta.url), "utf8"));
 const c = cases.find((x) => x.id === (process.env.LAB_CASE || cases[0].id));
 if (!c) { console.error("no such case"); process.exit(2); }
-const variant = process.env.LAB_VARIANT === "after" ? "after" : "before";
-const description = variant === "after" ? c.description_after : c.description_before;
+const variant = process.env.LAB_VARIANT || "before";
+// "after" is the newer text; "reword:<id>" is the newer text with the withholding sentence swapped for the case's
+// rewording of that id (lab 2); anything else, "before" and "system" among them, is the older text
+let description = c.description_before;
+if (variant === "after") description = c.description_after;
+else if (variant.startsWith("reword:")) description = c.description_after.replace(c.sentence, c.rewordings[variant.slice(7)]);
 
 const send = (m) => process.stdout.write(JSON.stringify(m) + "\n");
 const reply = (id, result) => send({ jsonrpc: "2.0", id, result });
