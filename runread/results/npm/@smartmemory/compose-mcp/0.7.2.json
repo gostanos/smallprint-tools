@@ -1,0 +1,1798 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@smartmemory/compose-mcp",
+  "version": "0.7.2",
+  "integrity": {
+    "dist": "sha512-wlIKeBp5xeIFdYL86iJwvwfE6CCgdjGON5hthu1W7WlMmJJZ27aM29t6jI0Av418CZrjvwPt2PF4DjFYZu5glg==",
+    "installed": "sha512-wlIKeBp5xeIFdYL86iJwvwfE6CCgdjGON5hthu1W7WlMmJJZ27aM29t6jI0Av418CZrjvwPt2PF4DjFYZu5glg=="
+  },
+  "bin": "node_modules/@smartmemory/compose-mcp/./bin/compose-mcp.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T02:56:50.717Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_vision_items",
+      "description": "Query Compose tracker items. Filter by phase, status, type, or keyword. Returns id, title, type, phase, status, confidence, description.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "phase": {
+            "type": "string",
+            "description": "Filter by phase: vision, requirements, design, planning, implementation, verification, release"
+          },
+          "status": {
+            "type": "string",
+            "description": "Filter by status (comma-separated for multiple): planned, in_progress, complete, blocked, parked, killed"
+          },
+          "type": {
+            "type": "string",
+            "description": "Filter by type: task, decision, evaluation, idea, spec, thread, artifact, question, feature, track"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "Search keyword matched against title and description"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results to return (default 30)"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_item_detail",
+      "description": "Get full detail for a single tracker item including all its connections.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID (UUID) or semanticId/slug"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "get_phase_summary",
+      "description": "Get status and type distribution for a phase (or all phases). Useful for understanding overall project health.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "phase": {
+            "type": "string",
+            "description": "Phase to summarize: vision, requirements, design, planning, implementation, verification, release. Omit for all phases."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_blocked_items",
+      "description": "List all tracker items that are blocked by non-complete items.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_current_session",
+      "description": "Get the most recent session: tool count, items touched, error count, and recent Haiku summaries of what was accomplished.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "featureCode": {
+            "type": "string",
+            "description": "Optional: get context for a specific feature"
+          }
+        }
+      }
+    },
+    {
+      "name": "bind_session",
+      "description": "Bind the current agent session to a lifecycle feature. Call once per session after creating/identifying the feature. Binding is one-shot — calling again on a bound session returns already_bound.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "featureCode": {
+            "type": "string",
+            "description": "The feature code (e.g., \"gate-ui\")"
+          }
+        },
+        "required": [
+          "featureCode"
+        ]
+      }
+    },
+    {
+      "name": "set_workspace",
+      "description": "Bind this MCP session to a workspace. Required when cwd contains multiple workspaces. Lives in process memory; lost on MCP restart.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Workspace ID (kebab-case)"
+          }
+        },
+        "required": [
+          "workspaceId"
+        ]
+      }
+    },
+    {
+      "name": "get_workspace",
+      "description": "Get the current MCP workspace binding plus all candidates discovered from cwd.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_feature_lifecycle",
+      "description": "Get the lifecycle state of a feature: current phase, phase history, artifacts, warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID (UUID) or slug"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "kill_feature",
+      "description": "Kill a feature from any phase. Records reason and sets status to killed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the feature is being killed"
+          }
+        },
+        "required": [
+          "id",
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "complete_feature",
+      "description": "Mark a feature as complete. Only callable from the ship phase. For a managed build-mode feature (one with a feature.json) this goes through the completion gate (COMP-COMPLETION-GATE): the commit is verified and tests attested when capabilities.guard is on, ONE guarded transition is ledgered, and the gate writes the completion record, feature.status COMPLETE, ROADMAP.md and the cockpit item. A refusal (bad evidence, KILLED feature, guard refused) returns 422 and writes nothing. commit_sha is required under the guard; with the guard off a commit-less completion records a no-commit completion. Fix/plan items and items with no feature.json transition as before.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          },
+          "commit_sha": {
+            "type": "string",
+            "description": "Full 40-char commit SHA. Required to write a completion record."
+          },
+          "tests_pass": {
+            "type": "boolean",
+            "description": "Defaults to true when commit_sha is provided."
+          },
+          "files_changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Repo-relative paths committed in the SHA."
+          },
+          "notes": {
+            "type": "string",
+            "description": "One-line note for the completion record."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "start_iteration_loop",
+      "description": "Start a review or coverage iteration loop on a feature. Returns loop state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID or semanticId"
+          },
+          "loopType": {
+            "type": "string",
+            "enum": [
+              "review",
+              "coverage"
+            ],
+            "description": "Type of iteration loop"
+          },
+          "maxIterations": {
+            "type": "number",
+            "description": "Override max iterations (optional, defaults from settings)"
+          }
+        },
+        "required": [
+          "id",
+          "loopType"
+        ]
+      }
+    },
+    {
+      "name": "report_iteration_result",
+      "description": "Report one iteration result. Compose evaluates exit criteria and returns whether to continue.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID or semanticId"
+          },
+          "result": {
+            "type": "object",
+            "description": "Iteration result. Review: {clean: bool, findings: []}, Coverage: {passing: bool, failures: []}"
+          }
+        },
+        "required": [
+          "id",
+          "result"
+        ]
+      }
+    },
+    {
+      "name": "abort_iteration_loop",
+      "description": "Abort the current iteration loop early.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID or semanticId"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the loop was aborted"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "assess_feature_artifacts",
+      "description": "Assess quality signals for all artifacts of a feature: section completeness, word count, last modified.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "featureCode": {
+            "type": "string",
+            "description": "Feature folder name (e.g. \"artifact-awareness\")"
+          }
+        },
+        "required": [
+          "featureCode"
+        ]
+      }
+    },
+    {
+      "name": "scaffold_feature",
+      "description": "Create feature folder with template stubs for all phase artifacts. Existing files are never overwritten.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "featureCode": {
+            "type": "string",
+            "description": "Feature folder name"
+          },
+          "only": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Limit to specific artifacts (e.g. [\"design.md\", \"blueprint.md\"]). Omit for all."
+          }
+        },
+        "required": [
+          "featureCode"
+        ]
+      }
+    },
+    {
+      "name": "approve_gate",
+      "description": "Resolve a pending policy gate. Outcomes: approved (proceed), revised (stay in phase), killed (abandon feature).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "gateId": {
+            "type": "string",
+            "description": "Gate ID"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "revised",
+              "killed"
+            ],
+            "description": "Resolution outcome"
+          },
+          "comment": {
+            "type": "string",
+            "description": "Optional human feedback"
+          }
+        },
+        "required": [
+          "gateId",
+          "outcome"
+        ]
+      }
+    },
+    {
+      "name": "get_pending_gates",
+      "description": "List pending policy gates. Optionally filter by item ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "description": "Filter to gates for a specific item (optional)"
+          }
+        }
+      }
+    },
+    {
+      "name": "add_roadmap_entry",
+      "description": "Register a new feature in the project. Writes feature.json and regenerates ROADMAP.md (audit-log append is best-effort). Use this instead of editing ROADMAP.md by hand.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Unique feature code (e.g. \"COMP-FOO-1\"). Must be uppercase A-Z, digits, dashes; cannot start or end with a dash."
+          },
+          "description": {
+            "type": "string",
+            "description": "One-line description for the ROADMAP cell"
+          },
+          "phase": {
+            "type": "string",
+            "description": "Phase heading (e.g. \"Phase 6: MCP Writers\"). Required."
+          },
+          "complexity": {
+            "type": "string",
+            "enum": [
+              "S",
+              "M",
+              "L",
+              "XL"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PLANNED",
+              "IN_PROGRESS",
+              "PARTIAL",
+              "COMPLETE",
+              "BLOCKED",
+              "KILLED",
+              "PARKED",
+              "SUPERSEDED"
+            ],
+            "description": "Initial status (default PLANNED)"
+          },
+          "position": {
+            "type": "number",
+            "description": "Sort order within phase"
+          },
+          "parent": {
+            "type": "string",
+            "description": "Parent feature code, for cross-references"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "profile": {
+            "type": "object",
+            "description": "Triage build profile (needs_prd/needs_architecture/etc.). Set by the plan lifecycle so build can skip fresh triage."
+          },
+          "triageTimestamp": {
+            "type": "string",
+            "description": "Triage cache stamp (ISO 8601). Set AFTER design.md is written so build treats triage as a cached no-op."
+          },
+          "plannedBy": {
+            "type": "string",
+            "description": "Originating plan session code (e.g. \"PLAN-WIDGET\"). Marks a plan-authored, build-ready feature."
+          },
+          "impact": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "description": "Estimated impact, carried from the plan/ideabox estimation step."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Bypass the pre-commit roundtrip guard (commit even if ROADMAP.md would not be a generation fixed point)."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Optional caller-provided key. Same key replays return the cached result without re-mutating."
+          }
+        },
+        "required": [
+          "code",
+          "description",
+          "phase"
+        ]
+      }
+    },
+    {
+      "name": "set_feature_status",
+      "description": "Flip a feature status. Updates feature.json and regenerates ROADMAP.md. Enforces a transition policy (use force: true to bypass). Appends an audit event (best-effort).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PLANNED",
+              "IN_PROGRESS",
+              "PARTIAL",
+              "COMPLETE",
+              "BLOCKED",
+              "KILLED",
+              "PARKED",
+              "SUPERSEDED"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Free-form reason persisted in the audit event"
+          },
+          "commit_sha": {
+            "type": "string",
+            "description": "Optional commit binding"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Bypass the transition policy AND the roundtrip fixed-point guard (commits even if ROADMAP.md would not be a generation fixed point). Recorded in audit."
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "status"
+        ]
+      }
+    },
+    {
+      "name": "roadmap_diff",
+      "description": "Read the feature-management audit log for a window. Returns events plus derived added[] and status_changed[] arrays.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "string",
+            "description": "Window: shorthand like \"24h\"/\"7d\"/\"30m\", or an ISO date. Default 24h."
+          },
+          "feature_code": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string",
+            "description": "Filter to one tool name, e.g. \"set_feature_status\""
+          }
+        }
+      }
+    },
+    {
+      "name": "get_roadmap",
+      "description": "Read the current roadmap rendered from canon (feature.json) WITHOUT writing. Returns a status summary, the active/blocked convenience lists, and a staleness flag vs on-disk ROADMAP.md. Pass a status/phase filter or a limit to also get a general `rows` list (e.g. {status:\"PLANNED\", limit:10} for \"what to work on next\") — structured rows so callers never re-parse the markdown. Narrative-owned workspaces return the hand-authored file verbatim. Read-only — prefer this over reading ROADMAP.md directly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Filter active/blocked + rows by status (comma-separated): PLANNED, IN_PROGRESS, PARTIAL, BLOCKED, COMPLETE, …"
+          },
+          "phase": {
+            "type": "string",
+            "description": "Filter active/blocked + rows to a single phase (matched against phaseId)"
+          },
+          "format": {
+            "type": "string",
+            "description": "\"summary\" (default — counts + lists, token-safe) or \"markdown\" (full rendered text)"
+          },
+          "check_drift": {
+            "type": "boolean",
+            "description": "Compare the render against on-disk ROADMAP.md and set stale/drift (default true)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Cap on the general `rows` list (default 50). Supplying status/phase/limit emits rows[]/rowsTotal/rowsTruncated; without any of them rows is omitted (token-safe summary). A finite value is floored and clamped to ≥ 0."
+          }
+        }
+      }
+    },
+    {
+      "name": "validate_feature",
+      "description": "Cross-check a single feature against ROADMAP, vision-state, feature.json, folder contents, linked artifacts, and cross-references. Returns structured findings with severity (error/warning/info). FEATURE_NOT_FOUND emitted as a finding (not thrown) when the code matches strict regex but exists in no source.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature_code": {
+            "type": "string",
+            "description": "Strict feature code, e.g. \"COMP-MCP-VALIDATE\""
+          },
+          "external_prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Code prefixes (e.g. [\"STRAT-\"]) treated as external; downgrades ORPHAN_FOLDER to info"
+          },
+          "feature_json_mode": {
+            "type": "boolean",
+            "description": "Default true. Set false to skip feature.json comparisons in legacy projects."
+          }
+        },
+        "required": [
+          "feature_code"
+        ]
+      }
+    },
+    {
+      "name": "validate_project",
+      "description": "Run validate_feature for every code in vision-state, ROADMAP, and folders, plus cross-cutting checks (orphan folders, dangling cross-refs, CHANGELOG references, journal index drift) and read-only external-reference staleness (kind:\"external\" links + xref: roadmap citations). external:true enables network resolution of github refs (off by default — github refs then emit XREF_RESOLUTION_SKIPPED). Returns the union of all findings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "external_prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "feature_json_mode": {
+            "type": "boolean"
+          },
+          "external": {
+            "type": "boolean",
+            "description": "Resolve github external refs over the network (read-only). Default false: github refs degrade to XREF_RESOLUTION_SKIPPED."
+          },
+          "fix": {
+            "type": "boolean",
+            "description": "COMP-MCP-VALIDATE-2: reconcile mechanical drift. Returns a fix plan under `reconcile` (dry-run unless apply:true). Local-provider only."
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "With fix:true, write the fixes and re-validate. Default false (dry-run plan only)."
+          },
+          "fix_classes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Override the enabled fix classes: dangling_link, invalid_link_kind, status_fj_vision, partial_age, roadmap_status_rewrite, invalid_link_kind_repair. Default: the non-destructive set."
+          }
+        }
+      }
+    },
+    {
+      "name": "roadmap_graph",
+      "description": "COMP-ROADMAP-GRAPH-1: generate a self-contained roadmap dependency-graph HTML from feature.json status/phase + per-feature deps.yaml edges + display frontmatter. Drops COMPLETE/SUPERSEDED/KILLED nodes; refuses (DANGLING_EDGE) when any edge points at an unknown feature. Deterministic/idempotent. Returns a small summary (path + counts + warnings), never the HTML body.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project root path. Default: current workspace."
+          },
+          "out": {
+            "type": "string",
+            "description": "Output HTML path (relative to project root unless absolute). Default: compose.json#roadmap_graph.out or roadmap-graph.html."
+          }
+        }
+      }
+    },
+    {
+      "name": "roadmap_graph_check",
+      "description": "COMP-ROADMAP-GRAPH-1: render the roadmap graph in-memory and diff against the on-disk HTML without writing. Returns { matches, exists, diffSummary, counts, warnings }. matches:false means the file is stale/missing — run roadmap_graph. Raises DANGLING_EDGE on a bad edge.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project root path. Default: current workspace."
+          },
+          "out": {
+            "type": "string",
+            "description": "Output HTML path to compare against. Default: compose.json#roadmap_graph.out or roadmap-graph.html."
+          }
+        }
+      }
+    },
+    {
+      "name": "roadmap_xref_push",
+      "description": "COMP-ROADMAP-XREF-PUSH: write external trackers to match feature.json declared `expect=`/`expect_labels` intent or lifecycle-derived intent (`derive_expect: true`; GitHub/Forgejo). DRY-RUN by default — returns {pushed, skipped, unchanged, scanned} describing what WOULD change. Only links with `push: true` are eligible. apply:true performs the writes: GitHub issue open/closed + additive labels (never removes; PR-backed refs skipped); Forgejo issue state + additive labels through independent operations, with partial-success rows reporting {statePushed, labelsPushed, errors[]}; and local refs via the sibling repo's own setFeatureStatus. Resolution failures are skipped; GitHub write failures and local disallowed transitions also skip, while successful Forgejo operations remain reported if another operation fails. Returns a small summary, never a large body.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project root path. Default: current workspace."
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Perform the writes. Default false (dry-run — report only)."
+          }
+        }
+      }
+    },
+    {
+      "name": "propose_followup",
+      "description": "File a follow-up feature against a parent. Auto-numbers the next code in the parent's namespace (parent_code-N), adds the ROADMAP row, links surfaced_by from new → parent, and scaffolds design.md with a \"## Why\" rationale block. Idempotent on (parent_code, idempotency_key); resumes across partial failures via an inflight ledger.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parent_code": {
+            "type": "string",
+            "description": "Parent feature code (e.g. \"COMP-MCP-MIGRATION\"). Must exist; must not be KILLED/SUPERSEDED."
+          },
+          "description": {
+            "type": "string",
+            "description": "One-line description for the ROADMAP cell."
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Why this follow-up exists. Persisted as a \"## Why\" block in the new design.md and in the audit event."
+          },
+          "complexity": {
+            "type": "string",
+            "enum": [
+              "S",
+              "M",
+              "L",
+              "XL"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "description": "Phase heading. Defaults to the parent's phase if omitted."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PLANNED",
+              "IN_PROGRESS",
+              "PARTIAL",
+              "COMPLETE",
+              "BLOCKED",
+              "KILLED",
+              "PARKED",
+              "SUPERSEDED"
+            ]
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Optional retry-safety key. Without it, repeated calls allocate new codes."
+          }
+        },
+        "required": [
+          "parent_code",
+          "description",
+          "rationale"
+        ]
+      }
+    },
+    {
+      "name": "link_artifact",
+      "description": "Register a non-canonical artifact (snapshot, journal entry, finding, etc.) on a feature. Canonical artifacts (design.md, plan.md, …) inside the feature folder are auto-discovered and rejected here. Stores in feature.json artifacts[]; dedups on (type, path); appends an audit event (best-effort).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature_code": {
+            "type": "string"
+          },
+          "artifact_type": {
+            "type": "string",
+            "description": "e.g. \"journal\", \"snapshot\", \"finding\", \"report-supplement\", \"link\", \"external\""
+          },
+          "path": {
+            "type": "string",
+            "description": "Repo-relative path. Must exist; cannot contain \"..\" after normalization."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "current",
+              "superseded",
+              "historical"
+            ]
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Overwrite an existing entry with the same (type, path)"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_code",
+          "artifact_type",
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "link_features",
+      "description": "Register a typed cross-feature relationship. Two shapes: (1) SAME-PROJECT — kind ∈ surfaced_by|blocks|depends_on|follow_up|supersedes|related, requires to_code; self-links rejected; dedups on (kind,to_code). (2) EXTERNAL (kind:\"external\") — a cross-project pointer, NOT a same-project link: requires provider; four resolvable sub-shapes — github or forgejo (repo \"owner/name\" + integer issue), local (repo token + to_code), url (url); plus reserved url-class providers jira|linear|notion|obsidian (parse-valid, require url, NOT resolved in v1). External dedups on (kind=external, provider, repo, issue|to_code|url). Stores on the source feature; query inverse via get_feature_links(direction:\"incoming\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from_code": {
+            "type": "string"
+          },
+          "to_code": {
+            "type": "string",
+            "description": "Same-project: target feature code (required unless kind:\"external\"). External local: the cited feature code. Need not exist yet."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "surfaced_by",
+              "blocks",
+              "depends_on",
+              "follow_up",
+              "supersedes",
+              "related",
+              "external"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "github",
+              "forgejo",
+              "local",
+              "url",
+              "jira",
+              "linear",
+              "notion",
+              "obsidian"
+            ],
+            "description": "Required when kind:\"external\". Resolvable: github|forgejo|local|url. Reserved url-class (require url, not resolved in v1): jira|linear|notion|obsidian."
+          },
+          "repo": {
+            "type": "string",
+            "description": "External github/forgejo: \"owner/name\". External local: workspace-relative repo token."
+          },
+          "issue": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "External github/forgejo: issue/PR number."
+          },
+          "url": {
+            "type": "string",
+            "description": "External url-class (url|jira|linear|notion|obsidian): the pointer URL."
+          },
+          "expect": {
+            "type": "string",
+            "description": "Optional expected state. github/forgejo: open|closed. local: a status token. url-class: recorded, never resolved."
+          },
+          "push": {
+            "type": "boolean",
+            "description": "Opt this external link into roadmap_xref_push. Default false."
+          },
+          "expect_labels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Optional labels to add without removing existing labels. Supported by github and forgejo links."
+          },
+          "derive_expect": {
+            "type": "boolean",
+            "description": "For github/forgejo, derive open|closed from the owning feature status at validation and push time instead of storing expect."
+          },
+          "note": {
+            "type": "string"
+          },
+          "force": {
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_code",
+          "kind"
+        ]
+      }
+    },
+    {
+      "name": "get_feature_artifacts",
+      "description": "Read both canonical (auto-discovered: design.md, plan.md, …) and linked (snapshots, journals, findings) artifacts for a feature in one call. Each linked entry includes a current existence check.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_code"
+        ]
+      }
+    },
+    {
+      "name": "get_feature_links",
+      "description": "Read outgoing and/or incoming feature links. Default returns both directions; filter by kind if needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature_code": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "outgoing",
+              "incoming",
+              "both"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_code"
+        ]
+      }
+    },
+    {
+      "name": "add_changelog_entry",
+      "description": "Insert (or replace, with force: true) a typed entry in compose/CHANGELOG.md. Idempotent on (date_or_version, code) at storage level; optional caller-supplied idempotency_key for retry safety. Audit-log append is best-effort. Use this instead of editing CHANGELOG.md by hand.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date_or_version": {
+            "type": "string",
+            "description": "ISO date \"YYYY-MM-DD\" or semver \"vX.Y.Z\""
+          },
+          "code": {
+            "type": "string",
+            "description": "Feature code (e.g. \"COMP-FOO-1\"). Uppercase A-Z, digits, dashes; cannot start or end with a dash."
+          },
+          "summary": {
+            "type": "string",
+            "description": "One-line summary; renders as the \"— summary\" tail of the entry header."
+          },
+          "body": {
+            "type": "string",
+            "description": "Free paragraphs between header and labeled subsections."
+          },
+          "sections": {
+            "type": "object",
+            "description": "Optional labeled subsections; emitted in fixed order Added → Changed → Fixed → Snapshot.",
+            "properties": {
+              "added": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "changed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fixed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "snapshot": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "force": {
+            "type": "boolean",
+            "description": "If true and an entry with the same (date_or_version, code) exists, replace it in place."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Optional caller-supplied key. Same key replays return the cached result without re-mutating."
+          }
+        },
+        "required": [
+          "date_or_version",
+          "code",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "get_changelog_entries",
+      "description": "Read parsed entries from compose/CHANGELOG.md. Filter by code (exact) or since (shorthand \"24h\"/\"7d\"/\"30m\" or ISO date — date-only; version surfaces always pass through).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "string",
+            "description": "Window: shorthand like \"24h\"/\"7d\"/\"30m\" or ISO date. Date-only filter; version surfaces are always returned."
+          },
+          "code": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Default 50; capped at 500."
+          }
+        }
+      }
+    },
+    {
+      "name": "write_journal_entry",
+      "description": "Write a typed entry to compose/docs/journal/ with auto-numbered global session and inserted index row. Idempotent on (date, slug) at storage level; optional caller idempotency_key for retry safety. Audit-log append is best-effort.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "ISO date \"YYYY-MM-DD\"."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Kebab-case slug for the filename, e.g. \"mcp-journal-writer\"."
+          },
+          "sections": {
+            "type": "object",
+            "required": [
+              "what_happened",
+              "what_we_built",
+              "what_we_learned",
+              "open_threads"
+            ],
+            "properties": {
+              "what_happened": {
+                "type": "string"
+              },
+              "what_we_built": {
+                "type": "string"
+              },
+              "what_we_learned": {
+                "type": "string"
+              },
+              "open_threads": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "summary_for_index": {
+            "type": "string",
+            "description": "Single-line summary for the README index row. No newlines, no \"|\"."
+          },
+          "feature_code": {
+            "type": "string",
+            "description": "Optional feature code stamped in entry frontmatter."
+          },
+          "closing_line": {
+            "type": "string",
+            "description": "Optional final italicized one-liner."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "If true and an entry with the same (date, slug) exists, overwrite in place."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Optional caller-supplied key. Same key replays return the cached result without re-mutating."
+          }
+        },
+        "required": [
+          "date",
+          "slug",
+          "sections",
+          "summary_for_index"
+        ]
+      }
+    },
+    {
+      "name": "get_journal_entries",
+      "description": "Read parsed entries from compose/docs/journal/. Filter by feature_code (exact), session (exact), or since (shorthand \"24h\"/\"7d\"/\"30m\" or ISO date).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "string"
+          },
+          "feature_code": {
+            "type": "string"
+          },
+          "session": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Default 50; capped at 500."
+          }
+        }
+      }
+    },
+    {
+      "name": "backfill_completion",
+      "description": "Reconstruct a completion through the running Compose server from historical evidence. With no configured guard.testCommand, tests_pass must be explicitly true. Each occurrence must cite either a verified commit SHA or a repo-relative file already inside the repository. This is HTTP delegation like complete_feature, so the Compose server must be running.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "commit_sha": {
+            "type": "string"
+          },
+          "tests_pass": {
+            "type": "boolean"
+          },
+          "files_changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "occurrences": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "commit_sha",
+          "tests_pass",
+          "files_changed",
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "record_completion",
+      "description": "Record a completion bound to a commit SHA — THROUGH the completion gate (COMP-COMPLETION-GATE): under capabilities.guard the commit is server-verified and tests attested (no silent default), ONE guarded transition is ledgered, then the gate writes completions[], status COMPLETE, ROADMAP.md, the cockpit item and the audit event. A refusal (bad evidence, KILLED/SUPERSEDED feature, guard refused/unreachable) errors with COMPLETION_REFUSED and writes NOTHING. Projection failures (ROADMAP/vision) return success with partial:true + failures[]. set_status:false records evidence only (no status change, no guard transition). Idempotent on (feature_code, commit_sha).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature_code": {
+            "type": "string"
+          },
+          "commit_sha": {
+            "type": "string",
+            "description": "Full 40-char hex SHA (Decision 9). Short prefixes are rejected before any guard write. Stored lowercase; commit_sha_short is derived for display only."
+          },
+          "tests_pass": {
+            "type": "boolean"
+          },
+          "files_changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
+          },
+          "set_status": {
+            "type": "boolean",
+            "description": "Default true. When true, flips status to COMPLETE via set_feature_status."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "If true and a record with the same (feature_code, commit_sha) exists, replace it in place."
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_code",
+          "commit_sha",
+          "tests_pass",
+          "files_changed"
+        ]
+      }
+    },
+    {
+      "name": "get_completions",
+      "description": "Read completion records from feature.json files. Filter by feature_code (exact), commit_sha (short or full prefix), or since (shorthand or ISO date).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature_code": {
+            "type": "string"
+          },
+          "commit_sha": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Default 50; capped at 500."
+          }
+        }
+      }
+    },
+    {
+      "name": "write_checkpoint",
+      "description": "COMP-RESUME: write a durable build checkpoint anchored to a deterministic environment fingerprint. Omit `soft` for a cheap anchor checkpoint — the response then includes a `scribePrompt` you can answer (returning {goal,nextStep,risks} anchored to the fingerprint) and re-submit as `soft` for a narrative checkpoint. Pass `soft` directly to skip that. Returns {checkpoint, scribePrompt}. Direct-to-disk (works when the server is down).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "featureCode": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "phase-transition",
+              "pre-risky-action",
+              "iteration-complete",
+              "gate-resolution",
+              "manual",
+              "resume-sync"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "description": "Lifecycle phase label; falls back to feature.json then \"unknown\"."
+          },
+          "soft": {
+            "type": "object",
+            "description": "Narrative intent; omit for an anchor checkpoint. Every factual claim should reference a fingerprint anchor.",
+            "required": [
+              "goal",
+              "nextStep"
+            ],
+            "properties": {
+              "goal": {
+                "type": "string"
+              },
+              "nextStep": {
+                "type": "string"
+              },
+              "risks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "flowId": {
+            "type": "string",
+            "description": "Stratum flow id, if any."
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Only on resume-sync checkpoints (0..1)."
+          }
+        },
+        "required": [
+          "featureCode",
+          "trigger"
+        ]
+      }
+    },
+    {
+      "name": "compose_resume",
+      "description": "COMP-RESUME: reconcile a build against ground-truth environment state and return the resume decision. Rebuilds derived state, classifies drift (clean/advanced/diverged), and returns action resume|needs-sync|gate. On needs-sync the caller runs the reconciliation agent with the returned prompt. Requires the Compose server (reconciles live lifecycle state).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "featureCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "featureCode"
+        ]
+      }
+    },
+    {
+      "name": "judgment_position_create",
+      "description": "Create a judgment position revision (new chain, update, supersession via supersedes, or tombstone via retracted). ASSERT grounding requires an elicitation block. Provenance is writer-stamped.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "claims": {
+            "type": "array",
+            "description": "Claims: {id, text, grounding EXT|INT|ASSERT|DERIVED|AGENT, supports[], elicitation?}."
+          },
+          "conviction": {
+            "type": "object",
+            "description": "{level high|medium|low, source stated|inferred}"
+          },
+          "rejected_alternatives": {
+            "type": "array",
+            "description": "{what, why}[]"
+          },
+          "supersedes": {
+            "type": "string",
+            "description": "<slug>#r<N> being superseded."
+          },
+          "retracted": {
+            "type": "boolean",
+            "description": "true → tombstone revision."
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "claims",
+          "conviction"
+        ]
+      }
+    },
+    {
+      "name": "judgment_position_amend",
+      "description": "Scoped amendment (P6): new revision changing ONE claim's grounding and/or the conviction block. Anything else is supersession via judgment_position_create.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "claim_id": {
+            "type": "string"
+          },
+          "grounding": {
+            "type": "string",
+            "description": "New grounding for claim_id."
+          },
+          "elicitation": {
+            "type": "object",
+            "description": "Required if new grounding is ASSERT."
+          },
+          "conviction": {
+            "type": "object"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "judgment_joint_add",
+      "description": "Add a judgment joint (born open). Both branches and a coarse cost bucket are required; EXT/STRADDLE method packages may be attached now or at dispose time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "branch_true": {
+            "type": "string"
+          },
+          "branch_false": {
+            "type": "string"
+          },
+          "resolve_by": {
+            "type": "string",
+            "description": "EXT|INT|CONSTRUCT|ASSERT|STRADDLE"
+          },
+          "cost": {
+            "type": "string",
+            "description": "hours|days|weeks|months"
+          },
+          "rank": {
+            "type": "string",
+            "description": "high|medium"
+          },
+          "ext": {
+            "type": "object",
+            "description": "EXT package: {sharpened_question, bar, falsifier} or {judgment_dispatch: true, reason}."
+          },
+          "straddle": {
+            "type": "object",
+            "description": "{discriminating_signal, kill_criteria}"
+          },
+          "flags": {
+            "type": "array"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "question",
+          "branch_true",
+          "branch_false",
+          "resolve_by",
+          "cost",
+          "rank"
+        ]
+      }
+    },
+    {
+      "name": "judgment_transition",
+      "description": "Joint state machine (edge→artifact table enforced; Stratum-guarded where capabilities.guard). Provide the target state plus its required artifact (resolution/dissolution/reopen/redispose), and/or a rank change (atomic rank ledger event).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string",
+            "description": "open|under_test|resolved|inconclusive|superseded|dissolved"
+          },
+          "resolution": {
+            "type": "object",
+            "description": "{outcome resolved|inconclusive|failed_to_run|superseded, …outcome-specific fields, ext_result?, elicitation?}"
+          },
+          "dissolution": {
+            "type": "object",
+            "description": "{decomposed_into[]}"
+          },
+          "reopen": {
+            "type": "object",
+            "description": "{shaken_evidence_ref} (P6)"
+          },
+          "redispose": {
+            "type": "object",
+            "description": "{new_resolve_by, ext?, straddle?} (retry inconclusive with a different method)"
+          },
+          "ext": {
+            "type": "object",
+            "description": "EXT package attached at dispose time."
+          },
+          "straddle": {
+            "type": "object"
+          },
+          "rank": {
+            "type": "object",
+            "description": "{to: high|medium}"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "judgment_ledger_append",
+      "description": "Append a judgment ledger event (kind-specific required fields enforced: commit-decide needs trigger+open_joints+prediction; postmortem needs recall_verdict+attribution and grades prediction_ref; override needs reason). Commit/CONSTRUCT events spawn prediction records.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "decide|kill|override|escalate|calibrate|postmortem|rank|note|correct|open"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "refs": {
+            "type": "array"
+          },
+          "rejected": {
+            "type": "array"
+          },
+          "conviction": {
+            "type": "object"
+          },
+          "trigger": {
+            "type": "string",
+            "description": "On decide: earned|forced|exhausted (marks a commit-moment decide)."
+          },
+          "open_joints": {
+            "type": "array"
+          },
+          "prediction": {
+            "type": "object",
+            "description": "{text, outcome_criteria}"
+          },
+          "disposition": {
+            "type": "string",
+            "description": "Method disposed with; CONSTRUCT requires prediction."
+          },
+          "recall_verdict": {
+            "type": "string"
+          },
+          "attribution": {
+            "type": "string"
+          },
+          "prediction_ref": {
+            "type": "string"
+          },
+          "prediction_grade": {
+            "type": "string",
+            "description": "right|right-wrong-reason|wrong"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rests_on": {
+            "type": "array",
+            "description": "On commit-moment decide: goal clause refs (goal:v<N>#c<N>) the commit rests on; resolved through the effective goal chain."
+          },
+          "anchor": {
+            "type": "string",
+            "description": "On note: projection anchor (register-header, joint:<slug>, …)."
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "judgment_person_write",
+      "description": "Write person canon by op. create adds a person; open_field supports create, fill, and reopen; edge/load_link support create and remove; correct supports divergence pair/clear. Provenance is writer-stamped.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "create",
+              "add_fact",
+              "correct",
+              "open_field",
+              "edge",
+              "load_link"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string",
+            "description": "role|life|stated|revealed"
+          },
+          "text": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "description": "said|observed|secondhand|inferred"
+          },
+          "via": {
+            "type": "string",
+            "description": "Source attribution for a secondhand fact; not provenance."
+          },
+          "at": {
+            "type": "string",
+            "description": "ISO date (YYYY-MM-DD)."
+          },
+          "fact_id": {
+            "type": "string"
+          },
+          "pair_with": {
+            "type": "string",
+            "description": "Pair stated↔revealed divergence on correct."
+          },
+          "clear": {
+            "type": "array",
+            "description": "On correct: exactly [\"diverges_with\"].",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string",
+            "description": "open_field create branch."
+          },
+          "open_field_id": {
+            "type": "string"
+          },
+          "filled_by": {
+            "type": "string"
+          },
+          "reopen": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string",
+            "description": "edge create branch target person slug."
+          },
+          "kind": {
+            "type": "string",
+            "description": "edge create branch kind."
+          },
+          "edge_id": {
+            "type": "string"
+          },
+          "remove": {
+            "type": "boolean"
+          },
+          "fact": {
+            "type": "string",
+            "description": "load_link create branch fact ID."
+          },
+          "carries": {
+            "type": "string"
+          },
+          "load_link_id": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ]
+      }
+    },
+    {
+      "name": "judgment_situation_write",
+      "description": "Write situation-entity canon by op. create adds an entity; owed supports create, give, and reopen; load_link supports create and remove. Provenance is writer-stamped.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "create",
+              "add_fact",
+              "correct",
+              "owed",
+              "load_link"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "description": "said|observed|secondhand|inferred"
+          },
+          "via": {
+            "type": "string",
+            "description": "Source attribution for a secondhand fact; not provenance."
+          },
+          "at": {
+            "type": "string",
+            "description": "ISO date (YYYY-MM-DD)."
+          },
+          "fact_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "owed create branch."
+          },
+          "why_load_bearing": {
+            "type": "string"
+          },
+          "owed_id": {
+            "type": "string"
+          },
+          "filled_by": {
+            "type": "string"
+          },
+          "reopen": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "remove": {
+            "type": "boolean"
+          },
+          "fact": {
+            "type": "string",
+            "description": "load_link create branch fact ID."
+          },
+          "carries": {
+            "type": "string"
+          },
+          "load_link_id": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ]
+      }
+    },
+    {
+      "name": "judgment_goal_write",
+      "description": "Write goal canon by op. Ordinary cuts require elicited clauses, provocation, and owner ratification. Every non-migrate op is migration-locked while a live legacy objective requires migration; migrate is the one-shot, fail-closed cutover that lifts the lock and takes no payload. joint_link/load_link support create and remove. Provenance and intents are writer-owned.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "cut",
+              "correct",
+              "joint_link",
+              "load_link",
+              "migrate"
+            ]
+          },
+          "clauses": {
+            "type": "array",
+            "description": "cut: {text, channel, elicitation, secondhand source attribution?}[]"
+          },
+          "provocation": {
+            "type": "object",
+            "description": "cut: {quote, at}"
+          },
+          "ratification": {
+            "type": "object",
+            "description": "cut: {asked, answered_at, answer_ref, quote}"
+          },
+          "diff_note": {
+            "type": "string"
+          },
+          "clause_id": {
+            "type": "string",
+            "description": "correct branch clause ID."
+          },
+          "text": {
+            "type": "string",
+            "description": "correct branch replacement wording."
+          },
+          "joint": {
+            "type": "string",
+            "description": "joint_link create branch joint slug."
+          },
+          "joint_link_id": {
+            "type": "string"
+          },
+          "remove": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "clause": {
+            "type": "string",
+            "description": "load_link create branch v<N>#c<N> reference."
+          },
+          "carries": {
+            "type": "string"
+          },
+          "load_link_id": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ]
+      }
+    },
+    {
+      "name": "get_judgment_state",
+      "description": "Judgment canon snapshot: positions (derived status), joints, under-test, open predictions, recent ledger. Replays pending judgment intents first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_judgment_trace",
+      "description": "Causal ancestry of one judgment position: every revision in order, what it superseded (walked recursively), and what superseded it. Read-only; answers \"what did we believe when we made that call\", which get_judgment_state cannot (it returns latest-only).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Position slug"
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "compose",
+    "version": "1.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 39918,
+  "stderr": ""
+}
