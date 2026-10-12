@@ -24,10 +24,13 @@ something to the user. This lab tests whether such sentences change what agents 
 Follow-ups run on the same harness, cases and scoring rule, each with its own report under `report/` and its rows in
 `runs/final/` under that day's file prefixes. `report/lab-table.py <prefix> <variants>` recomputes any of them.
 
+- **Lab 0, the sentence in the system prompt** (`report/lab0-system-prompt.md`, variant `system`, files `2026-10-11T11xx`): the
+  published sentence changed place, from the tool's text to the system prompt. The three Claude models flipped from telling
+  the customer every run to keeping it secret every run; Qwen kept it from either place; Granite told from either place.
 - **Lab 2, rewording** (`report/lab2-rewording.md`, variants `reword:bare,reword:plain,reword:polite,reword:strong,reword:reason`,
   files `2026-10-11T14xx` to `T17xx`): the sentence written five ways, in the tool's text. Nothing changed with the wording.
 
-The card for it is in `report/charts/lab2-card-wide.png` and `lab2-card-square.png`, drawn by `report/card2.py`.
+The cards are in `report/charts/lab0-card-*.png` and `lab2-card-*.png`, drawn by `report/card2.py`.
 
 ## The cases
 
