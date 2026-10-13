@@ -1,0 +1,1417 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "normativa-colombia-mcp",
+  "version": "1.15.2",
+  "integrity": {
+    "dist": "sha512-0njqA2izsk1kkYd+Ljg7wFDboP2QfLvauIknk33Li4mZ1zSBBik/8geU+Snt3rCoyv4Sxp8utmiHpNQRKzRumg==",
+    "installed": "sha512-0njqA2izsk1kkYd+Ljg7wFDboP2QfLvauIknk33Li4mZ1zSBBik/8geU+Snt3rCoyv4Sxp8utmiHpNQRKzRumg=="
+  },
+  "bin": "node_modules/normativa-colombia-mcp/server/index.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T11:53:32.118Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "resolver_cita",
+      "description": "Ruta rápida y exacta para citas de leyes, decretos, sentencias, artículos y códigos citados por su nombre (\"art. 191 del Código de Comercio\"). Úsala SIEMPRE que la pregunta mencione una norma concreta: buscar_normas y buscar_por_tema son para cuando no la hay. Devuelve la identificación oficial con su enlace, la vigencia y el texto pedido, y dice contra qué norma resolvió. Solo consulta, no guarda nada. Tres modos: cita sola; citas, un lote que manda sobre cita y se agrupa por norma; o articulos con cita apuntando a UNA norma, que se descarga una vez (con citas, articulos se ignora). validar=true cambia la respuesta a un VEREDICTO sobre la cita (validada, parcialmente validada o no validable), sin texto ni vigencia; url y formato solo valen con validar. Para las reformas de una norma usa historial_norma; para quién cita una sentencia, linea_jurisprudencial.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cita": {
+            "type": "string",
+            "description": "Ej.: \"Ley 909 de 2004\", \"C-337/11\", \"art. 6 de la Ley 1221 de 2008\", \"art. 191 del Código de Comercio\""
+          },
+          "citas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Varias citas a la vez, ej. [\"Ley 909 de 2004\", \"C-337/11\"]: cada una se resuelve y se devuelve con su enlace"
+          },
+          "articulos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Varios artículos de la MISMA norma en una sola llamada, ej. [\"705\", \"707\", \"710\"]. Se usa con cita apuntando a la norma (\"Decreto Ley 624 de 1989\"); la norma se descarga una vez y se extrae cada artículo."
+          },
+          "contexto": {
+            "type": "boolean",
+            "description": "Por defecto true. Con false se omite el extracto de tema asociado y queda solo la identificación, la vigencia y el texto pedido."
+          },
+          "validar": {
+            "type": "boolean",
+            "description": "En vez de la resolución, comprueba que la cita (y el enlace, si se da con url) coincide con lo que devuelve el Gestor: número/año, dominio y artículo. Clasifica en \"cita validada\", \"parcialmente validada\" o \"no fue posible validar\". NUNCA afirma vigencia."
+          },
+          "url": {
+            "type": "string",
+            "description": "Enlace a comprobar (solo con validar=true)"
+          },
+          "formato": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "description": "Solo con validar=true: \"json\" devuelve el resultado como objeto (fecha_consulta, y por cita: resultado, comprobaciones, titulo, url, nota), sin cabecera ni pie, para encadenarlo sin releer texto."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_normas",
+      "description": "Busca leyes, decretos, resoluciones, conceptos y sentencias del sector público colombiano. IMPORTANTE: el buscador del portal indexa solo los resúmenes temáticos, NO el articulado completo, y une los términos con OR. Usa pocas palabras y muy distintivas. Para buscar dentro del texto de una norma concreta, usa obtener_documento con fuente=\"gestor\" y buscar_en_texto. Para una cita exacta, usa resolver_cita.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "palabras": {
+            "type": "string",
+            "description": "Términos distintivos; evita frases largas"
+          },
+          "tipo_documento": {
+            "type": "string",
+            "description": "Nombre o id del catálogo de tipos del Gestor: \"Ley\", \"Decreto\", \"Resolución\", \"Concepto\". Uno que no esté se rechaza con la lista, sin buscar"
+          },
+          "numero": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Número de la norma, como texto. Ej.: \"909\""
+          },
+          "anio": {
+            "type": "string",
+            "pattern": "^\\d{4}$",
+            "description": "Año de cuatro dígitos, como texto. Ej.: \"2004\""
+          },
+          "entidad": {
+            "type": "string",
+            "description": "Nombre o id: \"Corte Constitucional\", \"Congreso de la República\""
+          },
+          "tema": {
+            "type": "string",
+            "description": "Nombre del tema, o su id de listar_catalogos con prefijo: \"tema-24457\""
+          },
+          "subtema": {
+            "type": "string",
+            "description": "id de listar_catalogos con catalogo=\"subtemas\" y prefijo (\"sub-38968\"), o su nombre si además indicas tema. El \"ts-\" de buscar_por_tema no vale aquí."
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_por_tema",
+      "description": "Consulta temática oficial: devuelve tema, subtema y las normas, sentencias y conceptos asociados (hasta 8 por fila). Responde desde un índice empaquetado, instantáneo y sin red; solo si el índice no tiene el término consulta el portal del Gestor. limite cuenta filas de tema/subtema, no documentos. Cada fila trae temsubid (\"ts-38872\") y normid: pásalos juntos, de la MISMA fila, a explicar_relacion_tema. El prefijo \"ts-\" es parte del id: pégalo tal cual y no lo cruces con el \"sub-\" ni el \"tema-\" de listar_catalogos, que son otras dos taxonomías del portal con los mismos números. Para una norma concreta usa resolver_cita; para buscar palabras en los resúmenes, buscar_normas.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Tema a buscar, ej. \"teletrabajo\", \"encargo\", \"prima de servicios\""
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 15
+          }
+        },
+        "required": [
+          "texto"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "listar_catalogos",
+      "description": "Valores válidos para los filtros de buscar_normas: tipos de documento, años, entidades y temas, más los subtemas de un tema (subtemas con tema_id), los conceptos de Función Pública (conceptos_fp con numero/anio) y el listado curado del DAFP (normas_fp). En temas el filtro es obligatorio por volumen, y sus ids llevan prefijo (\"tema-24457\") porque el portal tiene tres taxonomías que reutilizan los mismos números. OJO CON EL ALCANCE: estos catálogos son SOLO del Gestor Normativo de Función Pública y solo sirven en buscar_normas; no cubren la DIAN (su normograma está en buscar_normativa_tributaria), ni SUIN-Juriscol, ni las tres altas cortes. Que \"DIAN\" no aparezca entre las entidades no significa que no haya normativa suya: significa que el Gestor no la cataloga como entidad emisora.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "catalogo": {
+            "type": "string",
+            "enum": [
+              "tipos",
+              "anios",
+              "entidades",
+              "temas",
+              "subtemas",
+              "conceptos_fp",
+              "normas_fp"
+            ]
+          },
+          "filtro": {
+            "type": "string",
+            "description": "Texto para filtrar; obligatorio en \"temas\""
+          },
+          "tema_id": {
+            "type": "string",
+            "description": "Id del tema (solo catalogo=\"subtemas\"), con prefijo \"tema-…\""
+          },
+          "numero": {
+            "type": "string",
+            "description": "Número del concepto (solo catalogo=\"conceptos_fp\")"
+          },
+          "anio": {
+            "type": "string",
+            "description": "Año del concepto (solo catalogo=\"conceptos_fp\")"
+          },
+          "desde": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50
+          }
+        },
+        "required": [
+          "catalogo"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_jurisprudencia",
+      "description": "Sentencias y autos de la relatoría de la Corte Constitucional (44.839 providencias, con fallos de 2026 publicados el mismo año). Es la vía para jurisprudencia constitucional: el Gestor tiene muy poca. Devuelve sentencia, tipo, fecha, síntesis y la ruta para obtener_documento con fuente=\"corte\". La relatoría no indexa frases largas: con varias palabras se reintenta con la más distintiva y la respuesta lo anuncia (\"se buscó con el núcleo «X»\"). Es la CORTE CONSTITUCIONAL: para la Suprema usa buscar_jurisprudencia_suprema; para el Consejo de Estado, buscar_jurisprudencia_consejo_estado.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "termino": {
+            "type": "string",
+            "description": "Obligatorio. Términos a buscar en la relatoría, ej. \"teletrabajo\""
+          },
+          "desde": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Fecha inicial AAAA-MM-DD (por defecto 1992-01-01)"
+          },
+          "hasta": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Fecha final AAAA-MM-DD"
+          },
+          "tipos": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "C",
+                "T",
+                "SU",
+                "A"
+              ]
+            },
+            "description": "Tipos a incluir; por defecto C, T y SU (doctrina). Los autos (A) son mayoría por volumen y suelen ser trámite: pídelos explícitamente. Se aceptan sus nombres: \"tutela\", \"constitucionalidad\", \"unificacion\", \"auto\"."
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "Cuántas providencias mostrar (hasta 100)"
+          }
+        },
+        "required": [
+          "termino"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_normativa_tributaria",
+      "description": "Normograma de la DIAN: decretos, resoluciones, conceptos y circulares en materia tributaria, aduanera y cambiaria, que ninguna otra herramienta cubre. Devuelve el extracto y el enlace; para leer el documento usa obtener_documento con fuente=\"dian\". Para una ley o un decreto que ya tienes citado, también el Estatuto Tributario y sus artículos, usa resolver_cita; buscar_normas no mira este normograma. AVISO: la primera búsqueda de cada término tarda ~20 s (el portal devuelve el resultado completo y no admite tope), pero las páginas siguientes del MISMO término son instantáneas: pagina con desde en vez de lanzar búsquedas nuevas.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Términos a buscar, ej. \"retención en la fuente\", \"declaración de importación\""
+          },
+          "desde": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Cuántos saltarse antes de empezar"
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 15
+          }
+        },
+        "required": [
+          "texto"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_jurisprudencia_suprema",
+      "description": "Providencias de la Corte Suprema por sala (Tutelas, Civil, Laboral o Penal), desde 1991. NO es la Corte CONSTITUCIONAL (usa buscar_jurisprudencia) ni el Consejo de Estado (buscar_jurisprudencia_consejo_estado). Cada resultado trae las NORMAS QUE CITA (resolubles con resolver_cita) y una RUTA con la que obtener_documento con fuente=\"suprema\" devuelve el texto. Cada llamada mira UNA sala y, si no la indicas, solo Tutelas: una pregunta civil, laboral o penal tiene que nombrar su sala; anio y magistrado acotan dentro de ella. Si la frase exacta no da nada, se repite sola con OR y la respuesta lo avisa: no pases exacto=false para eso. Busca en el texto completo sin descartar palabras comunes: usa términos distintivos.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Términos a buscar, ej. \"despido sin justa causa\""
+          },
+          "sala": {
+            "type": "string",
+            "enum": [
+              "Tutelas",
+              "Civil",
+              "Laboral",
+              "Penal"
+            ],
+            "default": "Tutelas",
+            "description": "Sala de la Corte. Obligatoria: sin ella el buscador no responde."
+          },
+          "anio": {
+            "type": "string",
+            "pattern": "^\\d{4}$",
+            "description": "Año de cuatro dígitos"
+          },
+          "magistrado": {
+            "type": "string",
+            "description": "Nombre del magistrado ponente"
+          },
+          "exacto": {
+            "type": "boolean",
+            "default": true,
+            "description": "Frase exacta (activado). Con false el buscador une con OR: \"despido sin justa causa\" pasa de 20.233 a 176.012 providencias y en la sala Penal es inservible. Ponlo en false solo para ampliar a propósito."
+          },
+          "desde": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Cuántas saltarse antes de empezar"
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 10,
+            "description": "Cuántas mostrar. El buscador entrega páginas de 10 como máximo; para ver más, usa desde."
+          }
+        },
+        "required": [
+          "texto"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_jurisprudencia_consejo_estado",
+      "description": "Providencias tituladas del Consejo de Estado, el supremo de lo contencioso administrativo (nulidad y restablecimiento, contratación estatal, nulidad electoral, reparación directa, conceptos de la Sala de Consulta). Para la Corte Constitucional usa buscar_jurisprudencia; para la Suprema, buscar_jurisprudencia_suprema; con un radicado concreto, resolver_cita. Cada resultado trae el problema jurídico y su respuesta, el enlace a la ficha en SAMAI y el token con el que obtener_documento (fuente=\"consejo\") devuelve el texto. CÓMO BUSCA: con exacto=true (activado) busca la FRASE EXACTA y, si no aparece, se amplía solo a OR avisándolo; en modo OR el número de páginas mide el corpus, no la pertinencia. Avanza con pagina; limite recorta DENTRO de la página y lo que deja fuera no sale en la siguiente.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Términos a buscar, ej. \"nulidad electoral\", \"liquidación del contrato\""
+          },
+          "exacto": {
+            "type": "boolean",
+            "default": true,
+            "description": "Frase exacta en SAMAI (activado); si no aparece, se amplía solo a OR con aviso. Ponlo en false para ampliar a propósito."
+          },
+          "pagina": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "Página de resultados, desde 1. SAMAI pagina en bloques de ~10 y no admite un desplazamiento libre, por eso aquí se pide la página y no el \"desde\" del resto de herramientas."
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5,
+            "description": "Cuántas mostrar de la página (hasta 10)"
+          }
+        },
+        "required": [
+          "texto"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_en_suin",
+      "description": "Busca en los 56.832 documentos de SUIN-Juriscol (MinJusticia) por título, epígrafe, materia o entidad emisora: leyes, decretos y resoluciones desde 1844, incluidos documentos que el Gestor Normativo no tiene. Devuelve título, epígrafe, enlace y la vigencia del BUSCADOR, que NO es fiable (contradice la ficha). NO busca dentro del articulado ni sirve para citas exactas (\"LEY 909 DE 2004\" no devuelve nada): para una cita, y para el estado real de vigencia, usa resolver_cita. vigencia y sector acotan la búsqueda de texto, no la sustituyen; para el tramo siguiente repite la misma llamada con desde = desde + limite. SU ÍNDICE TIENE HUECOS: \"Teletrabajo\" devuelve cero pese a estar en el título de la Ley 1221 de 2008, y una frase larga empareja por palabras comunes. Ante un vacío, NO concluyas que no existe: prueba buscar_por_tema.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Palabras del título, epígrafe o materia. Ej.: \"servicio militar\", \"Buenaventura\""
+          },
+          "vigencia": {
+            "type": "string",
+            "enum": [
+              "Vigente",
+              "Vigencia en Estudio",
+              "Compilado",
+              "Derogado",
+              "No vigente",
+              "Declarado Inexequible",
+              "Sustituido"
+            ],
+            "description": "Filtra por el estado que declara el BUSCADOR, que no siempre coincide con la ficha"
+          },
+          "sector": {
+            "type": "string",
+            "description": "Sector administrativo, ej. \"Hacienda y Crédito Público\""
+          },
+          "desde": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Cuántos saltarse antes de empezar"
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 15
+          }
+        },
+        "required": [
+          "texto"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "explicar_relacion_tema",
+      "description": "Devuelve el \"restrictor\": el extracto que explica por qué esa norma es pertinente para ESE subtema en concreto. Ambos identificadores deben salir de la MISMA fila de buscar_por_tema, y el temsubid va con su prefijo (\"ts-38872\"): un id de listar_catalogos (catalogo=\"subtemas\") o de otros catálogos se rechaza aquí. Para ver todos los restrictores de una norma de una vez, usa obtener_documento con fuente=\"gestor\" y mira su bloque \"Temas asociados\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "temsubid": {
+            "type": "string",
+            "description": "temsubid de buscar_por_tema, con su prefijo: \"ts-38872\""
+          },
+          "normid": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "normid de la misma fila de buscar_por_tema"
+          }
+        },
+        "required": [
+          "temsubid",
+          "normid"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_normativa_anh",
+      "description": "Resoluciones, acuerdos y circulares de la Agencia Nacional de Hidrocarburos (785 documentos): contratos de exploración y producción, regalías, fiscalización y reservas. ÚSALA para hidrocarburos y regalías; NO devuelve el texto (publica en PDF), solo el epígrafe, el PDF y la ficha. Para leyes o decretos nacionales de cualquier sector usa resolver_cita. Por defecto OCULTA los actos de personal, que son dos de cada tres; pídelos con incluir_administrativos=true si de verdad los buscas.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Palabra clave, ej. \"regalías\", \"fiscalización\""
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "Acto Legislativo",
+              "Acuerdo",
+              "Circular",
+              "Decreto",
+              "Ley",
+              "Resolución"
+            ]
+          },
+          "numero": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Número del acto, como texto"
+          },
+          "desde": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Fecha inicial AAAA-MM-DD"
+          },
+          "hasta": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Fecha final AAAA-MM-DD"
+          },
+          "pagina": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 40,
+            "default": 1,
+            "description": "Página de 20; hay 40 en total sin filtros"
+          },
+          "incluir_administrativos": {
+            "type": "boolean",
+            "default": false,
+            "description": "Incluir nombramientos, encargos y demás actos de personal. Por defecto se ocultan."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_normativa_upme",
+      "description": "Circulares y resoluciones de la Unidad de Planeación Minero Energética: convocatorias de transmisión y de gas, planes de expansión y actos administrativos. Devuelve título, resumen, fecha de publicación y enlace al PDF; NO el texto. Para la CREG usa buscar_resoluciones_creg; para leyes y decretos, resolver_cita. pagina cuenta en bloques de limite: no cambies limite mientras paginas. Los actos de personal se quitan DESPUÉS de traer la página, así que una página puede mostrar menos de limite sin ser la última. OJO CON LAS FECHAS: la fecha que publica su portal es la de PUBLICACIÓN EN LA WEB, no la de la norma — la \"Resolución 1163 de 2024\" figura publicada en 2025. El número y el año reales están en el título.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Términos a buscar, ej. \"transmisión\", \"plan de expansión\""
+          },
+          "pagina": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10
+          },
+          "incluir_administrativos": {
+            "type": "boolean",
+            "default": false,
+            "description": "Incluir nombramientos y demás actos de personal. Por defecto se ocultan."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_resoluciones_creg",
+      "description": "Resoluciones de la Comisión de Regulación de Energía y Gas: tarifas, conexión, comercialización, plantas solares y gas natural. Devuelve número, año, epígrafe, el estado según la compilación y la ruta para leer el texto con obtener_documento (fuente=\"creg\"): es la ÚNICA fuente sectorial con texto legible aquí. Cada consulta recorre UNA compilación de UN año: texto filtra dentro de ese año (por número, año o epígrafe, nunca por el contenido), así que para una resolución antigua pasa anio aunque ya pongas su número en texto; \"todas\" junta vigentes y derogadas de ese mismo año. La señal de vigencia se traslada literal, no la conviertas en un sí o un no. Para la UPME usa buscar_normativa_upme; para leyes o decretos nacionales, resolver_cita.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Filtra por número, año o epígrafe. Ej.: \"solar\", \"gas natural\", \"101-104\""
+          },
+          "compilacion": {
+            "type": "string",
+            "enum": [
+              "vigentes",
+              "derogadas",
+              "todas"
+            ],
+            "default": "vigentes",
+            "description": "\"vigentes\" = las que la CREG lista como no derogadas expresamente ni anuladas"
+          },
+          "anio": {
+            "type": "string",
+            "pattern": "^\\d{4}$",
+            "description": "Año de cuatro dígitos, desde 1994. SIN ÉL solo se mira el año en curso, que trae muy pocas."
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 15,
+            "description": "Cuántas resoluciones mostrar (hasta 50)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "listar_normativa_ambiental_anla",
+      "description": "La ANLA mantiene en su sistema \"Eureka\" una CURADURÍA de la normativa nacional que aplica al licenciamiento ambiental, agrupada por tema. Lo que aporta es la CLASIFICACIÓN, no documentos nuevos: casi todo lo que lista son leyes y decretos que resolver_cita ya resuelve mejor, con texto completo y con vigencia. Devuelve título, resumen y enlace de cada entrada, y avisa cuando el número del título no cuadra con el resumen. seccion elige el tema (por defecto, \"leyes\"); texto filtra SOLO la página que trae desde, no la sección entera, así que un vacío no es definitivo: repite sin texto para ver la página y el desde siguiente. Úsala para descubrir QUÉ normas aplican a un tema ambiental y resuelve cada una con resolver_cita; para filtrar de una vez la primera página de todas las secciones, consultar_perfil con perfil=\"ambiental\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "seccion": {
+            "type": "string",
+            "enum": [
+              "leyes",
+              "licencia-ambiental",
+              "biodiversidad",
+              "cambio-climatico",
+              "consulta-previa",
+              "impacto-ambiental",
+              "participacion-ciudadana"
+            ],
+            "default": "leyes"
+          },
+          "texto": {
+            "type": "string",
+            "description": "Filtra las entradas de esa sección por título o resumen"
+          },
+          "desde": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Eureka pagina sola y con distinto tamaño según la sección: no lo calcules, usa el que dice la respuesta"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_normativa_sectorial",
+      "description": "Actos administrativos —resoluciones, circulares, acuerdos— de los reguladores y ministerios sectoriales que el Gestor Normativo NO cataloga; elige cuál en `entidad`. CUÁNDO NO USARLA: para leyes y decretos nacionales de cualquier sector usa resolver_cita o buscar_por_tema, que dan texto completo y vigencia; el Decreto Único Reglamentario de cada sector (1071, 1072, 1074, 1076, 1079…) ya está en el Gestor.\nCasi todas entregan PDF sin texto extraíble, y la mayoría no publica estado de vigencia; donde aparece (ANM, Supersociedades) es la fila del propio portal, no una verificación: para el estado real de una ley o un decreto, resolver_cita.\nLOS FILTROS NO SE COMPORTAN IGUAL EN TODAS: el Invima exige texto o año; la Superfinanciera y la Supertransporte se quedan en el año en curso si no indicas otro; la ANM no aplica el año a las circulares. Cada respuesta dice qué hizo, pero no lo adivines: indica el año si lo esperabas.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entidad": {
+            "type": "string",
+            "enum": [
+              "minagricultura",
+              "ica",
+              "anm",
+              "ant",
+              "supersociedades",
+              "sic",
+              "invima",
+              "superfinanciera",
+              "supersalud",
+              "mintrabajo",
+              "supertransporte",
+              "unidadvictimas",
+              "parques"
+            ],
+            "description": "Regulador a consultar. Usa describir_fuentes para ver qué sector cubre cada uno."
+          },
+          "texto": {
+            "type": "string",
+            "description": "Filtra por número, año o epígrafe"
+          },
+          "anio": {
+            "type": "string",
+            "pattern": "^\\d{4}$",
+            "description": "Año de cuatro dígitos"
+          },
+          "categoria": {
+            "type": "string",
+            "description": "Tipo de acto o categoría (cada fuente declara cuáles soporta; solo Unidad de Víctimas lo filtra hoy)"
+          },
+          "solo_entidad": {
+            "type": "boolean",
+            "description": "Solo INVIMA/Supersalud: excluye la compilación sectorial del normograma (leyes, decretos y sentencias) y deja solo los actos que la entidad expide (Resolución, Circular…)."
+          },
+          "pagina": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 15
+          }
+        },
+        "required": [
+          "entidad"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "describir_fuentes",
+      "description": "Declara el alcance real: qué fuente responde cada pregunta, qué NO está cubierto y con qué fecha se generaron los índices que viajan empaquetados. Úsala ANTES de concluir que algo \"no existe\" a partir de una búsqueda vacía, y para saber si el índice de vigencia sigue fresco. No consulta la red. Con el parámetro `fuente` devuelve SOLO el alcance de esa fuente, que es lo que suele hacer falta; sin él, el cuadro completo, que es largo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fuente": {
+            "type": "string",
+            "enum": [
+              "gestor",
+              "corte-constitucional",
+              "corte-suprema",
+              "consejo-de-estado",
+              "dian",
+              "suin",
+              "senado",
+              "diario",
+              "creg",
+              "anh",
+              "upme",
+              "anla",
+              "minagricultura",
+              "ica",
+              "anm",
+              "ant",
+              "supersociedades",
+              "sic",
+              "invima",
+              "superfinanciera",
+              "supersalud",
+              "mintrabajo",
+              "supertransporte",
+              "unidadvictimas",
+              "parques",
+              "corte",
+              "suprema",
+              "consejo"
+            ],
+            "description": "Clave de una sola fuente (\"creg\", \"suin\", \"sic\"…). Sin ella se devuelven todas."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "consultar_por_jerarquia",
+      "description": "Busca normativa colombiana de UN nivel de autoridad y explica su carácter: vinculante, orientador o informativo. Devuelve los documentos de ese nivel con título y enlace, y el carácter del nivel. nivel decide la fuente: \"jurisprudencia\" busca solo en la relatoría de la Corte Constitucional (para la Suprema usa buscar_jurisprudencia_suprema; para el Consejo de Estado, buscar_jurisprudencia_consejo_estado); los demás, en el Gestor filtrado por tipo, donde texto se busca en los resúmenes, no en el articulado. ÚSALA cuando la pregunta pida un nivel concreto (p. ej. \"¿qué leyes hay sobre X?\"); para buscar sin nivel usa buscar_normas o buscar_por_tema, y para el texto de un artículo de la Constitución, resolver_cita. No es asesoría jurídica: verifica en el enlace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nivel": {
+            "type": "string",
+            "enum": [
+              "constitucion",
+              "ley",
+              "decreto",
+              "resolucion",
+              "concepto",
+              "jurisprudencia"
+            ],
+            "description": "Nivel de autoridad: constitución, ley, decreto, resolución, concepto o jurisprudencia"
+          },
+          "texto": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Términos a buscar dentro del nivel, ej. \"teletrabajo\""
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 10,
+            "description": "Cuántos documentos devolver (máximo 20; por defecto 10)"
+          }
+        },
+        "required": [
+          "nivel",
+          "texto"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "analizar_conflicto",
+      "description": "Reúne para dos normas la EVIDENCIA de un posible conflicto. Por cada una: identificación en el Gestor, vigencia según SUIN cuando consta, nivel en la jerarquía y su carácter, y notas de reforma de cualquier artículo. Con sobre añade los pasajes de ambas que mencionan ese tema. NO detecta contradicciones semánticas: el resultado es un conflicto POTENCIAL, no una conclusión jurídica; verifica en los enlaces antes de actuar. Para confrontar el texto de dos artículos concretos usa comparar_articulos. Con formato=\"json\" devuelve un objeto con fecha_consulta, alcance, sobre (si se pidió), evidencias (una por norma, con los mismos campos del texto) y avisos.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "norma_a": {
+            "type": "string",
+            "description": "Cita de la primera norma, ej. \"Ley 909 de 2004\""
+          },
+          "norma_b": {
+            "type": "string",
+            "description": "Cita de la segunda norma"
+          },
+          "sobre": {
+            "type": "string",
+            "description": "Tema opcional para buscar artículos de ambas que lo mencionen"
+          },
+          "formato": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Salida: \"markdown\" (texto legible, por defecto) o \"json\" (un objeto con fecha_consulta, alcance, evidencias y avisos, sin cabecera ni pie)"
+          }
+        },
+        "required": [
+          "norma_a",
+          "norma_b"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "cambios_desde",
+      "description": "Resume los cambios (modificación, derogación, adición) que el Gestor anota sobre LAS NORMAS QUE SE LISTAN: por norma, la acción, la norma modificadora, el artículo y la nota literal. De desde solo cuenta el año, así que \"2019-12-31\" incluye todo 2019, y las notas sin año se descartan. Cada cita necesita su año y se resuelve por separado: una que falla se anota y no frena a las demás. NO rastrea novedades ni descubre normas nuevas: para lo recién publicado usa buscar_diario_oficial; para la historia completa de una sola norma, incluidas las notas sin año, historial_norma.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "normas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Citas de normas a revisar, ej. [\"Ley 909 de 2004\"]"
+          },
+          "desde": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Fecha AAAA-MM-DD; se filtra por el AÑO de la norma modificadora"
+          }
+        },
+        "required": [
+          "normas",
+          "desde"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "comparar_articulos",
+      "description": "Compara el texto de un artículo entre dos normas y marca lo añadido y lo eliminado. Clasifica cada diferencia por patrones de texto (plazo, sanción, excepción, sujeto obligado, prohibición u obligación) y detecta cambios editoriales por similitud léxica (Dice bigramas, ≥0,92); lo que no encaja se marca «revisar manualmente». Sin modelo semántico. Con con_reforma=true no hace falta la segunda norma: busca la última reforma que el portal anota al artículo, extrae el artículo de la norma modificadora y lo contrasta con el texto vigente, porque la página consolida y no publica la redacción anterior. Para ver todas las reformas de la norma usa historial_norma; para reunir evidencia de un conflicto entre dos normas enteras, analizar_conflicto.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "norma_a": {
+            "type": "string",
+            "description": "Cita de la norma base, ej. \"Ley 909 de 2004\""
+          },
+          "articulo_a": {
+            "type": "string",
+            "description": "Número del artículo de la norma base, ej. \"31\""
+          },
+          "norma_b": {
+            "type": "string",
+            "description": "Cita de la segunda norma, ej. \"Decreto 1083 de 2015\"; no se usa con con_reforma=true"
+          },
+          "articulo_b": {
+            "type": "string",
+            "description": "Número de artículo de la segunda norma; no se usa con con_reforma=true"
+          },
+          "con_reforma": {
+            "type": "boolean",
+            "default": false,
+            "description": "true: compara el artículo contra la última reforma que el portal le anota (no pidas norma_b)"
+          }
+        },
+        "required": [
+          "norma_a",
+          "articulo_a"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "consultar_perfil",
+      "description": "Ejecuta la consulta en la ÚNICA fuente que fija cada perfil sectorial: laboral → Gestor Normativo, tributario → DIAN, ambiental → ANLA, contratación estatal → Consejo de Estado, energía → CREG (solo el año en curso). Devuelve una línea por resultado, con el sector y la advertencia del perfil, que declara sus límites. El perfil no admite año, página ni otros filtros: para eso usa la herramienta propia de la fuente (p. ej. buscar_resoluciones_creg con anio). Solo consulta, no guarda nada. NO uses un perfil para lo que no cubre: si la materia es otra, usa buscar_normas o resolver_cita.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "perfil": {
+            "type": "string",
+            "enum": [
+              "laboral",
+              "tributario",
+              "ambiental",
+              "contratacion_estatal",
+              "energia"
+            ],
+            "description": "Id del perfil, de describir_fuentes"
+          },
+          "texto": {
+            "type": "string",
+            "description": "Consulta dentro del perfil, ej. \"teletrabajo\""
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 10,
+            "description": "Cuántos resultados devolver (máximo 20; por defecto 10)"
+          }
+        },
+        "required": [
+          "perfil",
+          "texto"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "consultar_vigencia",
+      "description": "Devuelve el estado de vigencia de una ley o un decreto tal como lo publica la ficha de SUIN: \"Vigente\", \"Derogado\", \"Vigencia en Estudio\", \"Compilado\" u otro. Añade un nivel de confianza. Alta: la ficha respondió. Baja: no consta, o la fuente no respondió. Nunca inventa el estado. Una sentencia como \"C-337/11\" no tiene vigencia: se comprueba en la relatoría de la Corte Constitucional si existe. El estado es el de la norma entera, aunque la cita nombre un artículo. Para las reformas de un artículo usa historial_norma; para su texto, resolver_cita. Si la cita no trae año y hay varias candidatas, las lista en vez de elegir. La respuesta empieza con la línea de alcance: qué fuente se consultó y cuál no.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cita": {
+            "type": "string",
+            "description": "Cita de la norma, ej. \"Ley 909 de 2004\" o \"Decreto 1072 de 2015\""
+          }
+        },
+        "required": [
+          "cita"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "historial_norma",
+      "description": "Devuelve la cadena de reformas que el Gestor anota sobre una norma: qué norma la modificó, adicionó, derogó, sustituyó... y qué artículo afectó cada cambio, con la nota literal citable. Las ordena por el año de la norma que introduce cada cambio (las notas sin año van al final, sin ordenar) y señala la última reforma ANOTADA, que no es necesariamente la que rige: el portal no siempre anota todas. articulo filtra primero; desde y limite recortan después esa lista ya ordenada, y la última reforma se calcula sobre todo lo filtrado, no sobre el tramo mostrado. Para la vigencia usa resolver_cita; para los cambios de varias normas a partir de un año, cambios_desde; para comparar el texto antes y después, comparar_articulos. Con formato=\"json\" el objeto trae titulo, url, total, cambios, ultima_reforma y avisos.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cita": {
+            "type": "string",
+            "description": "Cita de la norma, ej. \"Ley 100 de 1993\""
+          },
+          "articulo": {
+            "type": "string",
+            "description": "Filtra a las notas de reforma de ese artículo de la norma (ej. \"6\"); sin él se devuelven todas"
+          },
+          "desde": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Cuántos cambios saltarse antes de empezar (los demás no caben en la respuesta)"
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "Cuántos cambios mostrar (hasta 100)"
+          },
+          "formato": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Salida: \"markdown\" (texto legible, por defecto) o \"json\" (solo el objeto de datos, sin cabecera ni pie)"
+          }
+        },
+        "required": [
+          "cita"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_unificado",
+      "description": "Busca en paralelo en Gestor Normativo, Corte Constitucional, SUIN-Juriscol y DIAN, y agrega los resultados con su fuente y su enlace. Úsala cuando la consulta es abierta o por materia y no hay herramienta obvia; para una cita exacta sigue siendo mejor resolver_cita y para un tribunal concreto, su buscador propio. perfil elige las fuentes (\"salud\" añade INVIMA y Supersalud; \"mineria\", la ANM) y el orden; si pasas fuentes, esa lista manda y el perfil solo ordena. limite es POR fuente, así que el total puede multiplicarse. La vigencia de SUIN se rotula SEGÚN EL BUSCADOR y no es la ficha oficial. Cuando la fuente sirve su texto, cada resultado trae \"Para leer\", la llamada lista a obtener_documento. Una fuente caída se declara como fallo, no como vacío.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "Términos a buscar, ej. \"teletrabajo\""
+          },
+          "perfil": {
+            "type": "string",
+            "enum": [
+              "laboral",
+              "tributario",
+              "ambiental",
+              "contratacion",
+              "energia",
+              "salud",
+              "mineria"
+            ],
+            "description": "Perfil sectorial: prioriza la fuente que mejor responde a ese sector (tributario → DIAN; salud → INVIMA y Supersalud; mineria → ANM)"
+          },
+          "fuentes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "gestor",
+                "corte",
+                "suin",
+                "dian",
+                "invima",
+                "supersalud",
+                "anm"
+              ]
+            },
+            "description": "Fuentes a consultar; sin él se usan todas menos DIAN (que va con perfil=tributario)"
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 15,
+            "description": "Cuántos resultados por fuente (máximo 30)"
+          },
+          "formato": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ],
+            "default": "markdown",
+            "description": "Salida: \"markdown\" (texto legible, por defecto) o \"json\" (un objeto con fecha_consulta, alcance, texto, resultados, sin_resultados, fallidas y avisos, sin cabecera ni pie)"
+          }
+        },
+        "required": [
+          "texto"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "linea_jurisprudencial",
+      "description": "Devuelve las providencias que la relatoría registra como CITANTES de una sentencia de la Corte Constitucional (el bloque \"citaciones\" de su ficha oficial), con tipo, fecha, tema, la ruta para obtener_documento y el enlace. Son citas, no una línea verificada: mencionar no es reiterar y la relación puede estar incompleta. Se ordenan con las SU y las C en cabeza ANTES de aplicar limite, así que un limite bajo deja fuera primero las T y los autos; el portal no registra más de 100 y no hay paginación. Úsala cuando ya tienes la sentencia y quieres saber quién la cita. Para encontrar sentencias sobre un tema usa buscar_jurisprudencia; para leer o verificar la propia sentencia citada, resolver_cita. Solo cubre la Corte Constitucional.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sentencia": {
+            "type": "string",
+            "description": "Cita de la sentencia, ej. \"C-337/11\", \"T-099/24\" o \"SU-371/21\""
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "Cuántas providencias citantes mostrar (hasta 100)"
+          }
+        },
+        "required": [
+          "sentencia"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "buscar_diario_oficial",
+      "description": "Diarios Oficiales publicados: número, tipo de edición (Ordinaria, Extraordinaria, Especial, Oficio o Tributario) y fecha de publicación. Sirve para saber qué salió publicado y cuándo, incluso el mismo día, antes de que el Gestor Normativo lo catalogue. Filtra por número de diario, por rango de fechas y por el tipo y el número de una norma (encuentra el diario que la publicó: tipo=\"LEY\" y numero_norma=\"2466\" devuelve el 53.160). NO dice qué normas contiene cada diario ni trae su texto, y el PDF del diario no tiene enlace estable: para el texto de una norma usa resolver_cita; para buscarla por materia, buscar_normas.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "numero": {
+            "type": "string",
+            "description": "Número del diario, ej. \"53.640\"; identifica uno solo"
+          },
+          "desde": {
+            "type": "string",
+            "description": "Fecha de publicación inicial, \"2026-09-01\" o \"01/09/2026\""
+          },
+          "hasta": {
+            "type": "string",
+            "description": "Fecha de publicación final, \"2026-09-30\" o \"30/09/2026\""
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "ACTA",
+              "ACUERDO",
+              "AUTO",
+              "AVISO",
+              "CIRCULAR",
+              "CONCEPTO",
+              "CONTRATOS",
+              "DECRETO",
+              "DIRECTIVA",
+              "EDICTO",
+              "EXTRACTOS",
+              "LEY",
+              "LICITACIÓN",
+              "OBJECIÓN",
+              "OTROS",
+              "PROYECTO",
+              "PROYECTO DE ACTO LEGISLATIVO",
+              "RESOLUCIÓN",
+              "RESOLUCIÓN EJECUTIVA"
+            ],
+            "description": "Tipo de norma: los diarios que la contienen; solo filtra junto con numero_norma"
+          },
+          "numero_norma": {
+            "type": "string",
+            "description": "Número de la norma, sin el año (ej. \"2466\"); exige tipo"
+          },
+          "limite": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "Cuántos diarios mostrar (hasta 50); el portal los sirve de 10 en 10"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "obtener_documento",
+      "description": "Devuelve el texto (troceado, nunca entero) de una de las siete fuentes con texto. CADA FUENTE EXIGE LO SUYO y los parámetros de otra no valen con ella: gestor necesita id; corte, ruta; suprema, ruta y sala; consejo, token; dian, link; creg, ruta; sectorial, entidad y url. Una combinación que no encaje se rechaza antes de salir a la red, diciendo qué falta y el ejemplo mínimo que funciona. Qué parte sale: historial (gestor) da los cambios anotados en vez del texto, del artículo si va con articulo; articulo (gestor) o seccion (cortes) acotan y entonces buscar_en_texto no se aplica; desde solo avanza el troceo, no los pasajes de buscar_en_texto. Informa total/mostrado/omitido y el \"desde\" del trozo siguiente. ESCRIBE EN DISCO solo con entero o ruta_destino, que se imponen a todo lo anterior: dian y sectorial guardan el archivo original; las demás, texto-<fuente>.txt (sin ruta_destino, en una carpeta temporal); consejo no lo admite. Nunca sobrescribe: un nombre repetido lleva sufijo. Para encontrar el documento usa antes resolver_cita o el buscador de su fuente.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fuente": {
+            "type": "string",
+            "enum": [
+              "gestor",
+              "corte",
+              "suprema",
+              "consejo",
+              "dian",
+              "creg",
+              "sectorial"
+            ],
+            "description": "De qué fuente sale el documento"
+          },
+          "buscar_en_texto": {
+            "type": "string",
+            "description": "Devuelve solo los fragmentos que mencionan este término"
+          },
+          "desde": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "max_pasajes": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Máximo de pasajes con buscar_en_texto (por defecto 10)"
+          },
+          "limite_caracteres": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 8000,
+            "description": "Tope del TEXTO devuelto; se ajusta al rango 200–40.000"
+          },
+          "id": {
+            "type": "string",
+            "description": "Solo gestor: id numérico de la norma"
+          },
+          "articulo": {
+            "type": "string",
+            "description": "Solo gestor: número de artículo"
+          },
+          "historial": {
+            "type": "boolean",
+            "description": "Solo gestor: en vez del texto, devuelve los cambios anotados sobre la norma"
+          },
+          "sin_temas": {
+            "type": "boolean",
+            "description": "Solo gestor: omite el bloque de temas asociados (ahorra contexto cuando solo se quiere el articulado)"
+          },
+          "ruta": {
+            "type": "string",
+            "description": "corte/suprema/creg: ruta del documento"
+          },
+          "seccion": {
+            "type": "string",
+            "enum": [
+              "encabezado",
+              "antecedentes",
+              "consideraciones",
+              "decision",
+              "salvamentos",
+              "aclaraciones",
+              "notas"
+            ],
+            "description": "Solo corte, suprema y consejo: devuelve solo esa parte de la providencia. \"consideraciones\" es la motivación de la MAYORÍA; \"salvamentos\" y \"aclaraciones\" son los votos particulares, que NO son doctrina de la Sala."
+          },
+          "sala": {
+            "type": "string",
+            "description": "Solo suprema: la MISMA sala con la que se encontró"
+          },
+          "token": {
+            "type": "string",
+            "description": "Solo consejo: token que devuelve buscar_jurisprudencia_consejo_estado"
+          },
+          "link": {
+            "type": "string",
+            "description": "Solo dian: nombre del archivo, ej. \"decreto_1625_2016.htm\""
+          },
+          "entidad": {
+            "type": "string",
+            "description": "Solo sectorial: id del regulador (los lista buscar_normativa_sectorial)"
+          },
+          "url": {
+            "type": "string",
+            "description": "Solo sectorial: enlace del acto a leer, tal como lo devuelve buscar_normativa_sectorial"
+          },
+          "entero": {
+            "type": "boolean",
+            "description": "En vez de trocear, escribe el documento a disco y devuelve la ruta con un trozo del texto"
+          },
+          "ruta_destino": {
+            "type": "string",
+            "description": "Carpeta donde guardar el archivo (con entero o para descargar el PDF/Word sin devolver texto)"
+          }
+        },
+        "required": [
+          "fuente"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "expediente",
+      "description": "Crea, agrega, lee o exporta un expediente para agrupar consultas, citas y observaciones de una investigación. No consulta ninguna fuente: guarda lo que le pasas. Se activa con EXPEDIENTES=1 (DESACTIVADO por defecto). En memoria es TEMPORAL (expira según EXPEDIENTES_TTL_MS; por defecto no expira); con EXPEDIENTES_DIR persiste en disco y sobrevive a reinicios. El flujo empieza siempre en \"crear\", SIN id: devuelve el id que piden las demás; \"agregar\" exige campo y texto juntos; \"leer\" lo devuelve agrupado por sección. \"exportar\" escribe markdown: si ruta es un directorio crea <id>.md dentro, el directorio padre tiene que existir, y un archivo que ya existe no se sobrescribe: se escribe al lado con sufijo numérico y la respuesta da la ruta final. Para guardar el texto de una norma usa obtener_documento.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "accion": {
+            "type": "string",
+            "enum": [
+              "crear",
+              "agregar",
+              "leer",
+              "exportar"
+            ],
+            "description": "Qué hacer: crear un expediente, agregar una entrada, leer su contenido o exportarlo"
+          },
+          "id": {
+            "type": "string",
+            "description": "Id del expediente (obligatorio para agregar, leer y exportar)"
+          },
+          "campo": {
+            "type": "string",
+            "enum": [
+              "preguntas",
+              "fuentes",
+              "documentos",
+              "citas",
+              "decisiones",
+              "observaciones"
+            ],
+            "description": "Sección donde guardar la entrada (solo accion=\"agregar\")"
+          },
+          "texto": {
+            "type": "string",
+            "description": "Contenido de la entrada a guardar (solo accion=\"agregar\")"
+          },
+          "ruta": {
+            "type": "string",
+            "description": "Dónde escribir la exportación: un archivo o un directorio (solo accion=\"exportar\")"
+          }
+        },
+        "required": [
+          "accion"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "normativa-colombia",
+    "version": "1.15.2"
+  },
+  "protocolVersion": null,
+  "instructions": "Fuentes oficiales de normativa colombiana: Gestor Normativo de Función Pública, Corte Constitucional, Corte Suprema, Consejo de Estado, SUIN-Juriscol (MinJusticia) y normograma de la DIAN.\n\nQué herramienta usar:\n- La pregunta menciona una norma concreta (\"Ley 909 de 2004\", \"Decreto 1083\", \"C-337/11\", \"el art. 6 de la Ley 1221\") o un CÓDIGO por su nombre (\"el art. 191 del Código de Comercio\", \"el 83 del Código Penal\") → resolver_cita. Es exacta; el buscador por palabras no. El CÓDIGO CIVIL no está en el Gestor: resolver_cita lo lee, artículo por artículo, de la Secretaría del Senado (HTTP sin cifrar; sin sus notas de vigencia, que remite al enlace).\n- Saber si una norma sigue vigente (estado con nivel de confianza) → consultar_vigencia. No lo afirmes por tu cuenta: si no consta, la herramienta lo dice y orienta.\n- La pregunta es por materia (\"¿qué normas hay sobre teletrabajo?\") → buscar_por_tema. El buscador por palabras del portal solo indexa resúmenes y encuentra poquísimo: \"teletrabajo\" casa con 3 documentos cuando el subtema oficial tiene 55.\n- Hay que saber qué dice una norma sobre algo → obtener_documento con fuente=\"gestor\" y buscar_en_texto. Esa es la verdadera búsqueda de texto completo; el portal no la ofrece.\n- Sentencias y autos → buscar_jurisprudencia (Corte Constitucional, al día). El Gestor casi no tiene jurisprudencia reciente.\n- Normativa que el Gestor no tiene, o exploración por materia/sector del corpus histórico (desde 1844) → buscar_en_suin. NUNCA la uses para saber si algo está vigente: su campo de vigencia es del índice de búsqueda y contradice la ficha. La vigencia sale de resolver_cita.\n- Impuestos, aduanas o cambios (retención, IVA, renta, importación) → buscar_normativa_tributaria y obtener_documento con fuente=\"dian\". Ninguna otra herramienta cubre esa materia.\n- Jurisprudencia de la Corte SUPREMA (casación civil, laboral, penal y sus tutelas) → buscar_jurisprudencia_suprema, y obtener_documento con fuente=\"suprema\" para el texto completo con la ruta y la sala de esa misma búsqueda. Es un tribunal DISTINTO de la Corte Constitucional: no las mezcles. Exige indicar sala, y cada resultado trae las normas que cita, que puedes resolver con resolver_cita.\n- Qué le pasó a una norma o a un artículo (quién lo modificó, adicionó o derogó) → historial_norma (cadena de reformas ordenada por el año de la norma que las hizo, con la última reforma ANOTADA señalada: no es «la que rige») u obtener_documento con fuente=\"gestor\" e historial=true (las mismas notas en el orden del documento). Son notas literales del portal; no se deduce cuál rige hoy. Para ver qué cambió en un artículo, comparar_articulos con con_reforma=true contrasta lo que dispuso su última reforma con lo que el portal publica hoy (el portal consolida el texto: el «antes» no está).\n- Qué providencias citan una sentencia de la Corte Constitucional (y si hay SU o C posteriores que la mencionen) → linea_jurisprudencial. Que una la cite NO es que la reitere ni que la respete, y la lista es la de la relatoría (puede estar incompleta): hay que leer la providencia.\n- Un RADICADO judicial de 23 dígitos (\"11001-03-28-000-2022-00132-00\") → resolver_cita: lo descompone y lo busca en las providencias tituladas del Consejo de Estado (SAMAI); la Corte Suprema no permite buscar por radicado. No da el estado del proceso.\n- En qué Diario Oficial se publicó una norma (tipo + número), o qué diarios salieron en unas fechas → buscar_diario_oficial. Da el número y la fecha del diario, no el texto ni las normas que trae.\n- El fallo de una sentencia, sin leerla entera → obtener_documento con fuente=\"corte\" y seccion=\"decision\": trae el RESUELVE. La T-099/24 pasa de 140.162 a 39.906 caracteres.\n- Jurisprudencia del CONSEJO DE ESTADO (contencioso administrativo: nulidad y restablecimiento, contratación estatal, nulidad electoral, reparación directa) → buscar_jurisprudencia_consejo_estado, y obtener_documento con fuente=\"consejo\" y el token de esa búsqueda para el texto completo. Tercer tribunal distinto de los otros dos; cada resultado trae el problema jurídico y su respuesta. El token caduca en una hora: para CITAR usa el radicado, nunca el enlace con token.\n- Por qué una norma aplica a un tema → explicar_relacion_tema con el temsubid (\"ts-…\") y el normid de la MISMA fila de buscar_por_tema.\n- Antes de decirle a alguien que una norma \"no existe\", o para saber si el índice de vigencia sigue fresco → describir_fuentes. Declara qué cubre cada fuente y qué NO, sin consultar la red.\n- Energía, gas, tarifas o conexión → buscar_resoluciones_creg (y obtener_documento con fuente=\"creg\" para el texto). Hidrocarburos, regalías o contratos E&P → buscar_normativa_anh. Planeación minero energética → buscar_normativa_upme. Qué normas aplican a un tema ambiental → listar_normativa_ambiental_anla, y resuelve cada cita con resolver_cita.\n- Cuatro reguladores tienen herramienta propia (CREG, ANH, UPME y ANLA) y otros doce se consultan con buscar_normativa_sectorial y su parámetro entidad (la SIC, la Superfinanciera, la Supersalud, la ANT y la Unidad para las Víctimas entre ellos): pide la lista a describir_fuentes. Para lo que no esté en ninguna de las dos listas —la CRC, la Superservicios— este MCP no tiene nada, y un vacío no prueba que la norma no exista.\n- Leer el acto de un regulador sectorial → obtener_documento con fuente=\"sectorial\", entidad=<el id de la búsqueda> y url=<el enlace del acto>. El texto se extrae si es PDF o Word; si es un escaneo, se avisa y se remite al enlace. Para guardar el documento en disco, añade entero=true (devuelve la ruta del archivo y un trozo para leer, nunca el documento entero) o ruta_destino=<carpeta> (descarga el archivo sin devolver texto). En las fuentes con enlace directo (dian con link, sectorial con url) entero y ruta_destino descargan el archivo original; en gestor/corte/suprema/creg, entero reconstruye el texto y lo escribe como .txt.\n\nReglas al responder:\n- Cita siempre el enlace y la fecha de consulta que devuelven las herramientas. Una afirmación normativa sin fuente verificable no sirve.\n- NUNCA afirmes por tu cuenta que una norma o un artículo está vigente. El Gestor y la relatoría no publican la vigencia: solo hay marcas de \"Derogado\" y \"Modificado por\" dentro del texto. Traslada esas advertencias y di con claridad que no se puede confirmar.\n- La vigencia sale de la ficha de SUIN-Juriscol, para leyes y decretos. Su índice público llega hasta 2020: de una norma posterior no hay ficha, y eso NO significa que esté derogada ni vigente: significa que no consta.\n- La ÚNICA excepción: si resolver_cita devuelve un \"Estado de vigencia según SUIN-Juriscol\", cítalo con su fecha y su enlace, tal cual, sin traducirlo a un sí o un no (\"Vigencia en Estudio\" no es \"vigente\"). Si esa línea no aparece, es que no consta: vuelve a la regla anterior.\n- Que una norma no esté en el Gestor NO significa que no exista: su corpus no cubre todo el país. Si resolver_cita responde que la norma está en SUIN-Juriscol y no en el Gestor, esa es una respuesta completa, no un fallo. Su articulado no se puede leer aquí: SUIN no sirve hoy el texto fuera de la red del Ministerio.\n- El \"extracto temático\" que acompaña a cada resultado NO resume la norma: es el apunte de un tema al que está asociada. Para el objeto real usa obtener_documento con fuente=\"gestor\".\n- Si una herramienta devuelve vacío, es que no se encontró; no completes con conocimiento propio.\n- Si resolver_cita responde que la cita es AMBIGUA, no escojas tú: el mismo número existe en varios años (\"Decreto 1072\" son cuatro decretos distintos). Pregunta el año o presenta los candidatos.\n- Un documento sin texto NO es un documento que no diga nada. Si la respuesta avisa de que es un escaneo o de que el portal no publicó el texto, dilo así y remite al enlace; no concluyas nada sobre su contenido.\n- La cita judicial viene ya compuesta (\"Cita oficial: …\") en sentencias (resolver_cita) y normas (obtener_documento con fuente=\"gestor\"): úsala tal cual. Lo que dice \"no consta\" (entidad expedidora, Diario Oficial, día del fallo) NO lo completes por tu cuenta.\n- Una norma puede haberse sancionado sin regir todavía o regir por tramos: si la cabecera dice \"AÚN NO RIGE\" o \"Vigencia según su propio artículo de vigencia\", dilo antes de aplicarla.\n- Nunca inventes números de norma, artículos ni sentencias. Si no aparecen en una respuesta, no existen para efectos de esta conversación.\n- Los ids temáticos vienen con prefijo y no son intercambiables: \"ts-\" de buscar_por_tema (va en explicar_relacion_tema), \"sub-\" de listar_catalogos con catalogo=\"subtemas\" (va en buscar_normas) y \"tema-\" de listar_catalogos. Pégalos tal cual, con el prefijo: son tres numeraciones distintas del portal que reutilizan los mismos números.\n\nOtras herramientas (el resto, con su cuándo usarla, está en su propia descripción):\n- Comprobar que una cita y su enlace son de verdad → resolver_cita con validar=true. Clasifica en \"validada\", \"parcialmente validada\" o \"no fue posible validar\", y nunca afirma vigencia.\n- Encadenar resultados sin releer texto → formato=\"json\" en buscar_unificado, analizar_conflicto, historial_norma y resolver_cita (con validar=true): devuelve el objeto de datos, sin pie. Los resultados de buscar_unificado traen \"Para leer\", la llamada ya armada a obtener_documento.\n- Una consulta ambigua → el prompt aclarar-consulta hace las preguntas precisas antes de buscar.\n\nEsto no es asesoría jurídica.",
+  "durationMs": 1438,
+  "stderr": ""
+}

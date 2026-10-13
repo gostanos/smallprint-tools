@@ -1,0 +1,2243 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "obsbot-mcp",
+  "version": "0.9.2",
+  "integrity": {
+    "dist": "sha512-/o/wThIYWko5Z/obYZ3pnRF1tDUbWPIaybXP5OB9waK6/NaY1KG5hP1nZlVGgcFz57md5DjoOQfRWvcgVJbhPw==",
+    "installed": "sha512-/o/wThIYWko5Z/obYZ3pnRF1tDUbWPIaybXP5OB9waK6/NaY1KG5hP1nZlVGgcFz57md5DjoOQfRWvcgVJbhPw=="
+  },
+  "bin": "node_modules/obsbot-mcp/dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [
+    "OBSBOT_LOG_FILE"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T15:23:19.032Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "obsbot_devices",
+      "description": "List attached OBSBOT-compatible cameras. Each entry is { serial?, locationId?, name, status, reason? }: serial is the value to pass as `camera` to any camera-addressing tool (present where obtainable — reading it requires briefly opening the camera); status is available (free to bind), bound (already opened by this process), or busy (could not be opened and identified, so it can't be targeted here — usually another process holds it, but it also covers a camera that opened yet would not answer). On a busy entry, `reason` carries the underlying error and distinguishes those cases.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_wake",
+      "description": "Wake the camera/gimbal (sends \"run\"). This MOVES the camera: waking un-stows the gimbal and brings it back to level (pitch ~0). Most control commands also wake the camera implicitly as a side effect.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_sleep",
+      "description": "Sleep the camera/gimbal (sends \"sleep\"). This MOVES the camera: sleeping STOWS the gimbal, tilting it face-down to roughly pitch 84°, so obsbot_gimbal_position will read ~84 rather than the pose you left it in. obsbot_wake un-stows it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_gimbal_move",
+      "description": "Move the gimbal to an absolute yaw/pitch angle (degrees); positive yaw pans to the camera's left, positive pitch tilts down. Yaw is clamped to [-130,130], pitch to [-90,90]. Absolute positioning (1:1 degrees), verified on hardware.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "yaw": {
+            "type": "number"
+          },
+          "pitch": {
+            "type": "number"
+          },
+          "roll": {
+            "type": "number",
+            "default": 0
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "yaw",
+          "pitch"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_gimbal_recenter",
+      "description": "Recenter the gimbal — drives it back to yaw 0 / pitch 0 (level and facing forward). Returns as soon as the command is sent: the gimbal may still be moving, so poll obsbot_gimbal_position if you need to know it has arrived.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_zoom_uvc",
+      "description": "Standard UVC zoom: set an absolute zoom ratio, clamped to [1.0, 2.0]. Snaps to the requested target exactly (unlike obsbot_zoom_vendor, whose ratio scale differs and may not land exactly where asked). Waits for the zoom to actually arrive and returns { settled }: the ramp is not instant (a full 1.0->2.0 sweep takes about 2.4s), and obsbot_aim_at_pixel and obsbot_zoom_to_fit both refuse while it is in flight, so this returning early would just move the failure downstream. settled:false means the zoom had not arrived within the timeout — the command was still sent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ratio": {
+            "type": "number"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ratio"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_ai_track",
+      "description": "Enable or disable AI tracking and choose the mode. When enabled the camera follows the subject; disabling stops tracking. `mode` is either a human framing (normal | upper-body | close-up | headless | lower-body) or a standalone scene mode (group | whiteboard | desk | hand); scene modes imply enabled:true. After writing, the tool polls the status block until the mode settles and returns { verified, matched } — the aiMode the device actually landed on (matched:false means no subject was being tracked, so the mode could not take effect yet).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "upper-body",
+              "close-up",
+              "headless",
+              "lower-body",
+              "group",
+              "whiteboard",
+              "desk",
+              "hand"
+            ],
+            "default": "normal"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_ai_track_speed",
+      "description": "Set the AI tracking-speed preset (OBSBOT Center's Standard/Sport). speed: standard (slower follow) | sport (snappier follow).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "speed": {
+            "type": "string",
+            "enum": [
+              "standard",
+              "sport"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "speed"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_zoom_vendor",
+      "description": "Vendor zoom path with adjustable speed: zoom to a ratio at a chosen speed. This tool's ratio scale differs from obsbot_zoom_uvc's and may not land exactly on the requested target. ratio is clamped to [1.0,2.0]; speed 0=device default, 1-10 slow→fast, 255=maximum.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ratio": {
+            "type": "number"
+          },
+          "speed": {
+            "type": "number",
+            "default": 0
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ratio"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_focus_face",
+      "description": "Enable or disable face-priority autofocus.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_status",
+      "description": "Read the camera's live status block. Returns { awake, hdr, faceAe, aiMode, trackSpeed, fovMode, zoomPercent, focusMode, focusPosition }: faceAe is whether auto-exposure is metering for a detected face; aiMode is the current AI framing (no-tracking|normal|upper-body|close-up|headless|lower-body|desk|whiteboard|hand|group|unknown); trackSpeed is standard|sport|unknown; fovMode is the field-of-view mode (wide|medium|narrow|custom|unknown), where custom means a continuous zoom overrode the discrete modes; zoomPercent is the zoom position, 0-100; focusMode is auto|manual|unknown. focusPosition is present ONLY in manual mode, on the same 0-100 scale obsbot_focus_manual takes: under autofocus this camera does not expose the motor, it echoes the last written value, so reporting it would look like a live focus distance while being stale. Focus is a standard UVC control rather than a field of the status block, so it costs an extra read; a device that cannot answer it reports focusMode unknown rather than failing the whole read. Under --debug the result also carries `raw`: the full 60-byte status block as hex (for reverse-engineering undecoded offsets).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_image_fov",
+      "description": "Set the field of view. fov: wide (86°) | medium (78°) | narrow (65°).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fov": {
+            "type": "string",
+            "enum": [
+              "wide",
+              "medium",
+              "narrow"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fov"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_image_hdr",
+      "description": "Toggle HDR/WDR imaging on or off.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_focus_auto",
+      "description": "Enable continuous autofocus.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_focus_manual",
+      "description": "Set the focus motor to position (0-100, near→far), mapped onto the device range.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            ],
+            "default": 50
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_gimbal_position",
+      "description": "Read the gimbal's current absolute yaw/pitch in degrees (positive yaw = camera's left, positive pitch = down) via the standard UVC Pan/Tilt controls. This is a live hardware readout accurate to ±1°, reported rounded to 2 decimal places (finer digits would be noise, not precision): it is valid during a move as well as after one, and reflects motion the host did not command (speed moves, recenter, tracking).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_aim_at_pixel",
+      "description": "Point the camera at a specific pixel in a frame you just captured. Give the pixel's x/y and the frameWidth/frameHeight from THE SAME obsbot_capture_snapshot result — mixing a pixel from one frame with dimensions from another aims at the wrong place and cannot be detected. `source` DECLARES which feed the frame came from (default device); it cannot be inferred from the pixels. A virtual or ndi frame is accepted, but only aims correctly if that feed is an unmodified pass-through of the camera — a compositor's rescale or letterbox is invisible in the picture and silently wrong here — so a non-device declaration comes back with that assumption stated. Takes no field-of-view or zoom argument: it reads the camera's magnification from its reported state, a discrete FOV mode or a continuous zoom alike, so it works at any zoom. Refuses when AI tracking is active (tracking moves the gimbal itself and would fight the aim), when the FOV mode can't be decoded, or when a corrupt zoom reading would resolve to an implausible magnification, so it never aims on an assumption it cannot check. If the camera was asleep, waking it moves the gimbal and invalidates the frame you measured, so the call refuses instead of aiming on stale geometry — take a fresh snapshot and retry. Returns clamped:true if the target was outside the gimbal's range; the camera still moves, to the nearest reachable pose. Refuses (ok:false) instead of moving when the pixel lies past vertical from the current pose — reachable only by an \"over the top\" rotation that would swing the camera toward the opposite side of the room, not toward the target; tilt toward the pixel first, then re-aim.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "y": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "frameWidth": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 1
+              }
+            ]
+          },
+          "frameHeight": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 1
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "device",
+              "virtual",
+              "ndi"
+            ],
+            "default": "device"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "frameWidth",
+          "frameHeight"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_zoom_to_fit",
+      "description": "Frame a region of a frame you just captured: centre the gimbal on it and zoom so the region fills the frame. Give x/y/width/height of the region plus the frameWidth/frameHeight from THE SAME obsbot_capture_snapshot result — mixing a region from one frame with dimensions from another frames the wrong place and cannot be detected. Must come from a snapshot, and takes the same `source` declaration as obsbot_aim_at_pixel. `margin` (default 0.1) backs the zoom off by that fraction so the region isn't framed edge-to-edge; the tighter of the region's two axes decides the zoom, so the WHOLE region stays visible rather than being cropped on one side. Moves the gimbal BEFORE zooming, since zooming first can push the region's centre out of frame. Refuses on the same conditions as obsbot_aim_at_pixel: AI tracking active, the camera was asleep (waking it moves the gimbal and invalidates the frame), the FOV mode can't be decoded, a corrupt zoom reading, or the region's centre lying past vertical from the current pose, or a frame that isn't 16:9 (obsbot_capture_snapshot always returns 16:9; a non-16:9 pair looks transposed). Also refuses a region that isn't within the frame (edges included), or has non-positive width/height. The requested zoom is clamped to the camera's [1x, 4x] magnification range and reported via `clamped`; a partial fit still moves and zooms to the limit. Zoom ramps rather than jumping, so the tool polls the status block for up to 3s waiting for it to arrive and returns `settled:false` (not an error) if it didn't — a frame captured mid-ramp is at an unknown magnification, so check `settled` before trusting a follow-up snapshot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "y": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "width": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "height": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "frameWidth": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 1
+              }
+            ]
+          },
+          "frameHeight": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 1
+              }
+            ]
+          },
+          "margin": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0
+              }
+            ],
+            "default": 0.1
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "device",
+              "virtual",
+              "ndi"
+            ],
+            "default": "device"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height",
+          "frameWidth",
+          "frameHeight"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_preset_list",
+      "description": "Read the three gimbal preset slots (occupied/empty, name, pose in degrees). Reads flat XU selectors 12 (list) and 13 (entry cursor), NOT the vendor V3 framed-reply path (which is non-functional for preset data on this device).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_preset_save",
+      "description": "Save the gimbal's current live pose (yaw/pitch, via the standard UVC Pan/Tilt controls) into preset slot 1|2|3. Slots are create-once on this device — there is no overwrite, so an occupied slot is rejected (delete it first). Verifies by re-reading the slot list after writing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "enum": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_preset_recall",
+      "description": "Recall preset slot 1|2|3, driving the gimbal to that slot's saved pose. The slot must be occupied. The gimbal may still be moving when this returns — verification only confirms the slot is still occupied, not that the pose has arrived.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "enum": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_preset_update",
+      "description": "Overwrite preset slot 1|2|3 with the gimbal's current live pose (yaw/pitch via the standard UVC Pan/Tilt controls). The slot must already be occupied (save first to create it). Verifies by re-reading the slot list after writing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "enum": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_preset_rename",
+      "description": "Rename preset slot 1|2|3. The slot must already be occupied. Names longer than 40 bytes are truncated to fit the wire frame. Verifies by re-reading the slot list after writing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "enum": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot",
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_preset_delete",
+      "description": "Delete preset slot 1|2|3. The slot must be occupied. Verifies by re-reading the slot list after writing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "enum": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_image_wb_auto",
+      "description": "Enable auto white balance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_image_wb_manual",
+      "description": "Set white balance to a colour temperature in Kelvin (clamped to the device's supported range).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "temperature": {
+            "type": "number",
+            "default": 5000
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_image_adjust",
+      "description": "Adjust a standard image control: control is brightness | contrast | hue | saturation | sharpness | gain | backlight-compensation; level 0-100 is mapped onto the device's supported range for that control. Standard UVC (IAMVideoProcAmp), no auto. NOTE: `gain` and `backlight-compensation` are NOT implemented on the Tiny 2 — it reports them as zero-length controls — so they are refused with an error rather than silently doing nothing. The other five work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "control": {
+            "type": "string",
+            "enum": [
+              "brightness",
+              "contrast",
+              "hue",
+              "saturation",
+              "sharpness",
+              "backlight-compensation",
+              "gain"
+            ]
+          },
+          "level": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "control",
+          "level"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_image_exposure_auto",
+      "description": "Enable auto-exposure. Optional priority 'global' | 'face' selects the metering region (face-priority meters for a detected face). Uses the proprietary V3 frame protocol (CAM_SET_EXPOSURE_TINY2, which carries mode and value in one command) because the standard UVC/IAMCameraControl V4L2 path is a stub on the Tiny 2.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "priority": {
+            "type": "string",
+            "enum": [
+              "global",
+              "face"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_image_exposure_manual",
+      "description": "Set exposure level 0-100 (0 darkest → 100 brightest), mapped onto the device's exposure range. Also returns `raw`: the device-native exposure value the level mapped to, for diagnostics — `level` is the number to reason with. Uses the proprietary V3 frame protocol (CAM_SET_EXPOSURE_TINY2, which carries mode and value in one command) because the standard UVC/IAMCameraControl V4L2 path is a stub on the Tiny 2.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            ],
+            "default": 50
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_capture_snapshot",
+      "description": "Grab one still frame from the camera and return it as an image (for you to see and for framing/lighting/exposure checks). resolution is the longest edge in pixels, 256-1920, default 640 — larger images cost proportionally more tokens, so ask for more only when you need the detail. NOTE: before calling, ensure the camera is focused (call obsbot_focus_auto for autofocus) unless otherwise directed. source: device (default) | virtual | ndi. If the camera is in use by another app, returns a message instead of an image.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 256,
+                "maximum": 1920
+              }
+            ],
+            "default": 640
+          },
+          "quality": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100
+              }
+            ],
+            "default": 80
+          },
+          "settleMs": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 15000
+              }
+            ],
+            "default": 600
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "device",
+              "virtual",
+              "ndi"
+            ],
+            "default": "device"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_capture_record",
+      "description": "Start recording the camera to an MP4 (for the user). durationSec optional (open-ended recordings auto-stop after 60 min); audio defaults to on (the OBSBOT mic); outputPath optional (defaults to ~/Videos/OBSBOT on every platform, including macOS, where that is NOT the usual ~/Movies). NOTE: before calling, ensure the camera is focused (call obsbot_focus_auto for autofocus) unless otherwise directed. source: device|virtual|ndi. Returns a sessionId for obsbot_capture_stop.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "durationSec": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            ]
+          },
+          "audio": {
+            "type": "boolean",
+            "default": true
+          },
+          "outputPath": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "device",
+              "virtual",
+              "ndi"
+            ],
+            "default": "device"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_capture_preview",
+      "description": "Open a live preview window of the camera (for the user to watch). NOTE: before calling, ensure the camera is focused (call obsbot_focus_auto for autofocus) unless otherwise directed. source: device|virtual|ndi. Returns a sessionId for obsbot_capture_stop.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "device",
+              "virtual",
+              "ndi"
+            ],
+            "default": "device"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_capture_stop",
+      "description": "Stop a recording or preview session by its sessionId. Recordings are stopped gracefully so the MP4 finalizes correctly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_capture_list",
+      "description": "List active recording/preview sessions (id, kind, source, output path, start time).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_devices",
+      "description": "List registered OBSBOT Tail 2 cameras (network cameras; MAC-keyed). Each entry: mac (the identity — pass it as `camera` to any obsbot_tail2_* tool), name, and the host(s) it has answered on. Registration is not liveness: an offline camera still appears here; use obsbot_tail2_status to check one is reachable.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_scan",
+      "description": "Discover OBSBOT Tail 2 cameras on the network and register them. Listens for the camera's own mDNS announcements (~5s — it multicasts its MAC, name and IPs every few seconds, the same channel OBSBOT Center discovers by) and falls back to an HTTP subnet sweep only when nothing was heard (multicast-filtered networks; ~20s on a full /24). Returns the cameras found; they stay registered afterwards. Run this once to onboard a Tail 2 whose IP you don't know.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_status",
+      "description": "Read a Tail 2's full live status block (one WebSocket push): power, recording, portrait rotation, AI mode + tracking settings, zoom ratio, roll bias, focus modes, NDI/RTSP/SRT/RTMP enablement, SD card, preset list with poses (degrees + zoom ratio), and per-subsystem health (gimbal/AI/battery/lens/ToF). NOTE: no live yaw/pitch — the Tail 2 reports pose only via saved presets, so gimbal moves are open-loop (same limitation as the Tiny 2 on Linux).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_info",
+      "description": "Read a Tail 2's identity and static configuration in one call: device_info (name, MAC, wired/wireless IPs), range (zoom 1.0–12.0, focus 1–100, exposure, white balance 2000–10000K, image adjust ranges), and networkconfig (NDI/stream encoder settings). Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_zoom",
+      "description": "Set absolute zoom ratio on a Tail 2 (1.0–12.0 — twelve x, six times the Tiny 2's range; scale is the camera's own ratio, not a magnification multiple). speed 1–10 is REQUIRED by the firmware and defaults to 5. Zoom ramps mechanically; the tool polls the readback and returns settled:false if it hadn't arrived within ~5s — the command was still sent. Hardware-verified 2026-09-26.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ratio": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 12
+              }
+            ]
+          },
+          "speed": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            ],
+            "default": 5
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ratio"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_hybrid_zoom",
+      "description": "Unlock (or re-lock) the Tail 2's hybrid digital zoom — the control OBSBOT Center owns. Out of the box the camera's advertised 12x range is walled at its 5x OPTICAL ceiling across the entire REST API: PUT ptz/zoom above 5.0 is acknowledged but silently pins at 5.0. Center unlocks the 5-12x digital region through its private UDP 9999 protocol; this tool speaks that protocol directly (both checksums decoded — the synthesizer reproduces Center's captured frames byte-for-byte; TAIL2-PROTOCOL.md §10). Verified by readback from the live status snapshot (zoom_infos.digital_enable); returns settled:false if the readback hadn't caught up — behavioral double-check: obsbot_tail2_zoom ratio 6.0 settles above 5.0 only when enabled. Works with OBSBOT Center closed. Hardware-verified both directions 2026-09-30, including full synthesis with a fresh sequence number.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_zoom_type",
+      "description": "Read or set the auto-zoom framing pattern (Center's Console slider under Single/Group tracking: off/3/5/7/9/…/24). Off=normal, 7/9/16/24=P7/P9/P16/P24 (subject-size framing percentages), 3/5≈halfBody/fullBody (3 disabled in group mode). Arming AI tracking sets this to `shot` — which is why the status block's zoom_type reads shot while tracking. Writes are GATED (MEASURED 2026-10-01): the camera 500s unless human tracking is armed — obsbot_tail2_ai_track enabled:true first. Readback-verified write.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "shot",
+              "halfBody",
+              "fullBody",
+              "P7",
+              "P9",
+              "P16",
+              "P24"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_preset_speed",
+      "description": "Read or set the preset switching speed (1-5, Center's Console page). How fast recalls drive the gimbal. Readback-verified write.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "speed": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_usb_mode",
+      "description": "Read or set the USB-C function mode: mtp or uvc. Control rides the network either way, so switching is safe remotely. `mtp` is the measured wire value; `uvc` is the presumed counterpart (GET-measured 2026-10-01). Readback-verified write.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "mtp",
+              "uvc"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_antiflicker",
+      "description": "Read or set the anti-flicker mode: off, 50hz or 60hz (60hz measured on this unit). Readback-verified write.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "50hz",
+              "60hz"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_af_track",
+      "description": "Read or set the autofocus track mode: global, face or front (Center's radios; `face` measured on the wire, the other two are the presumed strings). Readback-verified write.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "global",
+              "face",
+              "front"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_iso_range",
+      "description": "Read or set the auto-ISO range (the double-ended slider: both bounds, 100-6400 in doubling stops). Pass min and/or max; both default to the current value when omitted. Readback-verified write.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "min": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 6400
+              }
+            ]
+          },
+          "max": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 6400
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_gesture",
+      "description": "Read (bare) or set the gesture-control switches and the gesture zoom factor: lockedTarget, recording, zoom (booleans) and zoomFactor (the multiplier one zoom gesture applies, e.g. 2.0). All measured on the wire 2026-10-01. Writes are readback-verified; each field is optional.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "lockedTarget": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "zoom": {
+            "type": "boolean"
+          },
+          "zoomFactor": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 10
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_stream_config",
+      "description": "Read (bare) or set the stream encoder configuration shared by the network outputs: encoder (h264/h265), resolution (camera format like 1920X1080P30), bitrate (Mbps). The bare read also includes the RTSP URLs for both network interfaces. GATED (MEASURED 2026-10-01): resolution writes 500 while an output is live — set obsbot_tail2_stream output:\"off\" first (encoder and bitrate writes are ungated). Readback-verified writes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "encoder": {
+            "type": "string",
+            "enum": [
+              "h264",
+              "h265"
+            ]
+          },
+          "resolution": {
+            "type": "string",
+            "pattern": "^\\d{3,4}X\\d{3,4}P\\d{2}$"
+          },
+          "bitrate": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0.7,
+                "maximum": 160
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_export_log",
+      "description": "Download the camera's full diagnostic bundle (GET /camera/test/log — the same archive OBSBOT Center's Export Log button produces) and save it to `path`. ~12 MB tar.gz containing the settings tree (ust.json), the runtime status snapshot, factory records, kernel logs. Takes ~10-20 s (server-side archive generation).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_live_status",
+      "description": "Read a FRESH runtime snapshot (GET /camera/test/status) distilled to what the REST tree hides: live gimbal pose (euler + joint angles — the WS push has no pose), zoom internals including digital_enable (the hybrid-zoom state, the readback obsbot_tail2_hybrid_zoom verifies against), runtime exposure truth (shutter/ISO/aperture as actually running), battery/lens temperatures, boot stage and uptime, and accessory state (360° base, BT remote, tally). Regenerated server-side per request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_zone_tracking",
+      "description": "Toggle zone tracking (Center's Console page switch) on or off. Rides the camera's private UDP 9999 channel (generic key-value command, key 03 — decoded from a labeled capture 2026-10-01, TAIL2-PROTOCOL.md §10b). No ack and no REST-readable state — the effect shows in the tracking behavior. Synthesized frame, works with Center closed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_auto_zoom_speed",
+      "description": "Set the AUTO zoom speed 1-10 — how fast AI-tracking auto-zoom framing moves (Center's Console slider; distinct from the MANUAL zoom speed on obsbot_tail2_zoom's speed param). Rides UDP 9999 key 0x17. No REST-readable state; no ack — the frame is synthesized and works with Center closed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "speed": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "speed"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_track_custom",
+      "description": "Configure CUSTOM tracking speed (Center's `customized` track speed): enable it, set the per-axis Pan/Tilt speeds 1-10, and toggle the per-axis Auto buttons. Bare call reads current state from the status push (tracking_settings, locks included read-only). Writes ride UDP 9999 keys 04/07/0a/06/09 (pan/tilt travel as float32 slider/10 on the wire; keys 06/09 are the Auto buttons — hardware-verified against horizontal_auto/vertical_auto). The AXIS LOCKS have no known write path (not UDP, REST guesses 404) — shown read-only. Verified by tracking_settings readback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "pan": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            ]
+          },
+          "tilt": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            ]
+          },
+          "panAuto": {
+            "type": "boolean"
+          },
+          "tiltAuto": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_recenter",
+      "description": "Recenter a Tail 2's gimbal (yaw 0 / pitch 0 / roll 0). Returns as soon as the command is acknowledged — the Tail 2 exposes no live pose to verify arrival against (open-loop, like the Tiny 2 on Linux), and note that commanding a reset can drop AI tracking to none (observed once 2026-09-26; re-enable with obsbot_tail2_ai_track if that matters). Hardware-verified 2026-09-26.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_gimbal_position",
+      "description": "Read the Tail 2's live gimbal pose in degrees (yaw/pitch/roll) plus the zoom ratio. The API has no direct pose read — this works by saving the current pose into an empty preset slot, reading it back, and deleting the slot (takes ~2s). Requires at least one empty preset slot: overwriting a preset is irreversible (no pose-by-value write exists to restore it). Leftover 'pose-probe' slots from crashed reads are deleted, not trusted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_gimbal_speed",
+      "description": "Jog the Tail 2's gimbal: per-axis SPEED (sign = direction, magnitude = speed, ±150 of the firmware's ±178 range) with an automatic stop after durationMs (default 500, max 5000). This is the joystick primitive (POST ptz/gimbalcontrol) — there is no absolute move endpoint, so the camera moves continuously until stopped; this tool always stops it. Measured: command 20 ≈ 7.9°/s, and a POSITIVE yaw command DECREASES the recorded yaw (obsbot_tail2_gimbal_position's convention). Disable AI tracking first or it will fight the move.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "yaw": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": -150,
+                "maximum": 150
+              }
+            ]
+          },
+          "pitch": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": -150,
+                "maximum": 150
+              }
+            ]
+          },
+          "roll": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": -150,
+                "maximum": 150
+              }
+            ]
+          },
+          "durationMs": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 5000
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_gimbal_move",
+      "description": "Move the Tail 2's gimbal to an absolute yaw/pitch in degrees — the Tail 2's pose-record convention (obsbot_tail2_gimbal_position reports the same axes). There is no move-to-angle endpoint in the API, so this is a closed loop over the speed primitive: jog, read the pose (each read ~2s), correct, up to 5 rounds, tolerance ±1.5°. Slow by design — expect ~5-15s. REFUSES while AI tracking is active (tracking drives the gimbal itself and would fight the loop); obsbot_tail2_ai_track enabled:false first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "yaw": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": -178,
+                "maximum": 178
+              }
+            ]
+          },
+          "pitch": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": -178,
+                "maximum": 178
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_gimbal_invert",
+      "description": "Read or set the Tail 2's control-direction inversion (gimbalinvert). Call with no arguments to read; pass enable to write (verified by readback).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enable": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_record",
+      "description": "Read (bare call) or control (enable) the Tail 2's recording switch over REST. Recording needs storage — with no SD card the state still reads (\"off\") but starting will not succeed; check obsbot_tail2_status's sdcard field first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enable": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_capture_photo",
+      "description": "Trigger a still-photo capture on the Tail 2 (POST capture/trigger). Needs storage (SD card — check obsbot_tail2_status's sdcard field). The ack means the camera accepted the trigger; the photo lands on the card (see obsbot_tail2_status / album).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_track_target",
+      "description": "Tap-to-track: give a normalized frame coordinate (x/y 0.01-0.99, top-left ~0,0) and the camera engages AI tracking on the subject there — measured to arm humanTrackingSingleMode on its own from mode none. Divide a snapshot pixel by frameWidth/frameHeight and pass it straight in. The mode that engages depends on what is at the point, so read it back (obsbot_tail2_status ai_mode) when it matters; objectTracking cannot be entered this way (it demands a bounding box the API grammar for which is not yet decoded).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 0.99
+              }
+            ]
+          },
+          "y": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 0.99
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_focus_point",
+      "description": "Tap-to-focus: move the focus window to a normalized frame coordinate (x/y 0.01-0.99, top-left ~0,0) AND start a point focus there. Effective in afc/afs focus modes only — in mf the motor position is the tool (obsbot_tail2_focus). Bare call reads the current window. Divide a snapshot pixel by frameWidth/frameHeight and pass it straight in.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 0.99
+              }
+            ]
+          },
+          "y": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 0.99
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_focus",
+      "description": "Read (bare call) or set the Tail 2's focus: mode afc|afs|mf, and position (0-100, the focus motor) which is only valid in mf — the camera errors on it in afc/afs and this tool refuses rather than trigger that. Bare call reports the mode, and the position when in mf.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "afc",
+              "afs",
+              "mf"
+            ]
+          },
+          "position": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_exposure",
+      "description": "Read (bare call) or set the Tail 2's exposure. mode manual|auto; in AUTO: face (face-priority AE, global|face) and evbias (-3.0..3.0, ~0.3 steps); in MANUAL: iso (100-6400) and shutter (\"1/N\", 1/6400..1/30). Manual values only exist in manual mode and face/evbias only in auto — a bare call reports whichever set the current mode exposes. Note: the camera's manual ISO granularity is finer than the doc claims (a live-AE value like 894 reads back).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "auto"
+            ]
+          },
+          "face": {
+            "type": "boolean"
+          },
+          "evbias": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": -3,
+                "maximum": 3
+              }
+            ]
+          },
+          "iso": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 100,
+                "maximum": 6400
+              }
+            ]
+          },
+          "shutter": {
+            "type": "string",
+            "pattern": "^1\\/\\d+$"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_image_adjust",
+      "description": "Read (bare call) or set the Tail 2's image style: brightness/contrast/hue/saturation/sharpness, each an absolute 0-100, plus styleMode standard|outdoor|pastel|manual. Individual control writes are MODE-GATED (measured): they apply only in styleMode manual — HTTP 500 \"style mode is not manual\" otherwise — so this tool applies a given styleMode FIRST and refuses a control write in a preset mode. A styleMode switch preserves the current values. Bare call returns the full style bundle.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "control": {
+            "type": "string",
+            "enum": [
+              "brightness",
+              "contrast",
+              "hue",
+              "saturation",
+              "sharpness"
+            ]
+          },
+          "value": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            ]
+          },
+          "styleMode": {
+            "type": "string",
+            "enum": [
+              "standard",
+              "outdoor",
+              "pastel",
+              "manual"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_hdr",
+      "description": "Read (bare call) or set (enabled) the Tail 2's HDR.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_wb",
+      "description": "Read (bare call) or set the Tail 2's white balance: mode auto|daylight|fluorescent|tungsten|cloudy|manual, plus temperature in Kelvin (2000-10000) which applies in manual mode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "daylight",
+              "fluorescent",
+              "tungsten",
+              "cloudy",
+              "manual"
+            ]
+          },
+          "temperature": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 2000,
+                "maximum": 10000
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_stream",
+      "description": "Read (bare call) or set the Tail 2's active network output: ndi|rtsp|srt|off — exactly ONE is active at a time (setting srt displaces ndi, and a camera reboot resets to off). This is the programmatic way to arm SRT for obsbot_tail2_snapshot without touching OBSBOT Center.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "string",
+            "enum": [
+              "ndi",
+              "rtsp",
+              "srt",
+              "off"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_only_me",
+      "description": "Read (bare call) or set (enabled) the Tail 2's OnlyMe human-tracking switch — track only the nearest/locked person rather than reframing for everyone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_audio",
+      "description": "Read (bare call) or set the Tail 2's audio input: volume 0-100 and mute. Changes apply to the encoded/recorded audio stream.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "volume": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            ]
+          },
+          "mute": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_portrait",
+      "description": "Rotate a Tail 2's barrel 90° for portrait framing (enable) or back to landscape (disable) — a motorized physical rotation no Tiny 2 has. Takes ~1.5s; the tool polls the status push for the new orientation and returns settled:false if the motor hadn't finished within ~5s. MEASURED 2026-09-26: while the motor is in motion the camera can acknowledge a write and silently drop it — if settled stays false, retry the command. Hardware-verified both directions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enable": {
+            "type": "boolean"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enable"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_roll_bias",
+      "description": "Set a Tail 2's roll trim angle in degrees (horizon correction / deliberate tilt), clamped to ±90. Unlike the Tiny 2 (whose roll slot is inert), this moves the image. Verified write+readback on hardware 2026-09-26.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "angle": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "angle"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_ai_track",
+      "description": "Enable or disable a Tail 2's AI tracking. enabled:false stops tracking (mode `none`). enabled:true starts the chosen mode — default humanTrackingSingleMode (single-person framing, the camera's power-on default); also group human framing, animal tracking, and object tracking (the mode strings are the camera's own enum). NOTE: while tracking is active it owns the gimbal — manual moves fight it, and a recenter can drop tracking to none. Mode strings verified against firmware 7.2.13.1.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "humanTrackingSingleMode",
+              "humanTrackingGroupMode",
+              "animalTrackingNormal",
+              "animalTrackingCloseUp",
+              "objectTracking",
+              "objectTrackingNormal",
+              "objectTrackingCloseUp"
+            ],
+            "default": "humanTrackingSingleMode"
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_track_speed",
+      "description": "Set a Tail 2's tracking follow speed: superLazy | lazy | slow | fast | crazy | customized — the camera's own six-speed enum (NOT the Tiny 2's standard/sport pair). Verified by readback on hardware 2026-09-26.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "speed": {
+            "type": "string",
+            "enum": [
+              "superLazy",
+              "lazy",
+              "slow",
+              "fast",
+              "crazy",
+              "customized"
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "speed"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_preset_list",
+      "description": "List a Tail 2's three preset slots: occupied/empty, decoded name, and pose in degrees + zoom ratio (pitch/yaw/roll/ratio). Slot numbers are 1–3 (the camera's own ids are 0-based; mapped for consistency with the Tiny 2 preset tools).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_preset_save",
+      "description": "Save a Tail 2's CURRENT live pose into a slot (1–3): aim the camera first (via tracking, a recall, or physically), then save. name defaults to P1/P2/P3. NOTE: unlike the Tiny 2, save OVERWRITES an occupied slot (no create-once), and there is no explicit-pose write in this API at all — a slot always captures the camera's CURRENT pose (measured 2026-09-26; TAIL2-PROTOCOL.md §3) — deleting first is unnecessary. Hardware-verified 2026-09-26.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_preset_recall",
+      "description": "Recall a Tail 2 preset slot (1–3): drives the gimbal and zoom to the saved pose. Refuses an empty slot. Arrival is verified through the only live observable — the zoom ratio from the status push — so gimbal axes are open-loop (the Tail 2 reports no live pose). Disable AI tracking first or it will fight the move. Hardware-verified 2026-09-26 (zoom 1.5 → saved 3.0 observed).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_preset_delete",
+      "description": "Delete a Tail 2 preset slot (1–3), freeing it. Verified by the slot disappearing from the list.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              }
+            ]
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_preset_rename",
+      "description": "Rename a Tail 2 preset slot (1–3). Names travel base64 on the wire; the tool encodes/decodes transparently (up to 40 chars).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot",
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "obsbot_tail2_snapshot",
+      "description": "Grab one still frame from a Tail 2 and return it as an image (for framing/lighting checks — and for measuring pixels). Source: the camera's SRT output via ffmpeg SRT caller (port 5000) — requires SRT listener mode in OBSBOT Center; exclusive with NDI, cleared by reboots, and Center only allows changing streaming settings while the output is off. Serves immediately once on. If SRT is off, returns a report of what it found with the available options and their costs (SRT toggle, NDI Webcam bridge caveats, NDI Tools install) so you can pick the cheapest path instead of dead-ending. resolution is the longest edge (256–1920, default 640); quality 1–100 (default 80). Needs ffmpeg. Frames are 16:9 1080p-sourced.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 256,
+                "maximum": 1920
+              }
+            ],
+            "default": 640
+          },
+          "quality": {
+            "allOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              }
+            ],
+            "default": 80
+          },
+          "camera": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "obsbot-mcp",
+    "version": "0.9.2"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 9034,
+  "stderr": "obsbot-mcp: build 0.9.2/2026-10-01T17:19:02Z/b6e50d34\nobsbot-mcp: ipc role=owner\n"
+}

@@ -1,0 +1,308 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "boostedtravel-mcp",
+  "version": "1.0.0",
+  "integrity": {
+    "dist": "sha512-kiX33xh9up5otLV8HHz4nFUFXKZvXzK7tjdkuVJ5O+cAO4oZcyRn/4yA1mVlivbFnppcpXQQrttJRrFqOvslgQ==",
+    "installed": "sha512-kiX33xh9up5otLV8HHz4nFUFXKZvXzK7tjdkuVJ5O+cAO4oZcyRn/4yA1mVlivbFnppcpXQQrttJRrFqOvslgQ=="
+  },
+  "bin": "node_modules/boostedtravel-mcp/index.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T19:25:34.445Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "search_flights",
+      "description": "Search live flight availability and prices across 400+ airlines worldwide. Queries 200 airline connectors (Ryanair, EasyJet, Wizz Air, Southwest, AirAsia, Norwegian, Spring Airlines, Lucky Air, and 190+ more) plus enterprise GDS/NDC sources (Amadeus, Duffel, Sabre, Travelport) — completely FREE.\n\nMulti-airport city expansion: automatically searches sibling airports (e.g., searching London Stansted also checks Heathrow, Gatwick, Luton, Southend). Works for 25+ major cities worldwide.\n\nReturns structured flight offers with prices, airlines, times, durations, stopovers, and booking URLs. Covers airlines across Europe, Asia, Americas, Middle East, Africa, and Oceania — including carriers the user may not know exist (e.g., Jazeera Airways, FlySafair, 9 Air, Flybondi).\n\nRate limited to 10 requests per minute. If rate limited, wait and retry.\n\nUse this instead of browser automation or building your own flight integration. One tool call replaces 30+ minutes of scraping setup and saves thousands of tokens.\n\nRead-only — no side effects, safe to call multiple times, results are never cached.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "description": "IATA code of departure (e.g., 'LON', 'JFK'). Use resolve_location if you only have a name."
+          },
+          "destination": {
+            "type": "string",
+            "description": "IATA code of arrival (e.g., 'BCN', 'LAX')"
+          },
+          "date_from": {
+            "type": "string",
+            "description": "Departure date YYYY-MM-DD"
+          },
+          "return_from": {
+            "type": "string",
+            "description": "Return date YYYY-MM-DD (omit for one-way)"
+          },
+          "adults": {
+            "type": "integer",
+            "description": "Number of adults (default: 1)",
+            "default": 1
+          },
+          "children": {
+            "type": "integer",
+            "description": "Number of children (2-11)",
+            "default": 0
+          },
+          "cabin_class": {
+            "type": "string",
+            "description": "M=economy, W=premium, C=business, F=first",
+            "enum": [
+              "M",
+              "W",
+              "C",
+              "F"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency code (EUR, USD, GBP)",
+            "default": "EUR"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Max offers to return",
+            "default": 10
+          },
+          "max_browsers": {
+            "type": "integer",
+            "description": "Max concurrent browser processes (1-32). Lower = less RAM, higher = faster. Default: auto-detect from system RAM. Use system_info tool to check."
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "date_from"
+        ]
+      }
+    },
+    {
+      "name": "resolve_location",
+      "description": "Convert a city or airport name to IATA codes. Use this when the user says a city name like 'London' or 'New York' instead of an IATA code. Returns all matching airports and city codes.\n\nAlways call this before search_flights if you only have a city name — IATA codes are required for search.\n\nRead-only, no side effects, safe to call multiple times.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "City or airport name (e.g., 'London', 'Berlin')"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "unlock_flight_offer",
+      "description": "Unlock a flight offer for booking — FREE with GitHub star.\n\nThis is the \"quote\" step: confirms the latest price with the airline and reserves the offer for 30 minutes. ALWAYS call this before book_flight so the user can see the confirmed price.\n\nIf the confirmed price differs from the search price, inform the user before proceeding.\n\nRequires GitHub star verification (call link_github first).\n\nNot idempotent — calling twice on the same offer may process twice.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "offer_id": {
+            "type": "string",
+            "description": "Offer ID from search results (off_xxx)"
+          }
+        },
+        "required": [
+          "offer_id"
+        ]
+      }
+    },
+    {
+      "name": "book_flight",
+      "description": "Book an unlocked flight — creates real airline reservation with PNR. Charges ticket price via Stripe.\n\nPAYMENT REQUIRED: Your Stripe payment method (attached via setup_payment) will be charged the ticket price plus Stripe processing fee (2.9% + 30¢). LetsFG adds zero markup — you pay only the raw airline price.\n\nFLOW: search_flights → unlock_flight_offer (quote) → setup_payment (once) → book_flight\nRequirements: 1) Offer must be unlocked first 2) passenger_ids from search 3) Full passenger details\n\nSAFETY: Always provide idempotency_key to prevent double-bookings if this call is retried. Use any unique string (e.g., UUID). If the same key is sent twice, returns the original booking.\n\nERROR HANDLING: Errors include error_code and error_category fields.\n  transient (SUPPLIER_TIMEOUT, RATE_LIMITED) → safe to retry after short delay\n  validation (INVALID_IATA, INVALID_DATE) → fix input, then retry\n  business (OFFER_EXPIRED, PAYMENT_DECLINED) → requires human decision",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "offer_id": {
+            "type": "string",
+            "description": "Unlocked offer ID (off_xxx)"
+          },
+          "passengers": {
+            "type": "array",
+            "description": "Passengers with 'id' from search passenger_ids",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "given_name",
+                "family_name",
+                "born_on",
+                "email"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Passenger ID from search (pas_xxx)"
+                },
+                "given_name": {
+                  "type": "string",
+                  "description": "First name (passport)"
+                },
+                "family_name": {
+                  "type": "string",
+                  "description": "Last name (passport)"
+                },
+                "born_on": {
+                  "type": "string",
+                  "description": "DOB YYYY-MM-DD"
+                },
+                "gender": {
+                  "type": "string",
+                  "description": "m or f",
+                  "default": "m"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "mr, ms, mrs, miss",
+                  "default": "mr"
+                },
+                "email": {
+                  "type": "string",
+                  "description": "Email"
+                },
+                "phone_number": {
+                  "type": "string",
+                  "description": "Phone with country code"
+                }
+              }
+            }
+          },
+          "contact_email": {
+            "type": "string",
+            "description": "Booking contact email"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Unique key to prevent double-bookings on retry (e.g., UUID). Strongly recommended."
+          }
+        },
+        "required": [
+          "offer_id",
+          "passengers",
+          "contact_email"
+        ]
+      }
+    },
+    {
+      "name": "setup_payment",
+      "description": "Attach a payment card — REQUIRED before booking Duffel/GDS flights.\n\nYour card is charged the ticket price when you call book_flight. Attaching the card itself is free.\nUse tok_visa for testing (Stripe test mode). Only needs to be called once — card stays on file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Payment token (e.g., 'tok_visa' for testing)"
+          },
+          "payment_method_id": {
+            "type": "string",
+            "description": "Payment method ID (pm_xxx)"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_agent_profile",
+      "description": "Get agent profile, payment status, and usage stats (searches, unlocks, bookings, fees).\n\nRead-only. Safe to call multiple times.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "start_checkout",
+      "description": "Automate airline checkout up to the payment page — NEVER submits payment.\n\nFLOW: search_flights → unlock_flight_offer → start_checkout\n\nUses Playwright to drive the airline website: selects flights, fills passenger details, skips extras/seats, and stops at the payment form. Returns a screenshot and booking URL so the user can complete manually in their browser.\n\nSupported airlines: Ryanair, Wizz Air, EasyJet. Other airlines return booking URL only.\n\nSAFETY: Uses fake test data by default. Never enters payment info. The checkout_token from unlock_flight_offer is required — prevents unauthorized usage.\n\nRuns locally via Python subprocess (pip install letsfg && playwright install chromium).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "offer_id": {
+            "type": "string",
+            "description": "Offer ID from search results (off_xxx)"
+          },
+          "checkout_token": {
+            "type": "string",
+            "description": "Token from unlock_flight_offer response"
+          },
+          "passengers": {
+            "type": "array",
+            "description": "Passenger details. If omitted, uses safe test data (John Doe, test@example.com)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "given_name": {
+                  "type": "string"
+                },
+                "family_name": {
+                  "type": "string"
+                },
+                "born_on": {
+                  "type": "string",
+                  "description": "DOB YYYY-MM-DD"
+                },
+                "gender": {
+                  "type": "string",
+                  "description": "m or f"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "mr, ms, mrs"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "phone_number": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "offer_id",
+          "checkout_token"
+        ]
+      }
+    },
+    {
+      "name": "link_github",
+      "description": "Link your GitHub account for FREE unlimited access — star the repo and verify.\n\nFLOW: 1) User stars https://github.com/LetsFG/LetsFG  2) Call this tool with their GitHub username\n\nOnce verified, the user gets unlimited search, unlock, and booking forever.\nOnly needs to be called once. If already verified, returns confirmation.\n\nIf status is \"star_required\", the user needs to star the repo first, then try again.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "github_username": {
+            "type": "string",
+            "description": "User's GitHub username (e.g., 'octocat')"
+          }
+        },
+        "required": [
+          "github_username"
+        ]
+      }
+    },
+    {
+      "name": "system_info",
+      "description": "Get system resource info (RAM, CPU cores) and recommended concurrency settings.\n\nUse this to determine optimal max_browsers value for search_flights. Returns RAM total/available, CPU cores, recommended max browsers, and performance tier.\n\nTiers: minimal (<2GB, max 2), low (2-4GB, max 3), moderate (4-8GB, max 5), standard (8-16GB, max 8), high (16-32GB, max 12), maximum (32+GB, max 16).\n\nRead-only, no side effects, instant response.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "letsfg",
+    "version": "1.2.1"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 1676,
+  "stderr": "\n⚠️  boostedtravel-mcp has been renamed to letsfg-mcp.\n   Install: npm install -g letsfg-mcp\n   Or run:  npx letsfg-mcp\n\n   https://www.npmjs.com/package/letsfg-mcp\n\nLetsFG MCP v1.2.1 | search: local | rate limit: 10 req/min | api: search-only (no key)\n"
+}

@@ -1,0 +1,706 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "terminal-use",
+  "version": "0.1.1",
+  "integrity": {
+    "dist": "sha512-a9UU2DYg/r0kodnO9wtYWVESnU8SOqtBPupmjOp4PNsSuVhorgb02tVdHEUV0jSNjMI+jz/fTiPv3/36aYR3jg==",
+    "installed": "sha512-a9UU2DYg/r0kodnO9wtYWVESnU8SOqtBPupmjOp4PNsSuVhorgb02tVdHEUV0jSNjMI+jz/fTiPv3/36aYR3jg=="
+  },
+  "bin": "node_modules/terminal-use/bin/terminal-use.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T09:20:10.621Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "terminal_batch",
+      "description": "Send a sequence of inputs in one call and get the screen back once at the end — for driving a full-screen program without a round trip per keystroke (open a menu, move down three, press Enter, type a name, confirm). Actions run in order, each given a moment to take effect before the next.\n\nEach action is an object with a `type` and the fields that type uses:\n- `type`: `text` — typed as keystrokes; \\n presses Enter.\n- `paste`: `text` — delivered as one bracketed paste where the program supports it.\n- `press`: `key`, optional `count` — same key specs as terminal_press.\n- `click`: `col`, `row` — left click, sent immediately with no preview; needs the program to track the mouse.\n- `scroll`: `direction`, optional `amount`, `col`, `row` — as terminal_scroll.\n- `wait`: `ms` for a fixed pause, or `pattern` (optional `timeoutMs`) to continue once a regex matches the screen.\n\nThe batch is validated before anything is sent. It stops at the first action that fails (a pattern that never appears, a click the program cannot receive, the process exiting) and reports how far it got, with the screen as it stands. Use it when you already know the steps; when you need to look between steps, use the individual tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "actions": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "type",
+                    "paste",
+                    "press",
+                    "click",
+                    "scroll",
+                    "wait"
+                  ],
+                  "description": "What to do. The fields each type uses are listed in the tool description."
+                },
+                "text": {
+                  "description": "type, paste: the characters. In type, \\n presses Enter.",
+                  "type": "string"
+                },
+                "key": {
+                  "description": "press: key spec as in terminal_press, e.g. \"Enter\", \"Ctrl+C\", \"ArrowDown\".",
+                  "type": "string"
+                },
+                "count": {
+                  "description": "press: repeat count. Default 1.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "col": {
+                  "description": "click (required), scroll (optional): 1-indexed column.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "row": {
+                  "description": "click (required), scroll (optional): 1-indexed row.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "direction": {
+                  "description": "scroll: wheel direction.",
+                  "type": "string",
+                  "enum": [
+                    "up",
+                    "down"
+                  ]
+                },
+                "amount": {
+                  "description": "scroll: wheel notches. Default 3.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "ms": {
+                  "description": "wait: pause this long.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "pattern": {
+                  "description": "wait: instead of a fixed pause, continue as soon as this regex matches the screen.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "timeoutMs": {
+                  "description": "wait with pattern: give up (and stop the batch) after this long. Default 5000.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "description": "The inputs to send, in order (1 to 50)."
+          },
+          "stepIdleMs": {
+            "description": "How long output must be quiet after each action before the next is sent. Default 100. Raise it for programs that redraw slowly.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "idleMs": {
+            "description": "Settle window after the last action. Default 200.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "maxWaitMs": {
+            "description": "Cap on the settle after the last action. Default 5000.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "sessionId",
+          "actions"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "terminal_click",
+      "description": "Deliver a left mouse-button click at a cell in the terminal. Only works when the program currently in the foreground has opted into mouse tracking (vim with `set mouse=a`, fzf, lazygit, less with mouse mode, etc.) — at a plain shell prompt mouse mode is off and the click would just print escape sequences as text, so we refuse the actual click in that case.\n\nCoordinates are 1-indexed and refer to the live screen viewport: col 1, row 1 is the top-left cell, and the bottom-right cell is (terminal width, terminal height) which you can see via `terminal_read`'s state header.\n\nPREVIEW MODE (default `preview: true`): does NOT click. Returns a PNG with a bright magenta ring + dot drawn around the target cell so you can verify your coordinates. Always do this first when you are not 100% sure where the click should land — TUIs often have destructive actions one click away (delete branch, kill process, etc.).\n\nEXECUTE MODE (`preview: false`): actually sends the mouse press+release sequence and settles for output. Use this only after you've previewed and confirmed, or when you're confident.\n\nCAVEATS: `idleMs` and `maxWaitMs` are ignored in preview mode (preview doesn't settle). When the target cell is near the right edge of the viewport, the coordinate label drawn next to the magenta ring may be clipped — the ring itself is always within frame, so trust it over the label.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "col": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "1-indexed column. Column 1 is the leftmost cell on the visible viewport."
+          },
+          "row": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "1-indexed row. Row 1 is the top of the visible viewport."
+          },
+          "preview": {
+            "description": "When true (DEFAULT), render a PNG with a bright magenta ring around the target cell WITHOUT actually clicking. When false, deliver the click and settle for output. Set to false explicitly when you are confident about the coordinates.",
+            "type": "boolean"
+          },
+          "filePath": {
+            "description": "Preview only: absolute path to write the PNG to. If unset, image is inlined as base64.",
+            "type": "string"
+          },
+          "idleMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "maxWaitMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "sessionId",
+          "col",
+          "row"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "terminal_create",
+      "description": "Spawn a new terminal session and return its sessionId. You must call this before any per-session tool — there is no shared default session. By default the session is an interactive shell. Pass `command` to run one program in the terminal instead (a TUI, a test run, a CLI under test): the session then lasts as long as that program, reports its exit status when it ends, and keeps its final screen readable until you destroy it. If the server already holds 50 live sessions, the least-recently-used one is evicted to make room (its sessionId is tombstoned and any later call against it will respawn with an 'evicted' notice).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "description": "Optional human-readable name shown in terminal_list output (e.g. \"dev-server\").",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "cols": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "rows": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "shell": {
+            "description": "Override the default shell (e.g. \"/bin/zsh\"; on Windows \"pwsh.exe\" or \"cmd.exe\" instead of PowerShell).",
+            "type": "string"
+          },
+          "cwd": {
+            "description": "Override the default working directory.",
+            "type": "string"
+          },
+          "command": {
+            "description": "Run this command line instead of an interactive shell, e.g. \"vim notes.txt\" or \"npm test\". It is run through the session's shell (`sh -c`; on Windows PowerShell `-Command`, or `cmd /c`), so quoting, pipes and redirection work as at that shell's prompt. Input tools talk to the program directly. When it exits, its exit status is reported, the final screen stays readable, and nothing is restarted automatically.",
+            "type": "string",
+            "minLength": 1
+          },
+          "login": {
+            "description": "Start the shell as a login shell (`-l`), so it reads the profile files (~/.zprofile, ~/.bash_profile, ~/.profile) where PATH is usually set up. Use it when tools that work in the user's own terminal are \"command not found\" here — typical when the MCP client was started from a GUI rather than a terminal. Slower to start. No effect in PowerShell or cmd.exe. Default false (or the server's --login flag).",
+            "type": "boolean"
+          },
+          "env": {
+            "description": "Environment variables to set for the session, on top of the server's own environment.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "scrollback": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 50000
+          },
+          "theme": {
+            "description": "Color palette used by terminal_screenshot and terminal_click previews for THIS session. Persists across auto-respawn / hardReset. Default \"dark\" (VS Code Dark+). Options: \"dark\", \"light\", \"solarized-dark\", \"solarized-light\".",
+            "type": "string",
+            "enum": [
+              "dark",
+              "light",
+              "solarized-dark",
+              "solarized-light"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "terminal_destroy",
+      "description": "Kill a session and forget the sessionId entirely. The shell process is terminated and the sessionId is *not* tombstoned — future calls against it will error with \"Unknown sessionId\". Use this when you're explicitly done with a session. Tombstones (which auto-respawn on next access) only happen for system-driven terminations: idle-kill, eviction, or shell exit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id from terminal_create or terminal_list."
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "terminal_list",
+      "description": "List every active session and every tombstoned (recently-killed but reserved) sessionId. Tombstones are reservations: the shell is gone but the sessionId can still be called against — doing so respawns a fresh shell under the same id and surfaces the original termination reason (shell-exit, idle-killed, or evicted). Tombstones expire after 30 days; after that the id is gone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "terminal_press",
+      "description": "Press a single named key or key combination. Examples of supported `key` values: `Enter`, `Tab`, `Escape`, `Backspace`, `Space`, `ArrowUp` / `ArrowDown` / `ArrowLeft` / `ArrowRight`, `Home`, `End`, `PageUp`, `PageDown`, `Delete`, `Insert`, `F1`..`F12`, `Ctrl+C`, `Ctrl+D`, `Ctrl+L`, `Ctrl+A`..`Ctrl+Z`, `Shift+Tab`, `Alt+B`, `Ctrl+ArrowLeft`, `Ctrl+Shift+ArrowRight`, etc. Same settle behavior as `terminal_type`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Key spec like \"Enter\", \"Ctrl+C\", \"Shift+Tab\", \"ArrowUp\", \"F5\", \"Ctrl+Shift+ArrowLeft\"."
+          },
+          "count": {
+            "description": "Press the key this many times in a row (e.g. ArrowUp x 5). Default 1.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "idleMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "maxWaitMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "sessionId",
+          "key"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "terminal_read",
+      "description": "Read a window of the terminal buffer. The buffer is the full xterm-emulated state (scrollback + visible viewport) in one contiguous index space. The window is paged from the bottom upward in multiples of `rows`. `rows` defaults to the current screen height and is capped at 1000. `page: 0` is the most recent screen-sized chunk; `page: 1` is the screen before that, and so on. Trailing blank rows are trimmed implicitly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "rows": {
+            "description": "Window height. Default = current screen height. Max 1000.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "page": {
+            "description": "0 = newest screen-sized window. N = scroll up N pages (each page = `rows` lines). Past-top clamps.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "joinWrapped": {
+            "description": "When true (default), rows the terminal soft-wrapped at its right edge are joined back into the single long line the program printed. Set to false to get one line per screen row.",
+            "type": "boolean"
+          },
+          "highlights": {
+            "description": "When true (default), list text on the current screen that is drawn in reverse video or on a background color — how TUIs show the selected menu entry, tab or button — with its screen row and columns. Plain text cannot show this otherwise.",
+            "type": "boolean"
+          },
+          "cursor": {
+            "description": "When true (default), mark the cursor inline with \"▌\". On an empty cell it takes the place of the blank; on a character it is inserted in front of that character, which shifts the rest of that one line right by a column. Nothing is overwritten. Skipped automatically while the program has the cursor hidden. Set to false if you need the unmodified text.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "terminal_reset",
+      "description": "Wipe the terminal buffer and scrollback. By default the shell process keeps running (env vars, cwd, history all preserved). Pass `hardReset: true` to kill the current shell and spawn a brand-new one — anything mid-execution gets killed. When `hardReset: true`, you can also override `cols`, `rows`, `shell`, and `cwd`. In a session created with `command`, a hard reset runs that command again.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "hardReset": {
+            "description": "Kill + respawn the shell instead of just clearing the buffer. Default false.",
+            "type": "boolean"
+          },
+          "cols": {
+            "description": "hardReset only: spawn at this width.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "rows": {
+            "description": "hardReset only: spawn at this height.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "shell": {
+            "description": "hardReset only: shell command (default $SHELL).",
+            "type": "string"
+          },
+          "cwd": {
+            "description": "hardReset only: working directory for the new shell.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "terminal_resize",
+      "description": "Change the terminal size. Both `cols` and `rows` are optional; omitting one preserves the current value. Resizes both the PTY and the emulator (so programs running inside see the change via SIGWINCH).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "cols": {
+            "description": "New column count (1..1000). Omit to keep current cols.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "rows": {
+            "description": "New row count (1..1000). Omit to keep current rows.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "terminal_screenshot",
+      "description": "Render a screen-sized window of the terminal to a PNG. Height is always the current screen height (`term.rows`); use `page` to walk back through scrollback in screen-sized increments at the same dimensions as the live screen. If `filePath` is set, the PNG is written there and the path is returned. Large images (>2097152 bytes) are also spilled to a temp file automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "page": {
+            "description": "0 = current live screen. N = the screen-sized window N screens earlier. Past-top clamps.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "filePath": {
+            "description": "Absolute path to write the PNG to. If unset, image is inlined as base64.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "terminal_scroll",
+      "description": "Turn the mouse wheel over a cell of a full-screen program: scroll a pager, a file list, a log pane. Behaves as a terminal emulator does — programs that track the mouse receive wheel events at that cell (so the pane under it scrolls); full-screen programs that do not (less, man) receive arrow keys instead. At a plain shell prompt there is nothing to scroll and the call fails: earlier output is read with `terminal_read` and its `page` argument, not by scrolling.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "description": "\"up\" moves toward earlier content, \"down\" toward later."
+          },
+          "amount": {
+            "description": "Wheel notches. Most programs move about 3 lines per notch. Default 3.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "col": {
+            "description": "1-indexed column the pointer is over. Matters when panes scroll independently. Default: screen center.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "row": {
+            "description": "1-indexed row the pointer is over. Default: screen center.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "idleMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "maxWaitMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "sessionId",
+          "direction"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "terminal_type",
+      "description": "Type literal characters into the terminal as if a human were pressing keys. Embedded `\\n` is normalized to `\\r` so `\"git push\\n\"` actually submits. Always waits for the buffer to settle (or to time out) before returning. The wait is capped at 10s; for anything slower (builds, installs, test runs) follow up with `terminal_wait`, which blocks until the command actually finishes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "text": {
+            "type": "string",
+            "description": "Characters to type. Embedded \\n becomes Enter."
+          },
+          "paste": {
+            "description": "Deliver the text as a single paste instead of keystrokes. Use it for multi-line text going into an editor, a REPL or a shell prompt: programs that support bracketed paste insert it verbatim (no auto-indent, lines are not run one by one), and nothing is submitted until you press Enter. Programs that do not support it receive the plain characters. Default false.",
+            "type": "boolean"
+          },
+          "idleMs": {
+            "description": "Settle window: silence this long after the last byte counts as settled. Default 200.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "maxWaitMs": {
+            "description": "Overall cap on the settle wait. Default 5000, clamped to 10000. Use terminal_wait for longer.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "sessionId",
+          "text"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "terminal_wait",
+      "description": "Block until the terminal reaches a state, instead of guessing with sleeps or polling `terminal_read`. Use it after `terminal_type` for anything that outlives the settle window: builds, installs, test runs, servers starting up.\n\nDEFAULT (no `pattern`): waits for the running command to finish — i.e. for the shell to take the terminal's foreground back and its prompt to go quiet. This asks the kernel who owns the terminal, so it works with any prompt and stays correct while a command is silent (`sleep 60`) or chatty. Returns immediately if the shell is already at its prompt. On Windows this cannot be detected in a shell session: the call waits for a stretch of silence instead and says so — prefer `pattern` there. In a session created with `command`, it waits for that command to exit and reports its exit status. Background jobs (`cmd &`) do not count as running, and inside a nested program (ssh, a REPL, a TUI) the outer shell never regains the foreground until that program exits — use `pattern` there.\n\n`until: \"quiet\"`: waits until nothing has been printed for `quietMs` (default 1000), whatever owns the terminal. This is the same \"settled\" rule `terminal_type` uses, without its 10s cap — for nested programs where completion cannot be detected and no pattern fits.\n\nWITH `pattern`: waits until the regex matches the text on screen (the viewport plus the 200 rows above it). Use this for servers that never exit (\"Listening on\"), REPL prompts, or TUI states. Text that is already on screen counts, so pick a pattern that only the new output can satisfy.\n\nReturns the screen when the condition is met, or when `timeoutMs` runs out (not an error — the response says the command is still running). In a shell session this does not report an exit status; run `echo $?` afterwards if you need it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Numeric id of the session to target. Get one by calling terminal_create. Use terminal_list to enumerate currently-known ids."
+          },
+          "pattern": {
+            "description": "JavaScript regular expression matched against the screen text, lines joined with \"\\n\" (e.g. \"Listening on .*:3000\", \"^>>>\\\\s*$\", \"(?i)error\"). `^` and `$` match at the start and end of each line; trailing spaces are trimmed from screen lines, so do not match a space after a prompt. Omit to wait for command completion.",
+            "type": "string",
+            "minLength": 1
+          },
+          "until": {
+            "description": "\"command\" (default): the running command has finished and the shell is back at its prompt. \"quiet\": output has been silent for `quietMs`. Ignored when `pattern` is given.",
+            "type": "string",
+            "enum": [
+              "command",
+              "quiet"
+            ]
+          },
+          "timeoutMs": {
+            "description": "Give up after this long. Default 30000, max 600000.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600000
+          },
+          "quietMs": {
+            "description": "How long the output must stay silent. With until=\"command\" (default 300) it applies once the shell is back in the foreground, so the prompt has finished drawing; with until=\"quiet\" (default 1000) it is the whole condition.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "terminal-use",
+    "version": "0.1.1"
+  },
+  "protocolVersion": null,
+  "instructions": "terminal-use drives real terminals: each session is a shell on its own PTY, rendered by a terminal emulator, so what you read is what a person at that terminal would see (full-screen TUIs included).\nWorkflow: terminal_create returns a sessionId; pass it to every other tool. Sessions outlive individual calls and are independent of each other, so several can be driven in parallel.\nA session is an interactive shell by default. To run one program in the terminal — a TUI, a test run, a CLI under test — pass `command` to terminal_create: you then get its exit status, and its final screen stays readable after it ends.\nterminal_type and terminal_press return the screen once output has been quiet for a moment (capped at 10s). For anything slower — builds, installs, test runs, servers starting — follow up with terminal_wait rather than sleeping or polling terminal_read.\nPrefer terminal_read (exact text, cheap) to understand the screen; it also lists what is highlighted, which is how TUIs show the selected item. Use terminal_screenshot when colors, layout or styling matter.\nWhen you already know the next several inputs (navigate a menu, fill a form), send them in one terminal_batch call instead of one call per key. Use terminal_type with `paste: true` for multi-line text.\nIf a call reports that the session was respawned (shell exited, idle, evicted), the command you sent was NOT run: a fresh shell is waiting, so re-issue it if still wanted.\nCall terminal_destroy when you are finished with a session.\nA fuller guide with worked recipes (vim, pagers, REPLs, menus, ssh prompts, testing a TUI) is published as the `terminal-use` skill at skill://terminal-use/SKILL.md, for hosts that load skills from MCP servers.",
+  "durationMs": 3434,
+  "stderr": ""
+}

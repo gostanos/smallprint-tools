@@ -1,0 +1,1229 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "soloforge",
+  "version": "3.8.0",
+  "integrity": {
+    "dist": "sha512-a4yCzyn+ODxAGJJhFlYHgzgRWLgv9Nu3atGcfPSbF0YZfMCKNsypj1CJ2WvmcBRLtZyLFlTG5liJUGqg/fcDvA==",
+    "installed": "sha512-a4yCzyn+ODxAGJJhFlYHgzgRWLgv9Nu3atGcfPSbF0YZfMCKNsypj1CJ2WvmcBRLtZyLFlTG5liJUGqg/fcDvA=="
+  },
+  "bin": "node_modules/soloforge/dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T18:09:04.204Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "sf_task",
+      "description": "任务生命周期。start 创建任务；query 查询状态；advance 在当前阶段证据有效后推进；deliver 在全部交付证据有效后完成；reset 清理失败或失效派生证据；cancel 取消任务。reset/cancel 需 confirm=true。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "query",
+              "advance",
+              "deliver",
+              "reset",
+              "cancel"
+            ],
+            "description": "start=创建任务；query=查看状态；advance=证据通过后推进阶段；deliver=最终交付；reset=重置锁定任务；cancel=取消任务"
+          },
+          "intent": {
+            "type": "string",
+            "description": "用户意图文本（start 时必填）"
+          },
+          "system_context": {
+            "type": "string",
+            "enum": [
+              "greenfield",
+              "brownfield"
+            ],
+            "description": "系统类型（start 时填写）"
+          },
+          "tech_stack": {
+            "type": "string",
+            "description": "技术栈标签"
+          },
+          "domain": {
+            "type": "string",
+            "enum": [
+              "design",
+              "build",
+              "verify",
+              "operate"
+            ],
+            "description": "显式指定目标域（覆盖 intent 关键词路由推断；明确产物所属域时用，如「提取原型说明」→design，避免「实现/开发」等词误路由 build）"
+          },
+          "product_profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "b2c",
+              "b2b-internal",
+              "saas",
+              "fullstack",
+              "backend",
+              "frontend"
+            ],
+            "description": "产品画像（greenfield 项目首次 start 会据此创建 .soloforge/intent.yaml；不传默认 default 不注入产品特定知识，后续可改）"
+          },
+          "task_id": {
+            "type": "string",
+            "pattern": "^task-[a-f0-9]{8}$",
+            "description": "query 可指定历史任务 ID；其他动作使用当前活跃任务"
+          },
+          "scope": {
+            "type": "object",
+            "properties": {
+              "frontend": {
+                "type": "boolean"
+              },
+              "persistence": {
+                "type": "boolean"
+              },
+              "api": {
+                "type": "boolean"
+              },
+              "code": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "frontend",
+              "persistence",
+              "api",
+              "code"
+            ],
+            "additionalProperties": false,
+            "description": "任务范围；新任务应显式声明"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "reset/cancel 必须传 true；两者都会清理派生证据或豁免"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_verify",
+      "description": "权威完整验证入口。full 运行完整规则并原子写 EvidenceView；status 只读任务验证状态。quick 即时反馈由客户端 hook-check 承担。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "full",
+              "status"
+            ],
+            "description": "full=执行权威完整验证；status=读取该任务验证记录"
+          },
+          "task_id": {
+            "type": "string",
+            "pattern": "^task-[a-f0-9]{8}$",
+            "description": "显式任务 ID（task-xxxxxxxx）；权威验证不使用 current-task 隐式指针"
+          },
+          "artifact": {
+            "type": "string",
+            "description": "产物 kind/path；full 必填"
+          },
+          "changeType": {
+            "type": "string",
+            "enum": [
+              "metadata",
+              "documentation",
+              "contract",
+              "behavior",
+              "schema",
+              "security"
+            ],
+            "description": "可选:声明本次变更类型,配合 domain+artifact 启用 semantic stale 减传播(status 时)"
+          },
+          "domain": {
+            "type": "string",
+            "enum": [
+              "design",
+              "build",
+              "verify",
+              "operate"
+            ],
+            "description": "可选域过滤"
+          }
+        },
+        "required": [
+          "action",
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_review",
+      "description": "对抗审查入口。审查过程与完整验证分离，记录独立采样、finding 裁决和新鲜度。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "submit",
+              "status",
+              "resolve",
+              "auto_fix"
+            ],
+            "description": "start=发起审查；submit=提交独立审查发现；status=查看进度；resolve=裁决 finding；auto_fix=按产物差异确认已修复项"
+          },
+          "task_id": {
+            "type": "string",
+            "pattern": "^task-[a-f0-9]{8}$",
+            "description": "显式任务 ID（task-xxxxxxxx）"
+          },
+          "artifact": {
+            "type": "string",
+            "description": "单产物 kind；不传表示跨产物审查"
+          },
+          "slice_id": {
+            "type": "string",
+            "description": "代码切片 ID"
+          },
+          "cross_scope": {
+            "type": "string",
+            "enum": [
+              "design",
+              "prototype",
+              "deliberation"
+            ],
+            "description": "跨产物审查范围"
+          },
+          "review_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "description": "审查会话 ID"
+          },
+          "round": {
+            "type": "integer",
+            "minimum": 2,
+            "description": "submit 时的轮次"
+          },
+          "reviewer_session_id": {
+            "type": "string",
+            "description": "独立审查 session 标识"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning",
+                    "info"
+                  ]
+                },
+                "artifact": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "location": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "issue": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "suggestion": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "evidence_type": {
+                  "type": "string",
+                  "enum": [
+                    "deterministic",
+                    "llm_subjective"
+                  ]
+                },
+                "criticality": {
+                  "type": "string",
+                  "enum": [
+                    "security",
+                    "finance",
+                    "compliance"
+                  ]
+                },
+                "fix_verification": {
+                  "type": "object",
+                  "properties": {
+                    "artifact": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "expected_present": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "expected_absent": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "artifact"
+                  ],
+                  "additionalProperties": false
+                },
+                "repair_evidence": {
+                  "type": "object",
+                  "properties": {
+                    "repair_type": {
+                      "type": "string",
+                      "enum": [
+                        "ADD",
+                        "MODIFY",
+                        "REMOVE"
+                      ]
+                    },
+                    "verification_method": {
+                      "type": "string",
+                      "enum": [
+                        "quote_absent",
+                        "anchor_present",
+                        "structural"
+                      ]
+                    },
+                    "old_quote": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "new_anchor": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "artifact": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "repair_type",
+                    "verification_method"
+                  ],
+                  "additionalProperties": false
+                },
+                "fix_action": {
+                  "type": "string",
+                  "enum": [
+                    "remove"
+                  ]
+                }
+              },
+              "required": [
+                "severity",
+                "artifact",
+                "location",
+                "quote",
+                "issue",
+                "suggestion"
+              ],
+              "additionalProperties": false
+            },
+            "description": "本轮结构化发现；无发现时传空数组"
+          },
+          "findings_batches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "reviewer_session_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/properties/findings/items"
+                  }
+                }
+              },
+              "required": [
+                "reviewer_session_id",
+                "findings"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "resolutions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "finding_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "resolution_status": {
+                  "type": "string",
+                  "enum": [
+                    "confirmed",
+                    "false_positive",
+                    "accepted_risk"
+                  ]
+                },
+                "closure_status": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "fixed",
+                    "waived"
+                  ]
+                },
+                "resolution_evidence": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "两线标准：及格线=修复动作+具体产物位置（对象/字段/行）；推荐线=动作+锚点+机器可核验引用（另填 old_quote/new_anchor/verification_ref 字段）"
+                },
+                "old_quote": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "推荐线可选：原问题代码片段（落 ResolutionRecord 供差量重审复核；resolve 时不做引擎核验——引擎核验走 finding 侧 quote/fix_verification/repair_evidence）"
+                },
+                "new_anchor": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "推荐线可选：新代码锚点（落 ResolutionRecord 供差量重审复核；resolve 时不做引擎核验）"
+                },
+                "verification_ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "推荐线可选：机器可核验引用（run-id/commit/测试名）"
+                }
+              },
+              "required": [
+                "finding_id",
+                "resolution_status",
+                "closure_status",
+                "resolution_evidence"
+              ],
+              "additionalProperties": false
+            },
+            "description": "finding 裁决结果"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "false_positive、accepted_risk 或跳过差量重审时需要用户显式确认"
+          }
+        },
+        "required": [
+          "action",
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_knowledge",
+      "description": "知识消费与管理工具。query：按当前任务的关键词、范围和能力域返回可引用的规则正文（不改知识库；每次调用追加一行度量审计行用于检索质量统计；空命中时自动用当前任务意图二次检索，仍空返回可见性清单）。audit：审计健康状态。add：新增条目（需 confirm=true；announce=true 时同步在项目根 CLAUDE.md 生成段追加拍板索引行）。update：更新条目（需 confirm=true）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "query",
+              "audit",
+              "add",
+              "update"
+            ],
+            "description": "动作：query=按任务信号检索规则正文 / audit=审计知识库 / add=新增条目 / update=更新条目"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "minItems": 1,
+            "maxItems": 12,
+            "description": "query 时=任务目标/领域术语/高影响决策关键词（1-12 个）；add 时=条目的中文任务侧检索词，单项 ≤64 字符（子串索引成本随长度平方增长，长描述应放 body），如任务会说「收费/账单」而规则名是「货币符号」"
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxItems": 8,
+            "description": "产品画像过滤；不传时使用当前项目 product_profile"
+          },
+          "domain": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxItems": 8,
+            "description": "能力域过滤，例如 design/build/operate"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "最多返回条目数，默认 5，最大 10"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "条目标题（add 时必填；作为文件名，不能包含路径分隔符）"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "pattern",
+              "procedure",
+              "pipeline_procedure",
+              "domain",
+              "acceptance_template",
+              "review_rule",
+              "governance_rule",
+              "artifact_template",
+              "checklist"
+            ],
+            "description": "知识类型（add 时必填）"
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "description": "适用范围（add 时必填且非空）"
+          },
+          "triggers": {
+            "type": "string",
+            "minLength": 1,
+            "description": "触发关键词，逗号分隔"
+          },
+          "decision_rules": {
+            "type": "string",
+            "minLength": 1,
+            "description": "决策规则（每行一条）"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "description": "完整知识正文；add 激活时必填，update 时替换正文"
+          },
+          "save_to_drafts": {
+            "type": "boolean",
+            "description": "是否保存为草稿（默认 true）"
+          },
+          "auto_enrich": {
+            "type": "boolean",
+            "description": "是否返回行业最佳实践探索指引（默认 false，opt-in；启用会引导检索行业最佳实践，须与项目事实核对后再采纳，勿直接当项目规则）"
+          },
+          "verification_layer": {
+            "type": "string",
+            "enum": [
+              "L0",
+              "L1",
+              "L2",
+              "L3"
+            ],
+            "description": "校验层（add 必填）：L0=确定性探针 / L1=可执行策略 / L2=LLM审查注入 / L3=人工确认"
+          },
+          "probe": {
+            "type": "string",
+            "enum": [
+              "builtin",
+              "semgrep",
+              "rego",
+              "property"
+            ],
+            "description": "L0/L1 探针类型（仅 L0/L1 时合法，与 verification_layer 互斥校验）"
+          },
+          "probe_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "semgrep/rego/property 旁挂探针文件相对路径（相对 .soloforge/knowledge/）"
+          },
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "description": "builtin 探针的正则源；add 单独传 pattern（不传 verification_layer/probe）时自动设 L0+probe=builtin 一次产出执法条目"
+          },
+          "selftest_sample": {
+            "type": "string",
+            "minLength": 1,
+            "description": "builtin 自验样本（add 时可选，强烈建议随 pattern 提供）：一段必被 pattern 命中的违规样本文本——加载期自验命中 0 处即拒载该 probe（正则写错会静默不拦=假执法），如禁半角货币符号时样本给「价格 ¥100」；样本为字面载荷不做 trim（空白敏感规则的前导/尾随空白有意义）"
+          },
+          "announce": {
+            "type": "boolean",
+            "description": "add 时=true 则在项目根 CLAUDE.md 的 soloforge:knowledge-index 边界标记生成段内追加本条目索引行（仅正式条目 save_to_drafts=false；幂等；标记外手写区不动；无 CLAUDE.md 时降级提示不阻断）"
+          },
+          "enforcement": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "description": "执法点声明（add 时可选）：probe=本条自带 L0/L1 探针 / external:<标识>=项目自建执法点（如 external:check-currency）；执法点唯一，同一规范禁双执法；缺省=未执法（仅规范文本）"
+          },
+          "supersedes": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "add 时=被取代条目名（name/id）：一次调用原子完成取代链——新条目落正位 active 并写 supersedes，旧条目 status→superseded 并写 superseded_by/superseded_at/supersede_reason+.backups 备份。要求 save_to_drafts=false、supersede_reason 必填、被取代条目为项目内 active 条目；重放幂等（半完成态自愈）"
+          },
+          "supersede_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "add --supersedes 时必填：推翻理由（写入旧条目 frontmatter，对齐显式推翻声明协议，如「2026-08-28 拍板推翻 08-25 Dialog 默认，FormDialog.vue 已删除」）"
+          },
+          "entry_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "要更新的条目名称（update 时必填）"
+          },
+          "add_decision_rules": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "追加的决策规则"
+          },
+          "add_acceptance_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "追加的验收项"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "staged",
+              "deprecated",
+              "pending_review",
+              "superseded"
+            ],
+            "description": "更新条目状态"
+          },
+          "superseded_by": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "update 时修订链登记：非空=补登记继任者名（自动写 superseded_at，status 未显式传时同步转 superseded；继任者须为项目内 active 条目）；空串=显式清除取代标记（status 不自动改，恢复供给需显式传 status=active）"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "写操作必须传 true"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_plan",
+      "description": "V2:从已确认 Requirement 生成 ExecutionPlan + governance 接入 + 决策记录(不执行 step/不调用 AI)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "任务 ID"
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "requirement_id": {
+                  "type": "string"
+                },
+                "affected_files": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "change": {
+                        "type": "string",
+                        "enum": [
+                          "create",
+                          "modify",
+                          "delete"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "change"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "requirement_id"
+              ],
+              "additionalProperties": true
+            },
+            "description": "RequirementContract 数组(至少含 requirement_id,可选 affected_files)"
+          }
+        },
+        "required": [
+          "task_id",
+          "requirements"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_repair",
+      "description": "V2 修复计划生成器(不执行 repair/不改文件/不改 task 状态)。使用时机:retry 上限卡住(freshness 阻断——内容没改还反复来验)或机械重试无进展、需要「换个思路」的结构化建议时,用本工具按 lazy/capability 分型生成修复计划;常规「失败→修复→重验」循环不需要本工具(直接修+sf_execute 重验即可)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "verification_result": {
+            "type": "object",
+            "properties": {
+              "verification_id": {
+                "type": "string"
+              },
+              "task_id": {
+                "type": "string"
+              },
+              "layer": {
+                "type": "string",
+                "enum": [
+                  "build",
+                  "test",
+                  "requirement",
+                  "code_quality"
+                ]
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "failures": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "error_type": {
+                      "type": "string",
+                      "enum": [
+                        "compile_error",
+                        "test_failure",
+                        "empty_test_suite",
+                        "hollow_command",
+                        "requirement_not_covered",
+                        "quality_violation"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error_type",
+                    "reason"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "duration_ms": {
+                "type": "number"
+              },
+              "verified_at": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "verification_id",
+              "task_id",
+              "layer",
+              "passed",
+              "failures",
+              "duration_ms",
+              "verified_at"
+            ],
+            "additionalProperties": true,
+            "description": "VerificationResult(含 failures)"
+          },
+          "related_steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step_id": {
+                  "type": "string"
+                },
+                "target_file": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "step_id",
+                "target_file"
+              ],
+              "additionalProperties": true
+            },
+            "description": "关联 ExecutionStep(失败文件定位,可选,默认空)"
+          }
+        },
+        "required": [
+          "verification_result"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_execute",
+      "description": "V2:验证 task(假设 AI 已按 plan 编辑文件)。跑 command verification(command evidence → EvidenceStore),供 deliver 消费。不编辑文件/不接 repair loop/不写 EvidenceView。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^task-[a-f0-9]{8}$",
+            "description": "任务 ID"
+          },
+          "plan_id": {
+            "type": "string",
+            "description": "ExecutionPlan ID(sf_plan 产出)"
+          },
+          "layer": {
+            "type": "string",
+            "enum": [
+              "build",
+              "test"
+            ],
+            "description": "验证层(默认 test)"
+          },
+          "verification_contract": {
+            "type": "object",
+            "properties": {
+              "build_commands": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "command": {
+                      "type": "string"
+                    },
+                    "layer": {
+                      "type": "string",
+                      "enum": [
+                        "build",
+                        "test"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "command",
+                    "layer"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "test_commands": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/properties/verification_contract/properties/build_commands/items"
+                }
+              },
+              "allowed_commands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "working_directory": {
+                "type": "string"
+              },
+              "environment_requirements": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "working_directory"
+            ],
+            "additionalProperties": true,
+            "description": "项目执行契约(build/test 命令 + working_directory)"
+          }
+        },
+        "required": [
+          "task_id",
+          "plan_id",
+          "verification_contract"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_evidence_graph",
+      "description": "只读查询 task 的证据图摘要(Finding→Resolution→Artifact):findings/resolutions/artifacts/unresolvedCount。经 EvidenceGraphView 读 store,不改任何 record,不触发验证。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "任务 id(查该 task 的证据图:涉及的 finding/resolution/artifact 与未闭环数)"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_governance_history",
+      "description": "查询 governance 决策审计摘要(只读,返回 id/taskId/status/policyIds/requirementIds/createdAt)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "按 taskId 过滤(可选)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_governance_report",
+      "description": "查询 governance 覆盖率报告(只读聚合:totalDecisions/generated/failed/policyUsage/requirementUsage/skipped)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_governance_effectiveness",
+      "description": "查询 governance 治理有效性指标(只读:totalGenerated/totalRequirements/requirementCompletionRate/policyEffectiveness/failureRate)。不泄露 governanceResult。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_governance_fulfillment",
+      "description": "查询 governance requirement 完成状态(只读:requirements[{requirementId,status,evidenceCount}])。不泄露 governanceResult。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_requirement",
+      "description": "RequirementContract 生命周期入口(create/list/query)。所有写入经 RequirementStore(HMAC 签名,fail-closed)。manual 需求创建;governance 需求经 bridge 自动落 store。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "list",
+              "query"
+            ],
+            "description": "create=创建 manual requirement;list=按 task 列出;query=按 id 查状态"
+          },
+          "task_id": {
+            "type": "string",
+            "description": "create/list 必填:所属任务 id"
+          },
+          "requirement_id": {
+            "type": "string",
+            "description": "query 必填:requirement id(req-xxx)"
+          },
+          "description": {
+            "type": "string",
+            "description": "create 必填:需求描述"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "must",
+              "should",
+              "could",
+              "wont"
+            ],
+            "description": "MoSCoW 优先级,默认 must"
+          },
+          "affected_domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "design",
+                "build",
+                "verify",
+                "operate"
+              ]
+            },
+            "description": "影响域,默认 [design]"
+          },
+          "evidence_requirements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "artifact_kind": {
+                  "type": "string"
+                },
+                "domain": {
+                  "type": "string",
+                  "enum": [
+                    "design",
+                    "build",
+                    "verify",
+                    "operate"
+                  ]
+                }
+              },
+              "required": [
+                "artifact_kind",
+                "domain"
+              ],
+              "additionalProperties": false
+            },
+            "description": "证据要求(产物 kind + domain)"
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "criterion_id": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "artifact_kind": {
+                  "type": "string"
+                },
+                "domain": {
+                  "type": "string",
+                  "enum": [
+                    "design",
+                    "build",
+                    "verify",
+                    "operate"
+                  ]
+                }
+              },
+              "required": [
+                "criterion_id",
+                "description",
+                "artifact_kind",
+                "domain"
+              ],
+              "additionalProperties": false
+            },
+            "description": "验收标准(绑定 artifact_kind/domain,coverage 验证)"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "create 必须传 true(list/query 免确认)"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sf_waiver",
+      "description": "豁免与基线生命周期入口。create/list/revoke:豁免(individual 个案默认;structural 跨任务四锁——conflict_source/expires_at/approved_by/category+每类上限)。baseline_register/reduce/remove/list:存量债务基线(计数锁——违例≤登记放行标注,超出即红;只减不增,调增=门禁变更须 increase_action)。写操作需 confirm=true;non_waivable check 拒绝(含 structural 化)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "list",
+              "revoke",
+              "baseline_register",
+              "baseline_reduce",
+              "baseline_remove",
+              "baseline_list"
+            ],
+            "description": "create=创建豁免;list=列 active 豁免;revoke=撤销豁免"
+          },
+          "task_id": {
+            "type": "string",
+            "description": "create 必填:所属任务 id(豁免不跨任务复用)"
+          },
+          "domain": {
+            "type": "string",
+            "enum": [
+              "design",
+              "build",
+              "verify",
+              "operate"
+            ],
+            "description": "create 必填/list 可选:所属域"
+          },
+          "check_id": {
+            "type": "string",
+            "description": "create 必填:被豁免的 check id(如 TS-Q01)"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "check_id"
+            ],
+            "description": "豁免范围,默认 exact(须配合 artifact_path);check_id=该 check 在该域全部产物(每域≤3)"
+          },
+          "artifact_path": {
+            "type": "string",
+            "description": "scope=exact 必填:产物路径"
+          },
+          "finding_location": {
+            "type": "string",
+            "description": "finding 级豁免:只豁免该位置,check 其他 finding 仍查"
+          },
+          "reason": {
+            "type": "string",
+            "description": "create 必填(≥10 字符)/revoke 可选:豁免或撤销理由,审计留痕"
+          },
+          "waiver_id": {
+            "type": "string",
+            "description": "revoke 必填:waiver id"
+          },
+          "waiver_type": {
+            "type": "string",
+            "enum": [
+              "individual",
+              "structural"
+            ],
+            "description": "豁免物种:individual=现状个案(默认);structural=跨任务结构性豁免(四锁:conflict_source/expires_at/approved_by/category+每类上限)"
+          },
+          "conflict_source": {
+            "type": "string",
+            "minLength": 3,
+            "description": "structural 必填:矛盾源锚定(如 artifact:prototype_spec:docs/analyze——锚矛盾源而非被验证产物)"
+          },
+          "expires_at": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "structural 必填:过期时间戳(未来;过期即失效不自动续期)"
+          },
+          "approved_by": {
+            "type": "string",
+            "const": "user",
+            "description": "structural 必填:批准人(恒 user——人工批准,AI 不得自批)"
+          },
+          "category": {
+            "type": "string",
+            "minLength": 2,
+            "description": "structural 必填:分类(如 legacy-prototype/parallel-batch,doctor 聚类展示用)"
+          },
+          "path_pattern": {
+            "type": "string",
+            "minLength": 1,
+            "description": "baseline_register 必填:违例范围路径模式"
+          },
+          "registered_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "baseline_register/baseline_reduce:登记的存量违例数(计数锁;reduce 调增须 increase_action=true+reason)"
+          },
+          "baseline_id": {
+            "type": "string",
+            "description": "baseline_reduce/baseline_remove 必填:基线 id"
+          },
+          "cleanup_ref": {
+            "type": "string",
+            "description": "baseline_register 可选:清理专项挂钩(关联任务/批次说明)"
+          },
+          "increase_action": {
+            "type": "boolean",
+            "description": "baseline_reduce 调增时必须 true(调增=门禁变更,审计留痕);减少(清偿)无需"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "create/revoke/baseline_* 写操作必须传 true(list/baseline_list 免确认)"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "soloforge",
+    "version": "3.8.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 10274,
+  "stderr": "ℹ️  SoloForge: 无配置文件，使用自动推断配置。\n   运行 'soloforge init' 接入 AI 客户端（项目配置由 AI 连上 MCP 后补充）。\n[soloForge] server: 当前目录 \"/pkg\" 不是 Git 仓库。部分功能（变更追踪、差异对比、提交历史）将不可用。建议初始化 Git 仓库: git init\n"
+}

@@ -1,0 +1,1397 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@usejunior/docx-mcp",
+  "version": "0.25.0",
+  "integrity": {
+    "dist": "sha512-4NiFc7PqH5r60+4A42aULcz0yI6RL8XrePB0im+grGmHtHb9fRAoXj99i8AgN8vBud1cYoZsRxdhOmGPXg3hiA==",
+    "installed": "sha512-4NiFc7PqH5r60+4A42aULcz0yI6RL8XrePB0im+grGmHtHb9fRAoXj99i8AgN8vBud1cYoZsRxdhOmGPXg3hiA=="
+  },
+  "bin": "node_modules/@usejunior/docx-mcp/dist/cli.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T10:52:16.558Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read document content (DOCX, ODT, or Google Doc). Output is token-limited (~14k tokens) by default with pagination metadata (has_more, next_offset). Use offset/limit to paginate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          },
+          "offset": {
+            "description": "1-based paragraph offset for pagination. Negative values count from end.",
+            "type": "number"
+          },
+          "limit": {
+            "description": "Max paragraphs to return. When omitted, output is token-limited to ~14k tokens with pagination.",
+            "type": "number"
+          },
+          "node_ids": {
+            "description": "Paragraph selectors. Each accepts a safe-docx `_bk_*` id, or (DOCX only) any other bookmark name — e.g. a host application's own stable paragraph bookmark — whose w:id-paired range covers exactly one paragraph. Exact name match; a point bookmark or a multi-paragraph range is refused. Returned rows always report the paragraph's canonical `_bk_*` id, even when selected by another bookmark name; results are de-duplicated and returned in document order.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "toon",
+              "json",
+              "simple"
+            ]
+          },
+          "comment_rendering": {
+            "description": "How to render comments in read_file output. Use \"paragraph_notes\" (default) for paragraph-local comment threads, \"inline_markers\" to add `[cm-start:N]`/`[cm-end:N]` milestones in TOON output (combined with the thread blocks), \"endnotes\" to collect threaded comments into a trailing #COMMENTS block in TOON output, or \"none\" for the legacy output with no comment rendering.",
+            "type": "string",
+            "enum": [
+              "none",
+              "paragraph_notes",
+              "endnotes",
+              "inline_markers"
+            ]
+          },
+          "show_formatting": {
+            "description": "When true (default), shows inline formatting tags (<b>, <i>, <u>, <highlighting>, <a>). When false, emits plain text with no inline tags.",
+            "type": "boolean"
+          },
+          "include_fingerprint": {
+            "description": "When true and format=\"json\", include a portable content_fingerprint (\"sha256:nfkc:<32hex>\") on each paragraph. Read-only metadata derived from the paragraph's normalized visible text; NOT an edit anchor. Edit tools accept a `_bk_*` ID, or (DOCX only) any other bookmark name whose w:id-paired range covers exactly that one paragraph. No effect on TOON/simple output. Ignored for Google Docs and ODT.",
+            "type": "boolean"
+          },
+          "include_fingerprint_ordinal": {
+            "description": "When true together with include_fingerprint and format=\"json\", add duplicate-disambiguation metadata to each paragraph: `content_fingerprint_ordinal` (1-based document-order position among paragraphs sharing the same content_fingerprint), `content_fingerprint_count_in_document` (total paragraphs sharing it, document-wide even under pagination), and `portable_paragraph_ref` (\"<content_fingerprint>#<ordinal>\"). Read-only disambiguator, NOT an edit anchor; reordering duplicates may change ordinals. No effect without include_fingerprint, and no effect on TOON/simple output. Ignored for Google Docs and ODT. Default: false.",
+            "type": "boolean"
+          },
+          "include_footnotes": {
+            "description": "Single-call body + footnotes retrieval. When true and format=\"json\", the response gains a document-wide TOP-LEVEL `footnotes` array — each entry is {id, display_number, ref_paragraph_ids (an ARRAY of the paragraph ids that reference it), paragraphs[] ({text, tagged_text with run-level formatting tags, style})} — preserving multi-paragraph bodies and footnote-internal bold/italic/citation formatting. This top-level array is NOT inlined into content[], so the 1:1 content[] index invariant is preserved. For backward compatibility a lightweight per-node `footnotes` array ({id, display_number, text}) is ALSO attached to each paragraph node it anchors, windowed to the returned slice. When true and format=\"toon\", a trailing `#FOOTNOTES` sidecar block is appended (symmetric with `#COMMENTS`). Footnotes with an empty body or display_number 0 are excluded. No effect on simple output. Ignored for Google Docs and ODT. Default: false.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "get_document_outline",
+      "description": "Get a compact structural map of a document's headings (DOCX only). Each entry is `{paragraph_id, text, level, source}`. Deterministic sources are `word_style`, `list_metadata`, and `outline_level`, selected in that precedence order and included by default. Heuristic sources are `run_in_header`, `title_with_period`, `title_with_colon`, `title_caps_centered`, and `title_bare`; set include_heuristic_headings=true to include them. JSON preserves levels 1-9; Markdown clamps visual ATX depth to 6. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX file.",
+            "type": "string"
+          },
+          "format": {
+            "description": "Output format: 'json' (default, structured outline array) or 'markdown' (indented ATX outline under `content`).",
+            "type": "string",
+            "enum": [
+              "json",
+              "markdown"
+            ]
+          },
+          "include_heuristic_headings": {
+            "description": "When true, also include heuristic title/run-in/centered-caps headings alongside deterministic word_style, list_metadata, and outline_level headings. Default: false (all deterministic sources only).",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "get_sections",
+      "description": "Read DOCX main-document sections in document order. Returns zero-based session-relative section_index values, paragraph/body boundary metadata, page numbering, page size, margins, and header/footer relationship references. Call again after any operation that changes section topology. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "grep",
+      "description": "Search paragraphs with regex. Use file_path for session-based search, file_paths for stateless multi-file search, or google_doc_id for Google Docs. ODT supported via file_path (single-file) only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          },
+          "file_paths": {
+            "description": "Multiple file paths for stateless multi-file search. No session created.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "whole_word": {
+            "type": "boolean"
+          },
+          "max_results": {
+            "type": "number"
+          },
+          "context_chars": {
+            "type": "number"
+          },
+          "dedupe_by_paragraph": {
+            "type": "boolean"
+          },
+          "search_xml": {
+            "description": "When true, search raw XML (word/document.xml) instead of paragraph text.",
+            "type": "boolean"
+          },
+          "include_context": {
+            "description": "When false, skip document view context (list labels, headers) for faster results. Default: true.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "batch_edit",
+      "description": "Single-agent front door for applying multiple edit steps (replace_text, insert_paragraph) to a document in one call. Validates all steps first, rejects conflicts before applying anything, then executes valid steps sequentially. Two source-proven bonded heading/body insertions may share an anchor and position when both declare the same bonded_pair_id and distinct style_source_id values; unrelated same-slot inserts remain conflicts. Accepts inline steps or a plan_file_path JSON array. Surface: revisionable — every applied step emits native OOXML tracked changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "steps": {
+            "description": "JSON array of edit steps. Each step needs step_id, operation, and operation-specific fields.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            }
+          },
+          "plan_file_path": {
+            "description": "Path to a .json file containing an array of edit steps. Mutually exclusive with steps.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "replace_text",
+      "description": "Replace text in a paragraph by provider paragraph id, preserving formatting where supported. Supports DOCX, ODT, and Google Docs. To delete an ordinary DOCX body paragraph, pass its complete visible text as old_string and an empty new_string; a clean save removes the paragraph and a tracked save keeps the deletion for review. Do not use this shortcut for paragraphs that carry section properties, are structurally required by a table cell, or own bookmark/comment anchors without inspecting the structure first. Surface: revisionable — DOCX edits emit native OOXML tracked changes (w:ins/w:del/w:rPrChange).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          },
+          "target_paragraph_id": {
+            "type": "string",
+            "description": "Paragraph anchor. Accepts a safe-docx `_bk_*` id, or (DOCX only) any other bookmark name — e.g. a host application's own stable paragraph bookmark — whose w:id-paired range covers exactly this one paragraph. Exact name match; a point bookmark or a multi-paragraph range is refused."
+          },
+          "old_string": {
+            "type": "string"
+          },
+          "new_string": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "normalize_first": {
+            "description": "Merge format-identical adjacent runs before searching. Useful when text is fragmented across runs.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_paragraph_id",
+          "old_string",
+          "new_string",
+          "instruction"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "insert_paragraph",
+      "description": "Insert a paragraph before/after an anchor paragraph by paragraph id. DOCX responses include structural_warnings when the placement may slice a hierarchy, mismatch list levels, or renumber a list. Supports DOCX, ODT, and Google Docs. (ODT paragraph ids are positional and shift after insertion — re-read before further edits.) Surface: revisionable — DOCX insertions emit native OOXML tracked changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          },
+          "positional_anchor_node_id": {
+            "type": "string",
+            "description": "Anchor paragraph. Accepts a safe-docx `_bk_*` id, or (DOCX only) any other bookmark name — e.g. a host application's own stable paragraph bookmark — whose w:id-paired range covers exactly this one paragraph. Exact name match; a point bookmark or a multi-paragraph range is refused."
+          },
+          "new_string": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "BEFORE",
+              "AFTER"
+            ]
+          },
+          "style_source_id": {
+            "description": "Paragraph anchor to clone formatting (pPr and template run) from instead of the positional anchor. Accepts a `_bk_*` ID, or (DOCX only) any other bookmark name whose w:id-paired range covers exactly that one paragraph. Falls back to anchor with a warning if not found.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "positional_anchor_node_id",
+          "new_string",
+          "instruction"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "save",
+      "description": "Persist the current in-memory document session. For DOCX: saves clean and/or tracked changes output. For ODT: saves an .odt package. For Google Docs: checkpoint (default) returns revisionId, or snapshot exports as DOCX. Surface: revisionable — the save report lists both the AI revisions applied and a non-revision change manifest of any package-level mutations (comment/footnote side parts, relationships) that have no tracked-change wrapper.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          },
+          "save_to_local_path": {
+            "type": "string"
+          },
+          "clean_bookmarks": {
+            "description": "Controls removal of internal bookmarks from DOCX output. Behavior is intentionally three-way: OMIT (recommended for tracked/persistence saves) preserves the document's own bookmarks — only safe-docx paragraph anchors (`_bk_*`) are removed. Explicit `true` ALSO strips harness edit-span bookmarks (`edit-*`) to produce a clean deliverable; do NOT pass it when the tracked output feeds a redline pipeline, because that reproduces the pre-#609 loss of `edit-*` anchors. `false` keeps all bookmarks. Omitting is NOT equivalent to passing `true` — they differ precisely in whether original `edit-*` bookmarks survive.",
+            "type": "boolean"
+          },
+          "save_format": {
+            "type": "string",
+            "enum": [
+              "clean",
+              "tracked",
+              "both"
+            ]
+          },
+          "allow_overwrite": {
+            "type": "boolean"
+          },
+          "allow_discard_preserved_revisions": {
+            "description": "Explicitly allow a clean artifact to auto-accept remaining revisions by the session AI author after accept_ai_edits/reject_ai_edits selectively left revisions unresolved. Default: false.",
+            "type": "boolean"
+          },
+          "tracked_save_to_local_path": {
+            "type": "string"
+          },
+          "tracked_changes_author": {
+            "type": "string"
+          },
+          "tracked_changes_engine": {
+            "description": "Deprecated and ignored (#126). The redline is now the session's write-time tracked markup, serialized directly — there is no comparison engine to select. Use the compare_documents tool for comparison-based redlines.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "atomizer"
+            ]
+          },
+          "fail_on_rebuild_fallback": {
+            "description": "Deprecated and ignored (#126). The default save no longer runs the comparison reconstruction engine, so there is no rebuild fallback to guard against; accepted for backward compatibility only.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "save_to_local_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "export",
+      "description": "Export a document to a portable rendering (Markdown, semantic HTML, or plain text). Writes an output file (default: source path with the format extension, e.g. .md, .html, or .txt) and returns its path, byte count, and the rendered content (under `content`). Intentionally lossy (no round-trip); HTML is the semantic tier, not pixel-faithful. DOCX only — Google Docs is not supported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "format": {
+            "description": "Output format: 'markdown' (default, writes .md), 'html' (writes .html), or 'plaintext' (writes .txt).",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "html",
+              "plaintext"
+            ]
+          },
+          "output_path": {
+            "description": "Where to write the rendering. Defaults to the source path with the format extension.",
+            "type": "string"
+          },
+          "allow_overwrite": {
+            "description": "Overwrite output_path if it already exists. Default: false.",
+            "type": "boolean"
+          },
+          "include_markdown": {
+            "description": "Include the rendered content (under `content`) in the response. Default: true; set false for large documents.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "convert_to_odt",
+      "description": "Convert a DOCX document to OpenDocument Text (.odt) using the native model-to-model converter (no LibreOffice involved). Writes the .odt (default: source path with the .odt extension), validates ODF packaging safety before writing, and returns the output path plus a `lossiness` summary itemizing every downgraded construct. Conversion is semantic and intentionally lossy: text, headings, bold/italic/underline, hyperlinks, lists, and tables are mapped; richer styling, tracked changes, comments, and headers/footers are not. DOCX in, ODT out — Google Docs and .odt inputs are not supported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "output_path": {
+            "description": "Where to write the .odt. Defaults to the source path with the .odt extension.",
+            "type": "string"
+          },
+          "allow_overwrite": {
+            "description": "Overwrite output_path if it already exists. Default: false.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "format_layout",
+      "description": "Apply layout controls (paragraph spacing, table row height, cell padding). Google Docs supports paragraph spacing only. Surface: revisionable — DOCX geometry edits emit native property-change revisions (w:pPrChange/w:trPrChange/w:tcPrChange).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "paragraph_spacing": {
+            "type": "object",
+            "properties": {
+              "paragraph_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "before_twips": {
+                "type": "number"
+              },
+              "after_twips": {
+                "type": "number"
+              },
+              "line_twips": {
+                "type": "number"
+              },
+              "line_rule": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "exact",
+                  "atLeast"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "row_height": {
+            "type": "object",
+            "properties": {
+              "table_indexes": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "row_indexes": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "value_twips": {
+                "type": "number"
+              },
+              "rule": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "exact",
+                  "atLeast"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "cell_padding": {
+            "type": "object",
+            "properties": {
+              "table_indexes": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "row_indexes": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "cell_indexes": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "top_dxa": {
+                "type": "number"
+              },
+              "bottom_dxa": {
+                "type": "number"
+              },
+              "left_dxa": {
+                "type": "number"
+              },
+              "right_dxa": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "format_numbering",
+      "description": "Change one DOCX body paragraph’s direct numbering reference. Use remove=true to drop direct w:numPr, match_paragraph_id to adopt another paragraph’s explicit numbering, or num_id with ilvl to reference an existing numbering definition. This tool does not create numbering definitions or change style-inherited numbering. Effective edits emit a native w:pPrChange; identical requests are no-ops.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          },
+          "target_paragraph_id": {
+            "type": "string",
+            "description": "Target paragraph anchor returned by read_file."
+          },
+          "remove": {
+            "description": "Set true to remove the target paragraph’s direct w:numPr.",
+            "type": "boolean"
+          },
+          "match_paragraph_id": {
+            "description": "Copy this paragraph’s complete direct num_id and ilvl to the target.",
+            "type": "string"
+          },
+          "num_id": {
+            "description": "Existing positive decimal w:numId from this DOCX; requires ilvl.",
+            "type": "string"
+          },
+          "ilvl": {
+            "description": "Existing numbering level for num_id; requires num_id.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "target_paragraph_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "format_section",
+      "description": "Partially update one DOCX section’s page-number restart, page dimensions/orientation, or margins using a zero-based section_index from get_sections. Effective calls emit one native w:sectPrChange and preserve section topology, page-number format, columns, break type, and header/footer references. Orientation is literal and does not automatically swap dimensions. This tool does not create sections or edit header/footer content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          },
+          "section_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Zero-based session-relative index returned by get_sections."
+          },
+          "page_number_start": {
+            "description": "Non-negative page number at which this section starts.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "page_size": {
+            "description": "Partial page-size update. Both dimensions are required when w:pgSz is absent.",
+            "type": "object",
+            "properties": {
+              "width_twips": {
+                "description": "Positive page width in twentieths of a point.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "height_twips": {
+                "description": "Positive page height in twentieths of a point.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "orientation": {
+                "description": "Literal OOXML orientation; dimensions are not auto-swapped.",
+                "type": "string",
+                "enum": [
+                  "portrait",
+                  "landscape"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "margins": {
+            "description": "Partial margin update in twips. All seven values are required when w:pgMar is absent.",
+            "type": "object",
+            "properties": {
+              "top_twips": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "right_twips": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "bottom_twips": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "left_twips": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "header_twips": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "footer_twips": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "gutter_twips": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "section_index"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "insert_section_break",
+      "description": "Insert a tracked DOCX section break after a stable direct-body paragraph. The new boundary preserves the containing section’s page setup and header/footer relationship references. The following section inherits current properties by default; set inherit_properties=false to reset non-relationship properties, and optionally provide page-number/page-size/margin overrides in new_section. Call get_sections again after success because section indexes change.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "paragraph_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable paragraph id returned by read_file; must identify a direct main-body paragraph that does not already end a section."
+          },
+          "break_type": {
+            "type": "string",
+            "enum": [
+              "nextPage",
+              "nextColumn",
+              "continuous",
+              "evenPage",
+              "oddPage"
+            ],
+            "description": "OOXML start behavior for the following section."
+          },
+          "inherit_properties": {
+            "description": "Whether the following section retains current non-relationship properties. Default: true. Header/footer references are always preserved.",
+            "type": "boolean"
+          },
+          "new_section": {
+            "description": "Optional page-number and page-setup overrides for the following section. Complete page size/margins are required when reset removes those elements.",
+            "type": "object",
+            "properties": {
+              "page_number_start": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "page_size": {
+                "type": "object",
+                "properties": {
+                  "width_twips": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "height_twips": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "orientation": {
+                    "type": "string",
+                    "enum": [
+                      "portrait",
+                      "landscape"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "margins": {
+                "type": "object",
+                "properties": {
+                  "top_twips": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "right_twips": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "bottom_twips": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "left_twips": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "header_twips": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "footer_twips": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "gutter_twips": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "paragraph_id",
+          "break_type"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "accept_changes",
+      "description": "Accept every supported tracked change in the document body, including inserted and deleted table-row revisions. Returns acceptance stats; unresolvedRowRevisions remains 0 for supported row markers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "accept_ai_edits",
+      "description": "Selectively accept tracked changes by revision id or author in the in-memory session, leaving all other (e.g. third-party reviewer) revisions byte-untouched. This does not write file_path; call save to persist the mutation. Provide revision_ids (array of w:id values) to target specific revisions, or author to accept every revision by one actor. Sweeps document.xml and supported side-story parts (footnotes, endnotes, comments). An ambiguous overlap — a targeted revision structurally containing, or contained by, a non-targeted revision (nested ins/del/move) — hard-errors with code AMBIGUOUS_REVISION_OVERLAP and a structured `overlaps` list unless normalize_first is set (best-effort, no byte-identical promise).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "revision_ids": {
+            "description": "w:id values of the revisions to accept. Mutually preferred over author.",
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          },
+          "author": {
+            "description": "Accept every revision authored by this w:author. Convenience alternative to revision_ids.",
+            "type": "string"
+          },
+          "normalize_first": {
+            "description": "Attempt best-effort resolution on an ambiguous (overlapping) revision graph instead of hard-erroring. No byte-identical guarantee. Default: false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "reject_ai_edits",
+      "description": "Selectively reject tracked changes by revision id or author in the in-memory session (restoring their pre-edit state), leaving all other revisions byte-untouched. This does not write file_path; call save to persist the mutation. Symmetric to accept_ai_edits: provide revision_ids or author, sweeps document.xml and supported side-story parts, and hard-errors on an ambiguous overlap (code AMBIGUOUS_REVISION_OVERLAP with a structured `overlaps` list) unless normalize_first is set.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "revision_ids": {
+            "description": "w:id values of the revisions to reject. Mutually preferred over author.",
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          },
+          "author": {
+            "description": "Reject every revision authored by this w:author. Convenience alternative to revision_ids.",
+            "type": "string"
+          },
+          "normalize_first": {
+            "description": "Attempt best-effort resolution on an ambiguous (overlapping) revision graph instead of hard-erroring. No byte-identical guarantee. Default: false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "has_tracked_changes",
+      "description": "Check whether the document body contains tracked-change markers (insertions, deletions, moves, and property-change records). Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "get_file_status",
+      "description": "Get file/session metadata including edit count, normalization stats, and cache info. Supports DOCX, ODT, and Google Docs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "close_file",
+      "description": "Close an open file session, or close all sessions with explicit confirmation. Supports DOCX, ODT, and Google Docs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "google_doc_id": {
+            "description": "Google Doc ID or URL (alternative to file_path). Extract from URL: docs.google.com/document/d/{ID}/edit",
+            "type": "string"
+          },
+          "clear_all": {
+            "type": "boolean"
+          },
+          "confirm": {
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "add_comment",
+      "description": "Add a comment or threaded reply to a document. Provide target_paragraph_id + anchor_text for root comments, or parent_comment_id for replies. Supports DOCX and ODT (ODT backs comments with office:annotation; threaded replies are DOCX-only). Surface: revisionable + package-mutation — the body-story comment reference is tracked (w:ins), while comment text and author metadata are recorded in the save report non-revision change manifest.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "target_paragraph_id": {
+            "description": "Paragraph ID to anchor the comment to (for root comments).",
+            "type": "string"
+          },
+          "anchor_text": {
+            "description": "Text within the paragraph to anchor the comment to. If omitted, anchors to entire paragraph.",
+            "type": "string"
+          },
+          "parent_comment_id": {
+            "description": "Parent comment ID for threaded replies.",
+            "type": "number"
+          },
+          "author": {
+            "type": "string",
+            "description": "Comment author name."
+          },
+          "text": {
+            "type": "string",
+            "description": "Comment body text."
+          },
+          "initials": {
+            "description": "Author initials (defaults to first letter of author name).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path",
+          "author",
+          "text"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "get_comments",
+      "description": "Get all comments from the document with IDs, authors, dates, text, and anchored paragraph IDs. Range-anchored DOCX comments also expose optional end_paragraph_id, start_run_index, start_char_offset, end_run_index, and end_char_offset fields describing the covered span. Includes threaded replies (DOCX). Supports DOCX and ODT. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "delete_comment",
+      "description": "Delete a comment and all its threaded replies from the document. Cascade-deletes all descendants. Surface: revisionable + package-mutation — the body-story comment reference removal is tracked (w:del), while comment/reply text cleanup is recorded in the save report non-revision change manifest.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "comment_id": {
+            "type": "number",
+            "description": "Comment ID to delete."
+          }
+        },
+        "required": [
+          "file_path",
+          "comment_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "compare_documents",
+      "description": "Compare two documents and produce a tracked-changes output document. Provide original_file_path + revised_file_path for standalone comparison, or file_path to compare session edits against the original. DOCX and ODF (.odt) support both modes. DOCX output always uses the revised archive as its package base and publishes tagged revisions; engine, strategy, reconstruction, premerge, and refinement selectors are not exposed. DOCX stats count insertions/deletions as contiguous ranges, expose tagged-token-v1 totals as insertedAtoms/deletedAtoms with atomMetricVersion, and report formatChanges separately from modifiedParagraphs. When a DOCX input difference is preserved in the output without tracked-change markup (for example a removed section's header or footer, or an unsupported header/footer topology), the response includes `unrepresented_changes` (objects with scope, kind, sectionIndex, for header/footer scopes role, and for the contentControl scope a contentControl identity: a changed `w:sdtPr`/`w:sdtEndPr` is published as the revised properties without markup, because CT_SdtPr admits no revision elements) plus one `warnings` string per entry, and the message carries a WARNING. Both fields are absent when no reportable unrepresented change was detected; the detector covers section properties, selected header/footer stories and content-control properties, so absence is not a guarantee about differences outside that scope. ODF compares at inline granularity (a modified paragraph is marked up in place — only the changed spans are struck or inserted).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "original_file_path": {
+            "description": "Path to the original DOCX or .odt file.",
+            "type": "string"
+          },
+          "revised_file_path": {
+            "description": "Path to the revised DOCX or .odt file.",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "Path to the DOCX or ODT file.",
+            "type": "string"
+          },
+          "save_to_local_path": {
+            "type": "string",
+            "description": "Path to save the tracked-changes output (DOCX or .odt)."
+          },
+          "author": {
+            "description": "Author name for track changes. Default: 'Comparison' (DOCX) or the configured AI author (ODF).",
+            "type": "string"
+          },
+          "ignore_formatting": {
+            "description": "Ignore formatting differences (DOCX only). Default: false.",
+            "type": "boolean"
+          },
+          "compare_moves": {
+            "description": "Detect moved content (DOCX only). Default: true.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "save_to_local_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "get_footnotes",
+      "description": "Get all footnotes from the document with IDs, display numbers, text, and anchored paragraph IDs. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "add_footnote",
+      "description": "Add a footnote anchored to a paragraph. Optionally position the reference after specific text using after_text. Note: [^N] markers in read_file output are display-only and not part of the editable text used by replace_text. Surface: revisionable + package-mutation — the footnote reference and note text are tracked (w:ins), while footnote-part creation and registration are recorded in the save report non-revision change manifest.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "target_paragraph_id": {
+            "type": "string",
+            "description": "Paragraph ID to anchor the footnote to."
+          },
+          "after_text": {
+            "description": "Text after which to insert the footnote reference. If omitted, appends at end of paragraph.",
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "description": "Footnote body text."
+          }
+        },
+        "required": [
+          "file_path",
+          "target_paragraph_id",
+          "text"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "update_footnote",
+      "description": "Update the text content of an existing footnote. Surface: revisionable — note-text changes emit native OOXML tracked changes (w:ins/w:del) inside the footnote body.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "note_id": {
+            "type": "number",
+            "description": "Footnote ID to update."
+          },
+          "new_text": {
+            "type": "string",
+            "description": "New footnote body text."
+          }
+        },
+        "required": [
+          "file_path",
+          "note_id",
+          "new_text"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "delete_footnote",
+      "description": "Delete a footnote and its reference from the document. Surface: revisionable — the reference and note text are removed as native OOXML tracked deletions (w:del).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "note_id": {
+            "type": "number",
+            "description": "Footnote ID to delete."
+          }
+        },
+        "required": [
+          "file_path",
+          "note_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "clear_formatting",
+      "description": "Clear specific run-level formatting (bold, italic, underline, highlight, color, font) from paragraphs. Surface: revisionable — clearing emits a native run-property-change revision (w:rPrChange).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "paragraph_ids": {
+            "description": "Paragraph IDs to clear formatting from. If omitted, clears from all paragraphs.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "clear_highlight": {
+            "description": "Remove highlight formatting.",
+            "type": "boolean"
+          },
+          "clear_bold": {
+            "description": "Remove bold formatting.",
+            "type": "boolean"
+          },
+          "clear_italic": {
+            "description": "Remove italic formatting.",
+            "type": "boolean"
+          },
+          "clear_underline": {
+            "description": "Remove underline formatting.",
+            "type": "boolean"
+          },
+          "clear_color": {
+            "description": "Remove font color.",
+            "type": "boolean"
+          },
+          "clear_font": {
+            "description": "Remove font family and size.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "extract_revisions",
+      "description": "Extract tracked changes as structured JSON with before/after text per paragraph, revision details, and comments. Table rows inserted or deleted as a whole, and row property changes (w:trPr > w:ins / w:del / w:trPrChange), are reported as records with scope \"row\", keyed by the row's first paragraph, whose revisions are ROW_INSERTION / ROW_DELETION / FORMAT_CHANGE entries carrying the revision id, author and date. Supports pagination via offset and limit. Read-only - does not modify the document.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the DOCX or ODT file."
+          },
+          "offset": {
+            "description": "0-based offset for pagination. Default: 0.",
+            "type": "number"
+          },
+          "limit": {
+            "description": "Max entries per page (1-500). Default: 50.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "safe-docx",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 8362,
+  "stderr": ""
+}

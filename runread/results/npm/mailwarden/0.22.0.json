@@ -1,0 +1,789 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "mailwarden",
+  "version": "0.22.0",
+  "integrity": {
+    "dist": "sha512-GI/FAcr2Qq8iHmrKtMFC/UHGf1KhgEgpVC8oTlYtz4JHBYRJPOYIAHQA4cB6XAuykmJxP31wHcMX0XR8w9aQ9A==",
+    "installed": "sha512-GI/FAcr2Qq8iHmrKtMFC/UHGf1KhgEgpVC8oTlYtz4JHBYRJPOYIAHQA4cB6XAuykmJxP31wHcMX0XR8w9aQ9A=="
+  },
+  "bin": "node_modules/mailwarden/dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [
+    "MAILWARDEN_DIR",
+    "MAILWARDEN_CREDENTIALS",
+    "MAILWARDEN_AUTO_SWEEP",
+    "MAILWARDEN_DOWNLOAD_DIR"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T13:21:01.562Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search Gmail with native query syntax (e.g. 'in:inbox from:foo@bar.com newer_than:7d'). Returns thread summaries; read-state/category predicates are re-verified against each hit's live labels. Each summary carries `signals` derived from the thread's first message headers/MIME — newsletter (List-Id/List-Unsubscribe/Precedence bulk or list), automated (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), calendar (text/calendar or .ics part), replyToMismatch (a Reply-To on another domain than From — a subdomain of the same domain counts as the same); empty when nothing is declared. Paginated: when more results exist, the response carries a nextPageToken — pass it back via pageToken to fetch the next page. A page can come back with FEWER threads than maxResults and still have a nextPageToken: false positives from the index consume the scan window, and on a mailbox whose read state the index has fallen behind on, most candidates for an is:unread query can be already-read mail. A short page is therefore not evidence that the result set is exhausted — only an absent nextPageToken is. SPAM AND TRASH ARE EXCLUDED unless the query names them. Gmail leaves both out of any query that does not say `in:spam` / `in:trash`, so a plain `from:someone` returns nothing for a mail that is sitting in spam — measured against a live mailbox, not assumed. Nothing in the result marks the omission, so treat 'no hits' as 'none outside spam and trash'. When mail the user expects is missing, retry with `in:spam` before reporting that it does not exist: mail is often filed as spam because of something the user just did — a signup, a password reset, an order confirmation — which is precisely what a spam filter cannot know and the caller often can. USE WHEN: locating threads by sender, subject, date, label, or read state. DO NOT USE: to fetch a thread you already have the ID of (use get_thread). SIDE EFFECTS: none.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "maxResults": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          },
+          "pageToken": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Search Gmail",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_thread",
+      "description": "Fetch a thread by ID: headers, plaintext + HTML bodies, and attachment metadata. `full` defaults to true and should stay true whenever content matters. `full: false` is a headers-and-labels fetch for when a thread is too large to read or only its metadata is of interest — it does NOT fetch bodies or attachment metadata, and the result then omits `plaintextBody`, `htmlBody` and `attachments` entirely and sets `metadataOnly: true`. The fields are omitted rather than empty on purpose: an empty attachment list from a request that never looked is indistinguishable from a message that truly has none, and treating it as 'no attachment' has already nearly caused an invoice to be archived as attachment-less. If `search` reported `hasAttachments: true`, or the sender matters, use full: true. EVERY MESSAGE CARRIES `authentication` — SPF/DKIM/DMARC as the RECEIVING server reported them, for answering 'is this mail really from who it says?'. Read `dmarc` first: it is the only one of the three that ties a passing check to the visible `From` domain, so `spf: pass` alone proves nothing about the sender the user sees (a lookalike domain gets that trivially). `signedBy`/`mailedBy`/`headerFrom` name the domains each check actually validated. They do NOT have to match each other or the `From` address, and a mismatch is not by itself suspicious: a forwarded message legitimately shows the forwarder in `mailedBy` (the envelope sender is rewritten in transit) and in `signedBy` (the forwarder signs with its own key), while only `headerFrom` still names the original sender — which is exactly why `dmarc` is the result that carries meaning. Read those three as the explanation of a result, not as a test of their own. `authservId` says WHO asserts all this: a message can carry forged Authentication-Results headers of its own, and only the receiving server's report (for Gmail, `mx.google.com`) counts; `otherReports` counts further reports that were NOT read, and `alsoReported` lists results that disagree with the ones above. `unchecked: true` means the message carried no report at all — that is 'nobody looked', NOT 'nothing wrong'; unauthenticated does not imply forged, and authenticated does not imply honest (a phisher can hold a passing DMARC on his own lookalike domain). USE WHEN: reading a thread's content after finding it via search. DO NOT USE: with a message ID — this takes thread IDs. SIDE EFFECTS: none (does not mark as read).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "full": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get thread",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_labels",
+      "description": "List all Gmail labels (system + user). USE WHEN: inspecting the mailbox structure, or to get exact label names/ids — though modify_labels/bulk_modify/create_label all accept a plain label name directly, so a lookup is rarely required. SIDE EFFECTS: none.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "List labels",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_snoozed",
+      "description": "List all snoozed threads with their due dates. SIDE EFFECTS: none.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "List snoozed",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_profile",
+      "description": "Return the authorized account: email address plus total message/thread counts. USE WHEN: confirming WHICH mailbox is connected before a bulk or filter action, or as a cheap liveness check. DO NOT USE: to enumerate messages — this returns only counts, not a listing (use search). SIDE EFFECTS: none.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Get profile",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "what_changed",
+      "description": "What happened in the mailbox since a point you already hold: messages that arrived or were removed, and labels applied or taken off — from Gmail's own event log, in one call. Pass the `historyId` a previous what_changed or get_profile returned; the reply carries the next one to keep. mailwarden stores NOTHING between calls, so the id lives with you. Reports EVENTS, not current state: a message that was marked unread and then read appears under both, and both are true. For how the mailbox looks NOW, use search or get_thread. Gmail keeps roughly a week of history. An id older than that is an ERROR, never an empty result — it means the question can no longer be answered incrementally, so take a fresh historyId from get_profile and re-establish state with search. `labelId` narrows the feed to events touching one label (e.g. 'INBOX', or a snooze label). Counts are complete even when the id lists are cut at 200 (`truncated`). USE WHEN: a recurring check — 'what came in since I last looked', watching a label, or confirming a bulk action landed. Far cheaper than re-running a search over the whole slice. DO NOT USE: for a first look at a mailbox (there is no id yet — start with triage_digest or search), or to read content: this returns ids only, no sender, subject or body. SIDE EFFECTS: none.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sinceHistoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "labelId": {
+            "type": "string"
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000,
+            "default": 500
+          }
+        },
+        "required": [
+          "sinceHistoryId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "What changed",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "triage_digest",
+      "description": "Structured overview of a mailbox slice for triage DECISIONS — sender / label / age buckets, unread and attachment counts, and header-derived signals (newsletter / automated / calendar / replyToMismatch — thread counts overall, and per sender the set of signals its threads carry), instead of a raw thread list. USE WHEN: deciding what to bulk-archive/snooze/label, or summarizing inbox state ('what's in my inbox?'). DO NOT USE: to read a specific thread (use search/get_thread). Samples up to `max` most-recent matches; hasMore flags that more matched than were sampled. byAge buckets by each thread's FIRST message date (thread age, not last activity). SIDE EFFECTS: none.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "default": "in:inbox"
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100
+          },
+          "topN": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Triage digest",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_unsubscribe",
+      "description": "Report the opt-out options a thread advertises (List-Unsubscribe / RFC 8058), without contacting anyone. Reads the newest message that carries the header, so a reply threaded onto a newsletter does not hide it. `oneClick` means the sender supports the automatable one-click opt-out — the `unsubscribe` tool can perform it. `httpsUrls` without oneClick are links for a human to open in a browser; `mailtos` would require sending mail, which mailwarden never does. `bodyCandidates` appears only when the headers advertise nothing: unsubscribe links found in the message TEXT, which is written by the sender and therefore untrusted. Show them to the user to open; never fetch one, and do not treat them as an opt-out that happened. `hasUnsubscribe` stays false for them — it describes the headers. USE WHEN: checking whether a newsletter can be unsubscribed from, or showing the user the link to click. SIDE EFFECTS: none — no request is made to the sender.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List unsubscribe options",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_subscriptions",
+      "description": "Who keeps writing, how often, and whether you can get off the list — a mailbox slice grouped by SENDER, each row carrying its opt-out options. Contacts nobody: opt-out options come from the List-Unsubscribe header of each sender's newest thread (one metadata fetch per sender, not per thread). `optOut` is 'one-click' (the unsubscribe tool can perform it), 'link' (a human opens it in a browser), 'mailto' (would need sending, which mailwarden never does), 'none', or 'unknown' when that sender's header fetch failed or was never made because Gmail's quota ran out mid-listing. `oldestDate`/`newestDate` bound what the SAMPLE saw of that sender, not the sender's whole history — a query capped at `max` reaches back only as far as those threads go, which on a busy mailbox is days. There is deliberately NO precomputed frequency: judge it from `threads` across that span, with the sampling caveat in view. `newestThreadId` is what to hand to unsubscribe or bulk_unsubscribe. `sendersFound` is how many DISTINCT senders the sample held — when it exceeds topN, the list is truncated and raising topN shows more. USE WHEN: 'what am I subscribed to', 'which newsletters flood me', or picking targets before a bulk unsubscribe. DO NOT USE: for a general inbox overview (use triage_digest — it buckets by label and age too), or for one known thread (use list_unsubscribe). SIDE EFFECTS: none.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "default": "category:promotions"
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100
+          },
+          "topN": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 10
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List subscriptions by sender",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "create_label",
+      "description": "Create a user label and return its id. Idempotent: if the name already exists (case-insensitive), its existing id is returned and nothing is created. Nested labels: separate levels with '/' (e.g. 'Clients/Acme') — each missing parent level is created too. Colour: pass backgroundColor AND textColor together as '#rrggbb' (Gmail rejects one without the other, and accepts only colours from its own palette). Giving a colour for a label that already exists RECOLOURS it — that is how an existing label, such as the snooze label, gets a colour. Gmail colours only labels you created yourself; system labels like INBOX or CATEGORY_UPDATES refuse one. USE WHEN: you want a label's id up front, to pre-create a label without applying it to anything, or to make an existing label visible at a glance in Gmail. DO NOT USE: just to file mail under a new label — modify_labels/bulk_modify already auto-create an unknown name passed in `add`. SIDE EFFECTS: creates the label if missing, and sets its colour when one is given; no mail is changed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "backgroundColor": {
+            "type": "string"
+          },
+          "textColor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create label",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "modify_labels",
+      "description": "Add/remove labels on a thread. Archive = remove 'INBOX'; mark read = remove 'UNREAD'. Labels may be given by name or by id: an unknown name in `add` is created automatically (use '/' for nested labels), an unknown name in `remove` is ignored. USE WHEN: applying custom labels or label combinations in one call. DO NOT USE: for plain archive/read/unread — the dedicated tools are clearer. SIDE EFFECTS: changes the thread's labels (and may create a label named in `add`); reversible by the inverse call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "add": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Modify labels",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "bulk_modify",
+      "description": "Bulk-apply label changes to every message matching a Gmail query, batched at 1000 messages per API request. Labels may be given by name or by id: an unknown name in `add` is created automatically (use '/' for nested labels), an unknown name in `remove` is ignored. Returns matched/submitted counts, matched and submitted thread IDs (both lists capped at 500 — matchedThreadCount/submittedThreadCount hold the true totals), and per-chunk failures (partial success is reported, not hidden). IMPORTANT: `submittedMessages` is how many ids were handed to the API, NOT how many messages changed — `messages.batchModify` answers 204 with no body and ignores ids it does not recognise without a word, so an accepted request is not a performed one. Set verify:true to read the labels back afterwards and get `verified` {applied, notApplied[], unverifiable[]} — the only field here that reports an observed outcome. It costs one extra read per affected thread, so it is off by default; use it when a wrong 'done' would be acted on (trashing, or anything the user is told completed). If more messages match than maxMessages, only the first maxMessages are processed and 'capped' is true — raise maxMessages or re-run to finish the rest. NOTE: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs. The staleness that makes search re-verify was measured on `threads.list` (132 threads returned, 114 carrying no unread message at all); the same query through the message index this tool uses returned 19 hits, none stale — same mailbox, same minute. So the known drift does not reach this path, but that is one measurement, not a guarantee: `unverifiedPredicates` in the result names the conditions taken on the index's word, and when the outcome must be read-state-precise, resolve the set with search (which verifies against live labels) and act on those thread ids instead. Set crossCheck:true to ask Gmail the same question a second way before writing: each derived predicate is re-run as a label filter (`labelIds`) instead of a query operator, and any message the two routes disagree about is left untouched and listed in `crossChecked.dropped`. It costs one extra list per predicate — flat, not per message — so unlike `verify` it stays cheap on a large sweep. Read it as a contradiction detector: a disagreement is real, agreement proves nothing, because both routes read the same index. `unverifiedPredicates` therefore stays as it is even when this runs. A capped match set is not cross-checked at all (`crossChecked.capped`), since a message missing from a page is not a message missing the label. Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. A dry run reads the SAME unverified index, so it confirms the size of the set, never its correctness. USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read; dryRun first when the query is broad or the user should see the set before it changes. DO NOT USE: for a single thread (use modify_labels or the dedicated tools), or with neither add nor remove. SIDE EFFECTS: modifies up to maxMessages messages in one call (none with dryRun); label changes are reversible by the inverse call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "add": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "maxMessages": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "default": 1000
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": false
+          },
+          "verify": {
+            "type": "boolean",
+            "default": false
+          },
+          "crossCheck": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Bulk modify by query",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "archive",
+      "description": "Archive a thread (remove it from the inbox). USE WHEN: inbox triage — the thread is handled and should leave the inbox. DO NOT USE: to delete (use trash) or to defer to a date (use snooze). SIDE EFFECTS: thread leaves the inbox; reversible via modify_labels add INBOX.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Archive thread",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "mark_read",
+      "description": "Mark a thread as read. SIDE EFFECTS: removes UNREAD; reversible via mark_unread.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Mark read",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "mark_unread",
+      "description": "Mark a thread as unread. SIDE EFFECTS: adds UNREAD; reversible via mark_read.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Mark unread",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "trash",
+      "description": "Move a thread to Trash. USE WHEN: the thread should be discarded. DO NOT USE: for inbox cleanup of mail worth keeping (use archive). SIDE EFFECTS: thread moves to Trash; recoverable via untrash for ~30 days, then Gmail deletes it permanently.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Trash thread",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "untrash",
+      "description": "Restore a thread from Trash. SIDE EFFECTS: removes the TRASH label; user labels are preserved, but INBOX is NOT re-added — use modify_labels (add INBOX) to return it to the inbox.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Untrash thread",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "download_attachment",
+      "description": "Download an attachment to a local file path. If MAILWARDEN_DOWNLOAD_DIR is set, destPath is resolved inside (and restricted to) that directory. USE WHEN: the user wants an attachment saved to disk (IDs come from get_thread's attachment metadata). SIDE EFFECTS: writes a local file; never overwrites — an existing file gets a numeric suffix (file-1.pdf). The response's 'saved' field is the path actually used. Mailbox unchanged.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string"
+          },
+          "attachmentId": {
+            "type": "string"
+          },
+          "destPath": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "messageId",
+          "attachmentId",
+          "destPath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Download attachment",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "unsubscribe",
+      "description": "Unsubscribe from the mailing list a thread came from, via the sender's RFC 8058 one-click endpoint. There is deliberately no URL parameter: the endpoint is taken from the message's own List-Unsubscribe header and nowhere else. Only https one-click endpoints are called (fixed request body, response body discarded); a plain link is reported for the user to open, and a mailto: opt-out is never performed because mailwarden cannot send mail. If the sender offers nothing automatable this returns unsubscribed:false with the alternatives in `options` — it is not an error. USE WHEN: the user wants off a newsletter. Pair with archive/trash or create_filter to deal with mail already in the mailbox. DO NOT USE: to check whether unsubscribing is possible (use list_unsubscribe — it contacts nobody). A sender already contacted in this session is reported with `duplicateOf` and NOT contacted again — safe to retry after a timeout. Pass force:true for a deliberate second attempt (e.g. the endpoint answered 500). SIDE EFFECTS: makes an outbound HTTPS request to the sender's unsubscribe endpoint (plus up to 3 redirects) — the only non-Google host mailwarden ever contacts. This confirms to the sender that the address is live, and it cannot be undone. The mailbox itself is not changed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "force": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Unsubscribe from mailing list",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "bulk_unsubscribe",
+      "description": "Unsubscribe from several mailing lists in one call, one thread id per list. Threads are processed SEQUENTIALLY, and at most ONE request is made per sender — a second thread from a sender whose request already went out is reported with `duplicateOf` and no request (and says so when it advertises a DIFFERENT endpoint, i.e. is probably a separate list from the same sender). The whole call shares a 60-second budget; threads left over when it runs out come back with `skippedOutOfTime` and a reason, so re-running with the remaining ids finishes the job. Like unsubscribe, there is no URL parameter: every endpoint comes from that thread's own List-Unsubscribe header. Only RFC 8058 one-click senders are contacted; the rest come back with their alternatives in `options`. Partial success is reported, never hidden: a thread that cannot be read or whose endpoint fails becomes an entry with a `reason`, and the remaining threads still run. Set dryRun:true to rehearse: same header reads, same per-sender dedupe (as a real run with every request succeeding), and each entry a real run would contact reports the endpoint it `wouldCall`; refusals and duplicates carry none — and nobody is contacted. USE WHEN: clearing out several newsletters at once — pair with list_subscriptions, which gives you the sender rows and their newestThreadId; dryRun first to show the user which senders would be contacted. DO NOT USE: for one thread (use unsubscribe), or to find candidates (use list_subscriptions — it contacts nobody). SIDE EFFECTS: up to one outbound HTTPS request per DISTINCT sender (plus up to 3 redirects each) — the only non-Google hosts mailwarden ever contacts (none with dryRun). Each confirms to that sender that the address is live, and none of it can be undone. The mailbox itself is not changed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 25
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "threadIds"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Unsubscribe from several lists",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "snooze",
+      "description": "Snooze a thread until a date or time: archives it now, resurfaces when it comes due and sweep_snoozed runs. `until` accepts an explicit date (YYYY-MM-DD), a date+time (YYYY-MM-DD HH:MM or e.g. '2026-06-20 9am'), OR a preset resolved server-side: today, tomorrow, weekend (next Saturday), next week (next Monday), a weekday name (monday–sunday, next occurrence), 'in N days', or 'in N hours'. A preset may carry a trailing time ('tomorrow 9am', 'monday 8:30'). A timed snooze wakes at the next sweep on/after that minute. USE WHEN: deferring a thread to a later date/time instead of leaving it in the inbox. DO NOT USE: for permanent removal (use archive or trash). SIDE EFFECTS: removes INBOX, adds a dated MCP/Snoozed label; reversible via unsnooze.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "threadId",
+          "until"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Snooze thread",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "unsnooze",
+      "description": "Cancel a snooze: return the thread to the inbox now. SIDE EFFECTS: removes the snooze label, restores INBOX.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Unsnooze thread",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "sweep_snoozed",
+      "description": "Resurface all snoozed threads whose date is due (<= today), batched at 1000 messages per API request. Set dryRun:true to rehearse: reports the due labels and threads (dueLabels/dueThreads) as the sweep would find them (from the live label listing; a single snooze label with more than 5000 messages is under-counted in the rehearsal), and wakes nothing. USE WHEN: the user asks to process due snoozes, or as a scheduled maintenance call; dryRun to answer 'what is due right now?' without acting. SIDE EFFECTS: due threads return to the inbox marked unread (none with dryRun); safe to run repeatedly. failedCount/errors report messages a batch could not wake (their label is kept for the next sweep).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Sweep snoozed",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_filters",
+      "description": "List all Gmail filters — the server-side rules that auto-apply label actions to incoming mail. Shows each filter's criteria and label actions, and (for auditing) any `forward` address an existing filter carries. USE WHEN: reviewing existing automation, or to get a filter's id before delete_filter. SIDE EFFECTS: none. Requires the gmail.settings.basic scope — re-run `mailwarden --auth` if you authorized an earlier version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "List filters",
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "create_filter",
+      "description": "Create a Gmail filter: matching incoming mail automatically gets the given label actions. Give at least one criterion and at least one action. Actions are label add/remove only (labels by name or id; an unknown name in addLabels is auto-created). Common recipes: skip the inbox → removeLabels ['INBOX']; auto-mark-read → removeLabels ['UNREAD']; auto-trash → addLabels ['TRASH']; star → addLabels ['STARRED']; file under a label → addLabels ['Receipts']. A filter only affects mail arriving AFTER it's created; set applyToExisting:true to ALSO apply the same actions once to mail already in the mailbox (builds a Gmail search from the criteria and runs a bulk modify — same unverified-index caveat as bulk_modify — the sweep acts on what the index returns, which can be badly stale on read state; up to maxMessages, default 1000). The sweep's `applied.submittedMessages` is how many ids were handed to the API, NOT how many messages changed; set verify:true alongside applyToExisting to read the labels back afterwards and get `applied.verified` {applied, notApplied[], unverifiable[]}. It costs one extra read per affected thread, so it is off by default; a read-back that fails lands in `unverifiable` and never fails the call — the filter stands either way. USE WHEN: setting up a persistent auto-triage rule (e.g. 'always archive + label newsletters from x'), optionally cleaning up the existing backlog too. NOTE: forwarding filters are intentionally not supported — mailwarden creates no send/exfiltration path. SIDE EFFECTS: adds a server-side rule affecting future mail (reversible via delete_filter); with applyToExisting also modifies existing messages. Requires gmail.settings.basic.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "negatedQuery": {
+            "type": "string",
+            "minLength": 1
+          },
+          "hasAttachment": {
+            "type": "boolean"
+          },
+          "excludeChats": {
+            "type": "boolean"
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "sizeComparison": {
+            "type": "string",
+            "enum": [
+              "smaller",
+              "larger"
+            ]
+          },
+          "addLabels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "removeLabels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "applyToExisting": {
+            "type": "boolean",
+            "default": false
+          },
+          "maxMessages": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "default": 1000
+          },
+          "verify": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create filter",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "delete_filter",
+      "description": "Delete a Gmail filter by id (get ids from list_filters). USE WHEN: removing an auto-triage rule. SIDE EFFECTS: removes the server-side rule; future mail is no longer auto-processed by it. Requires gmail.settings.basic.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Delete filter",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "mailwarden",
+    "version": "0.22.0"
+  },
+  "protocolVersion": null,
+  "instructions": "mailwarden — live Gmail tools for the one account this server is connected to (call get_profile to confirm which). Use these tools whenever the user asks about their Gmail inbox, specific emails or newsletters, or wants to organize, defer (snooze) or clean up mail, or wants Gmail to auto-triage incoming mail with rules. They can: search and read mail (search results are re-verified against live labels, so `is:unread`-style predicates are trustworthy), list labels, get a triage digest of a mailbox slice, and list subscriptions/newsletters by sender with their opt-out options; archive, label, mark read/unread, trash/untrash (recoverable), bulk-change everything matching a query, snooze a thread to a date/time or preset and sweep due snoozes back into the inbox, unsubscribe from newsletters (one-click, RFC 8058), and download attachments; list, create and delete server-side Gmail filters (auto-triage rules; label actions only). By design there are NO compose/reply/forward/send tools and no permanent delete (trash only); do not look for them. Every call reads the live mailbox — nothing is cached or synced.",
+  "durationMs": 7644,
+  "stderr": "mailwarden MCP server running on stdio.\n"
+}

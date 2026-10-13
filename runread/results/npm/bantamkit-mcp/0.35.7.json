@@ -1,0 +1,491 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "bantamkit-mcp",
+  "version": "0.35.7",
+  "integrity": {
+    "dist": "sha512-xL1Z8Y3l95zfDnheVuDYd1KPjSdVLVVcF3DNbLziX7nWIG8ekaIuc6fimo6vQyqol8phMO6P6CNsoaRxkgE+Ow==",
+    "installed": "sha512-xL1Z8Y3l95zfDnheVuDYd1KPjSdVLVVcF3DNbLziX7nWIG8ekaIuc6fimo6vQyqol8phMO6P6CNsoaRxkgE+Ow=="
+  },
+  "bin": "node_modules/bantamkit-mcp/dist/cli.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T08:16:32.840Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "memory_save",
+      "description": "Save ONE durable fact to persistent memory. Use only for facts needed in a future session; never for things derivable from the repo or one-off state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "user",
+              "feedback",
+              "project",
+              "reference"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "short-kebab-case slug"
+          },
+          "description": {
+            "type": "string",
+            "description": "One line written to match the FUTURE recall query, not to summarize the body"
+          },
+          "body": {
+            "type": "string",
+            "description": "The fact itself, terse"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "names of related memories"
+          }
+        },
+        "required": [
+          "type",
+          "name",
+          "description",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "memory_recall",
+      "description": "Search persistent memory. Call BEFORE starting a task that resembles past work. Returns the top word matches, never fewer than the store default of 3 when that many match; a query that is exactly a fact's name returns that fact alone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Words a past-you would have used to describe the fact"
+          },
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Facts wanted. Raised to the store default of 3 when smaller; never lowered below it."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "validate_json",
+      "description": "Validate candidate output text against a JSON Schema. Returns {valid, feedback}; when invalid, feed the feedback back to the model and retry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "schema": {
+            "additionalProperties": true,
+            "title": "Schema",
+            "type": "object"
+          }
+        },
+        "required": [
+          "output",
+          "schema"
+        ],
+        "title": "validate_jsonArguments"
+      }
+    },
+    {
+      "name": "shiftwork_clock_in",
+      "description": "Shift-work clock-in: schema-validate the checkpoint file and return the brief for the unit at plan.cursor — {unit, role, invariants, handoff, do_not, files} — to hand to the spawned agent verbatim. The unit briefed is the one at plan.cursor, or, when unit_id is given, that unit — which must appear in shiftwork_plan's `ready`, the batch the dependency graph says may run now. A unit_id that is not ready, including one naming no unit, is refused with {\"result\": \"error\", \"reason\": \"unit <id> is not ready; ready is <a, b>\"}, and the refusals of the batch view itself (cycle, unknown dependency, unreadable checkpoint) pass through verbatim. Clock-in still never moves plan.cursor; clock_out does. Structured refusals, never exceptions: result=escalate when handoff.open_questions is non-empty, result=success when every unit is done or dropped, result=error when the checkpoint fails validation. Clock-in also WRITES: on result=brief, and only then, it appends one line {event: brief, ts, unit, role} to <checkpoint>.log.jsonl — best-effort: a log it cannot write costs the brief nothing (the brief still returns, no error, only the record is lost). clock_out reads those lines back to write `briefed` on every accounting line, so the ledger is no longer one line per clock-out; a brief line carries `event` and no `status`. See docs/shiftwork.md.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checkpoint": {
+            "title": "Checkpoint",
+            "type": "string"
+          },
+          "unit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit Id"
+          }
+        },
+        "required": [
+          "checkpoint"
+        ],
+        "title": "shiftwork_clock_inArguments"
+      }
+    },
+    {
+      "name": "shiftwork_clock_out",
+      "description": "Shift-work clock-out: record a finished unit — set its status, advance plan.cursor, merge handoff_patch, push history_entry onto the 5-entry ring — validating the whole mutated document against the checkpoint schema BEFORE an atomic write (a failure writes nothing and returns result=error). `unit_id` must be `plan.cursor` — which needs no brief, clocking out with briefed=false — OR a unit briefed since its own last clock-out; any other id keeps its refusal (`unit X is not the cursor unit Y`). plan.cursor then advances to the head of the ready batch recomputed on the mutated document, falling back to plan.units order over the remaining non-terminal units when the graph cannot batch (cycle or unknown dependency), and to unit_id when none remain. `handoff_patch` and `history_entry` are both required arguments: `handoff_patch` is shallow-merged into `handoff` and takes only its four keys (pass `{}` to leave it unchanged); `history_entry` needs `unit` and `outcome`; `status` is one of the five unit statuses — a value outside these shapes is refused by the schema check, nothing written. Every success appends one accounting line (unit, role, status, ts, briefed, plus your accounting fields, e.g. tokens/duration_ms/model) to <checkpoint>.log.jsonl, beside the brief lines clock_in writes (a brief line carries `event` and no `status`). `accounting` is optional: null, the default, logs a line with no cost figures at all; a non-null line must fit the accounting shape below. `briefed` is written by the runtime, never taken from you: true when a brief was issued for this unit since its LAST clock-out (not ever), so a unit re-run after a blocked clock-out reads false. If job.roles names this unit's role, accounting.model must be one of that role's model identifiers, spelled exactly, or nothing is written — see the `model` property below.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checkpoint": {
+            "title": "Checkpoint",
+            "type": "string"
+          },
+          "unit_id": {
+            "title": "Unit Id",
+            "type": "string",
+            "description": "The unit being clocked out. Must be plan.cursor, or a unit briefed since its own last clock-out: clock_in briefs the cursor unit by default and, when its unit_id names one, any unit shiftwork_plan reports in `ready` — and that brief is what lets clock_out accept a unit the cursor is not on."
+          },
+          "status": {
+            "title": "Status",
+            "type": "string",
+            "enum": [
+              "todo",
+              "in_progress",
+              "done",
+              "blocked",
+              "dropped"
+            ],
+            "description": "The unit's new status; the same five values the checkpoint schema allows on plan.units[].status."
+          },
+          "handoff_patch": {
+            "title": "Handoff Patch",
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Shallow-merged into `handoff`: only these four keys exist there, and a key outside them is refused by the schema check. Required; `{}` leaves `handoff` unchanged.",
+            "properties": {
+              "next_action": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Imperative first move — zero re-derivation."
+              },
+              "open_questions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "The autonomy switch: empty = driver keeps cycling, non-empty = STOP and ask."
+              },
+              "do_not": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Negative space — near-mistakes past sessions made."
+              },
+              "notes": {
+                "type": "string",
+                "description": "Free-form prose for the next session, one string; the empty string clears it."
+              }
+            }
+          },
+          "history_entry": {
+            "title": "History Entry",
+            "type": "object",
+            "required": [
+              "unit",
+              "outcome"
+            ],
+            "additionalProperties": true,
+            "description": "Pushed onto the 5-entry `history` ring; `unit` and `outcome` are required, `notes` optional, other keys pass through.",
+            "properties": {
+              "unit": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outcome": {
+                "type": "string",
+                "minLength": 1
+              },
+              "notes": {
+                "type": "string"
+              }
+            }
+          },
+          "accounting": {
+            "anyOf": [
+              {
+                "type": "object",
+                "description": "Per-unit cost. Written verbatim, beside ts/unit/role/status, as one line of <checkpoint>.log.jsonl - the ledger the N-sessions experiment reads. The keys named here have fixed meanings so a reader holding only the ledger knows what each number counts, in which unit, and which model produced it; any other key passes through unchanged (a refused key is friction, not safety). Lines written before this schema existed may spell these differently; the schema governs new writes only.",
+                "properties": {
+                  "tokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Tokens the unit consumed as the harness's subagent counter reports them: every class it reports (input, output, cache creation) summed, EXCLUDING cache reads. In a non-null accounting line it is required — a line without it is refused before anything is written; only `accounting: null`, the default, is exempt, and that logs no cost at all. A rounded self-estimate is allowed only if `note` says it is one; a unit whose cost is unknown cannot be compared with any other."
+                  },
+                  "cache_read_tokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Tokens the unit's requests served from prompt cache, kept OUT of `tokens` because they dominate a real session's traffic and would swamp the work signal. Optional: omit it when the harness reports no such figure - a written 0 means the unit read nothing from cache."
+                  },
+                  "duration_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Wall-clock from spawning the subagent to its final message, in whole milliseconds. In a non-null line it is required, and it is the only duration key with a defined meaning: older lines carry `duration`, `duration_min` or `duration_s`, which this schema neither reads nor renames."
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "The exact identifier of the model the subagent actually ran on (e.g. `claude-sonnet-5`) and nothing else - a caveat about how it was chosen belongs in `note`. Not required here: when the checkpoint's job.roles names this unit's role, clock_out already requires it and refuses a value off that role's list, spelled exactly; a checkpoint with no job.roles leaves it optional. This schema does not change that gate."
+                  },
+                  "tool_uses": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Tool calls the subagent made, as the harness counts them. Optional; it is the denominator that makes `tokens` comparable across units of different size (per-unit cost is linear in tool calls, not in unit length)."
+                  },
+                  "note": {
+                    "type": "string",
+                    "description": "Free text for what the fields above cannot say: that `tokens` is an estimate, that this is a retry or a second scope under the same unit id, what a harness counter excludes. Anything that is not a model identifier goes here, not in `model`."
+                  }
+                },
+                "required": [
+                  "tokens",
+                  "duration_ms"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Accounting"
+          }
+        },
+        "required": [
+          "checkpoint",
+          "unit_id",
+          "status",
+          "handoff_patch",
+          "history_entry"
+        ],
+        "title": "shiftwork_clock_outArguments"
+      }
+    },
+    {
+      "name": "shiftwork_status",
+      "description": "Shift-work status: read-only progress summary of a checkpoint — units by status, cursor, open-question count, last history entry. Never mutates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checkpoint": {
+            "title": "Checkpoint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "checkpoint"
+        ],
+        "title": "shiftwork_statusArguments"
+      }
+    },
+    {
+      "name": "build_identity",
+      "description": "Which bantamkit build is answering you, readable mid-call. Returns `build_id` — a content fingerprint of the running source and the asset pack it loads — plus the paths it was computed over. Call it when one MCP server name may resolve to more than one install: two endpoints reporting the same `version` are the SAME build only if their `build_id` matches, because a version string moves on release bumps and not on builds. Any fact that cannot be derived comes back as {\"unavailable\": \"<reason>\"} and is named in the `unavailable` list — never omitted, never a placeholder that reads as a value. Takes no arguments and reads no state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "title": "build_identity_toolArguments"
+      }
+    },
+    {
+      "name": "bantamkit_status",
+      "description": "Is bantamkit working, and which bantamkit? Returns a short report a person can read in the transcript: `bantamkit Active 🟢` or `bantamkit Degraded 🟠` on the first line, then the version and `build_id` of the code answering, the surfaces it serves, the memory store it is bound to with its index size against its budget, whether the event log is on, and — when degraded — every condition in full with what to do about it. Call it when the user asks whether the server is alive or working, when a bantamkit tool answered oddly and you need to know whether the server is the reason, or when a reply arrived carrying a `bantamkit degraded` footer and you want the rest of it. Every fact is observed at call time from the server's own state; nothing is a heartbeat or a cached verdict. Takes no arguments, writes nothing, and never echoes another call's arguments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "title": "bantamkit_statusArguments"
+      }
+    },
+    {
+      "name": "memory_compact",
+      "description": "Free room in persistent memory when `memory_save` was refused for budget. Archives the stalest facts of the writable project store until a fact as large as the biggest one kept will fit, and returns what moved — every archived name with its type and description. Nothing is deleted: archived facts leave the index but stay on disk, and the operator can restore any of them by name. Read-only grants and the profile layer are never touched. Call it after a budget refusal, then retry the save; calling it under budget archives nothing and says so.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reserve": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Bytes of index headroom to free below the budget. Omit for the default: the size of the largest index line the store holds, capped at half the budget."
+          }
+        }
+      }
+    },
+    {
+      "name": "skill_audit",
+      "description": "Price the skill catalogue every session pays for, and name the collisions in it. A skill's `description:` frontmatter is loaded into the agent's context in EVERY session; its body is read only when the skill is invoked, so the descriptions are the standing bill. Call it before adding or retiring a skill, or when two skills keep firing on the same phrase. Walks `root` for `<marketplace>/<plugin>/<version>/skills/<name>/SKILL.md` and answers one JSON document: `roots`, `skills` (counted), `catalogue_bytes` (UTF-8 bytes of their `description:` values), `findings` and `omissions`. Read `findings` first — each is `{kind, severity, skills, detail}`: `shared-trigger-phrase` (high; two skills quote the same literal phrase, so which fires is a coin flip), `catalogue-over-budget` (high; only when `budget` is given), `never-invoked` (low; only when `usage` is given), `frontmatter-malformed` and `name-mismatch` (medium). Then `omissions`: counted skills plus omissions account for every SKILL.md found, each `{subject, count, size, what}` with subject one of `plugin-not-enabled`, `duplicate-skill`, `stale-version`, `unreadable-file`, `unparsed-frontmatter`. The tool reads nothing but `root`; the three facts a directory cannot answer come from the caller — `enabled` (plugin ids the host has switched on, `<plugin>@<marketplace>`; the cache also holds disabled plugins, so without it the bill is inflated), `usage` (call counts per skill) and `versions` (the version directory the host serves per plugin; a plugin absent from it gets the directory name that sorts LAST in byte order, which is wrong for `10.0.0` against `9.0.0`). Refused with their own sentence, never as a partial answer: an unknown `check`, a negative `budget`, an EMPTY `root`, a `root` that is missing or is a file. Full rules in docs/skill-audit.md.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Directory to scan for SKILL.md files, absolute or relative to the server's working directory. It must name a directory: the empty string is refused rather than resolved, because resolving it would audit whatever directory the server happens to be standing in"
+          },
+          "enabled": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Plugin ids that are switched on, `<plugin>@<marketplace>`; when given only skills under those plugins are counted, when omitted every skill under `root` counts"
+          },
+          "usage": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Skill id (`<plugin>:<name>`) to call count, the caller's own measurement; a counted skill absent from a supplied map is treated as zero"
+          },
+          "check": {
+            "type": "string",
+            "enum": [
+              "all",
+              "phrase",
+              "budget",
+              "frontmatter"
+            ],
+            "description": "Which family of findings to report; default `all`. `skills`, `catalogue_bytes` and `omissions` are reported whatever this says"
+          },
+          "budget": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Catalogue byte budget; `catalogue-over-budget` is only reported when this is given"
+          },
+          "versions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Plugin id (`<plugin>@<marketplace>`) to the version directory name the host actually serves; when a plugin is named here that directory is resolved whatever byte order would have said, and a plugin absent from it falls back to byte order"
+          }
+        },
+        "required": [
+          "root"
+        ]
+      }
+    },
+    {
+      "name": "memory_dream",
+      "description": "Consolidate the memories the project layer and the machine-wide profile layer hold under the SAME NAME, and say exactly what changed. Byte-identical copies collapse to one; a pair that has diverged is UNIONED — every claim from both copies survives, never a winner-takes-all — and a relative date in a body is annotated with the day it resolves to against that fact's own mtime, never against today. The survivor stays in the writable project layer and the profile copy MOVES to that store's archive/: nothing is deleted and any consumed memory can be restored by name. This is a correctness pass, not a token saving: the profile index is derived at read time and is not loaded from a prompt, so consolidating it frees approximately no bytes — what it buys is one copy of a ruling instead of two that can disagree. It defaults to a DRY RUN because the profile store is machine-wide: a memory archived out of it stops answering for every other project on this machine that has no store of its own. Read the plan first, then call it again with dry_run false to apply it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "Preview only. True (the default) performs every read, merge and projection and writes nothing. Pass false to apply the plan."
+          }
+        }
+      }
+    },
+    {
+      "name": "token_ledger",
+      "description": "What a session actually cost, read off the host's own transcripts. Walks `root` for `*.jsonl` transcripts — the host writes `<cwd-slug>/<session>.jsonl` and `<cwd-slug>/<session>/subagents/*.jsonl` beneath `~/.claude/projects` — and answers ONE JSON document: `root`, `transcripts`, `lines`, `requests` (distinct API requests), `totals` (the four classes: `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`), `sessions` (one row each), `omissions`, and `cost` only when `model` is given. Call it to answer 'what did this work cost' from the API's own `usage` blocks — nothing here is estimated. Point `root` at ONE project's slug directory, not the whole projects tree: there is no time window and no summary mode, so a whole-corpus call answers a row per session ever recorded and blows the host's tool-result cap. The four classes are reported and priced separately because on a real prompt 98.1 % of the tokens were `cache_read`. Counting is per `requestId`, never per line: one response is written as several records with the same `usage`, so the dedupe spans the whole walk and every later copy is a `duplicate-request` omission. A subagent's transcript carries its PARENT's `sessionId`, so its cost lands in the parent row as `sidechain_requests`. `lines` equals `requests` plus the sum of every omission's `count`, always. An omission is `{subject, count, what}`; `what` names the first site as `<relpath>:<line>` plus `and N more`. `cost` needs a rate: the shipped price table has none, so `{\"unavailable\": \"no rate recorded for model ...\"}` is the NORMAL answer, not an error; a rate enters through `$BANTAMKIT_PRICES` or `prices`. Refused with their own sentence: an EMPTY `root`, a `root` that is missing or is a file, an EMPTY `model`, and a token total above 2**53-1. The record rule and the nine omission subjects: docs/ledger.md.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Directory of host transcripts to walk, absolute or relative to the server's working directory; `~/.claude/projects` is where the host keeps them on this machine. It must name a directory: the empty string is refused rather than resolved, because resolving it would read whatever directory the server happens to be standing in"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model to price the totals as, e.g. the id an assistant record's `message.model` carries. Omit it and no `cost` key is reported at all; name one with no recorded rate and `cost` is `{\"unavailable\": ...}`, which is what the shipped table answers for every model"
+          },
+          "prices": {
+            "type": "string",
+            "description": "Price table to read instead of `$BANTAMKIT_PRICES` or the shipped one; only consulted when `model` is given. A malformed table is a configuration fault and stops with its own sentence, rather than being reported as an unpriced model"
+          }
+        },
+        "required": [
+          "root"
+        ]
+      }
+    },
+    {
+      "name": "work_plan",
+      "description": "Work plan: turn a dependency graph into the batches that may run in parallel. Takes `nodes`, each `{id, depends_on, priority}` — `priority` defaults to 0 — and answers `{\"result\": \"plan\", \"batches\", \"sequence\", \"width\"}`: batch k holds every node whose dependencies all appear in batches below k, `sequence` is those batches flattened in order, and `width` is the largest batch length — the widest fan-out, which is the number an orchestrator needs to decide whether it can afford the batch. Order inside a batch is priority descending, then the order the nodes were given; both halves are contract, because determinism inside a batch is what two implementations are held to. Empty `nodes` is an ANSWER, not a refusal: no batches, no sequence, width 0. Three refusals, checked in this order and one sentence each: `duplicate node id <id>`, `node <id> depends on <dep>, which no node declares`, and `the graph has a cycle: <a> -> <b> -> <a>`. It reports what the graph permits and decides nothing about what may actually be dispatched together — `depends_on` encodes logical order, not file contention, so a batch this tool calls parallel may still hold work that writes one file. Pure computation over the nodes it was handed: it opens no file and takes no path. Never mutates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "title": "Nodes",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "The node's identifier, unique across `nodes`"
+                },
+                "depends_on": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Ids this node waits for; every one of them must be declared by some node"
+                },
+                "priority": {
+                  "type": "integer",
+                  "description": "Tie-break inside a batch, descending. Optional; 0 when absent"
+                }
+              },
+              "required": [
+                "id",
+                "depends_on"
+              ]
+            }
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "title": "work_planArguments"
+      }
+    },
+    {
+      "name": "shiftwork_plan",
+      "description": "Shift-work plan: read-only batch view of a checkpoint — which units its `depends_on` graph permits to run in parallel. Answers `{\"result\": \"plan\", \"batches\", \"ready\", \"sequence\", \"width\", \"cursor\"}`: `ready` is `batches[0]`, the units whose dependencies are all satisfied, and `width` is the largest batch length, the widest fan-out. A `ready` member beyond the cursor is clockable, but only in that order: shiftwork_clock_in briefs any unit in `ready` when `unit_id` names it, and shiftwork_clock_out then accepts that unit because it was briefed — an id that is neither the cursor nor briefed since its own last clock-out is still refused. Units with status `done` or `dropped` are satisfied — dropped from the graph, and edges pointing at them treated as already resolved; `todo`, `in_progress` and `blocked` stay in it. Every unit has priority 0, because the checkpoint schema has no priority field, so order inside a batch is `plan.units` order. Same refusal sentences as `work_plan` for a duplicate id, an unknown dependency or a cycle, and the same refusals `shiftwork_status` gives for a checkpoint it cannot read. It reports what the dependency graph permits; it does not move the cursor, which is echoed unchanged so the single-pointer contract and the batch view can be read side by side. An orchestrator stays responsible for what it actually dispatches: `depends_on` encodes logical order, not file contention. Never mutates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checkpoint": {
+            "title": "Checkpoint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "checkpoint"
+        ],
+        "title": "shiftwork_planArguments"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "bantamkit",
+    "version": "0.35.7"
+  },
+  "protocolVersion": null,
+  "instructions": "# Memory\n\nThe runtime enforces format, dedupe, and budgets. You only decide WHEN and WHAT.\n\n## Recall first\n\nBefore a task that resembles past work, call memory_recall with the words a\npast-you would have used. Do this before acting, not after.\n\n## When to save\n\n- The user corrects you or states a preference → type \"feedback\"\n- A durable fact about the user → \"user\", about ongoing work → \"project\",\n  a URL/dashboard/ticket → \"reference\"\n\n## When NOT to save\n\n- Anything derivable from the repo, git history, or docs\n- One-off state that only matters in this conversation\n\n## Writing the description\n\nWrite it to match the future recall QUERY, not to summarize the body.\nAsk: \"what words will future-me search with?\" Put related memory names in links.\n\n## On \"duplicate\" replies\n\nIf memory_save answers that a similar memory exists, either update it by\nsaving under that SAME name, or skip — never rename to force a second copy.\n\n## Layers\n\nRecall lines may start with `[project]`, `[extra:<name>]`, or `[profile]` —\nwhere the fact came from. Prefer `[project]` when they conflict; saves always\ngo to the project store.\n",
+  "durationMs": 5752,
+  "stderr": ""
+}

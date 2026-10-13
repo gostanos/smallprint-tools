@@ -1,0 +1,151 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "pypi",
+  "name": "embodify-mcp",
+  "version": "0.1.0a2",
+  "integrity": {
+    "dist": "sha256:6e28c3723de1c73fed90fd00da0e4d7c9b8b23db3643eaec778cc9b2e1afe171",
+    "installed": "sha256:6e28c3723de1c73fed90fd00da0e4d7c9b8b23db3643eaec778cc9b2e1afe171"
+  },
+  "bin": "embodify-mcp = embodify_mcp.mcp:main",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/python:3.12-slim-bookworm",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T07:49:15.222Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "reset_task",
+      "description": "Start a new FakeSim episode. **All three arguments are optional**: omit them all to use the server's default scene (usually task 0 of the suite with initial layout 0), which is the most common use.\nTo switch tasks, use list_tasks first: without arguments it lists the suites, with suite it gives the task_index and instruction of every task in that suite; then pass the chosen suite / task_index. init_state_index picks another object layout of the same task. If the server was started with --lock-task (task_locked is true in get_session_info), passing any of these arguments returns a task_locked error.\nIf an episode is already running, returns already_running; call stop_episode first.\nReturns run (short run ID), task (suite, task_index, name, instruction, init_state_index), images (agentview and robot0_eye_in_hand: two separate PNGs), state (eef_pos_m is the end-effector XYZ position in meters; eef_rpy_rad.roll_x, pitch_y and yaw_z are the orientation about the robot base X/Y/Z axes in radians; gripper.command is the open/close target and gripper.opening_m the gripper opening in meters), step (simulation steps used) and steps_left (simulation steps left in this episode).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Which task of the suite; omit to use the server's default scene (task 0 when switching suites). See list_tasks with suite for the options."
+          },
+          "init_state_index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Which initial layout of the task; 0 if omitted. Must be below the task's n_init_states."
+          },
+          "suite": {
+            "type": "string",
+            "description": "Switch to another suite; omit to keep the current one. See list_tasks (without arguments) for the suites."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "observe",
+      "description": "Read the current RGB images from two cameras and the end-effector/gripper state, without advancing the simulation or using the step budget. Returns images (agentview and robot0_eye_in_hand: two separate PNGs), state (eef_pos_m is the end-effector XYZ position in meters, eef_rpy_rad the orientation about the base XYZ axes in radians, gripper holds the target command and opening_m in meters), step (simulation steps used), steps_left (simulation steps left) and status (running).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "move_relative",
+      "description": "Move the end effector by delta_xyz meters in the FakeSim world frame (z up, table surface at z=0.80 m), optionally rotating by delta_rpy about the robot base X/Y/Z axes (radians). The server approaches the target step by step with P control and returns only when a definite stop condition triggers, not after a fixed number of steps.\naction.stop_reason says why the call stopped, one of four:\n- reached: Within the target tolerance (8 mm in position, 0.02 rad in orientation); the motion is complete.\n- stalled: Barely moved for 3 consecutive steps (less than 1 mm in total) without reaching the target, which usually means something is blocking it: the table, an object, or a joint limit. Repeating the same command has no effect; change direction, or lift or back off first. This is the main signal of contact.\n- step_cap: Hit the per-call internal step limit while the end effector was still moving toward the target. Call again with the remaining displacement in the same direction to continue.\n- budget: The episode's total step budget ran out during the motion; only stop_episode can be called afterwards.\nMotion is a best-effort approach and may fall short of the requested delta: judge progress by action.achieved_delta_xyz (actual displacement of this call, meters) and action.remaining_distance_m (meters still missing to the requested target), and do not assume the request was achieved.\nReturns images (two separate PNGs), state (eef_pos_m is the end-effector XYZ position in meters, eef_rpy_rad the RPY orientation in radians, gripper holds command/opening_m), action (the requested delta_xyz/delta_rpy, executed_steps, stop_reason, achieved_delta_xyz, remaining_distance_m), step (simulation steps used after the call), steps_left (simulation steps left) and status (running). When the budget is already 0, returns a step_limit error instead of silently doing nothing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delta_xyz": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "[dx, dy, dz] in meters."
+          },
+          "delta_rpy": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "[droll, dpitch, dyaw], increments about the robot base X/Y/Z axes in radians; omit to keep the current orientation."
+          }
+        },
+        "required": [
+          "delta_xyz"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_gripper",
+      "description": "Open or close the gripper. The server keeps sending the command and watches the opening width, and returns only when a definite stop condition triggers, not after a fixed number of steps.\naction.stop_reason says why the call stopped, one of four:\n- settled: After at least 10 internal steps of the same command, the opening varied by less than 0.5 mm over the last 2 steps. This only means the opening is momentarily stable, possibly because something blocks it; it does not guarantee a fully open gripper, a firm grasp or a released object. Check state.gripper.opening_m and the images.\n- step_cap: Hit the per-call internal step limit before the opening was confirmed stable; the gripper may still be starting or moving. Repeat the same command to continue.\n- budget: The episode's total step budget ran out during the action; only stop_episode can be called afterwards.\n- no_op: The request matches the current gripper target and no gripper call is pending; nothing was executed and no budget was used. It does not mean an object was released.\nReturns images (two separate PNGs), state (eef_pos_m is the end-effector XYZ position in meters, eef_rpy_rad the RPY orientation in radians, gripper.command the gripper target and gripper.opening_m the opening in meters), action (the requested gripper target, executed_steps, stop_reason, opening_m before and after), step (simulation steps used after the call), steps_left (simulation steps left) and status (running). When the budget is already 0, returns a step_limit error and the gripper target stays unchanged.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "close"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "stop_episode",
+      "description": "End the current simulation and save its frames, event log and summary. Returns run (short run ID), status (stopped) and artifacts (events: path of events.jsonl, frames: PNG frame directory, summary: path of summary.json).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_session_info",
+      "description": "Read the state of **the current run**: task context, instruction, step count and robot state. Renders no images and uses no step budget; callable at any time, including before the first reset_task.\nThis only says where you are now. To see which tasks are available, use list_tasks.\nReturns run (short run ID), status (idle/running/stopped), step (simulation steps used), max_steps (the episode limit), steps_left (simulation steps left), task (suite, task_index, name, instruction, init_state_index), task_locked (true means the server fixed this run's scene, and reset_task accepts no scene arguments), and state (eef_pos_m is the XYZ position in meters, eef_rpy_rad the RPY orientation in radians, gripper holds command/opening_m). While status is idle there is no task or state; instead it returns default_scene (the scene a reset_task without arguments starts).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_tasks",
+      "description": "List the tasks FakeSim offers. **Independent of the current run**: callable at any time, renders no images, uses no step budget and does not change a running episode.\nWithout arguments: returns suites, the name and task count of every suite, plus the total task count. Start here, pick a suite, then look inside it.\nWith suite: returns task_index, instruction and n_init_states (the number of initial layouts of the same task) for every task in that suite.\nPass the chosen suite and task_index to reset_task to start.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "suite": {
+            "type": "string",
+            "description": "The suite whose tasks to list; omit to get only the suite overview."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "embodify-mcp",
+    "version": "0.1.0a2"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 3370,
+  "stderr": "[embodify-mcp] The controller constants (max_position_delta_m / max_rotation_delta_rad / gripper_close_sign) have not been verified against this backend; this run is recorded as unverified. Add --controller-verified once they are.\n"
+}

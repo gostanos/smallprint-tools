@@ -1,0 +1,979 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "healix-mcp",
+  "version": "1.12.0",
+  "integrity": {
+    "dist": "sha512-fPp2RpGU8VW5DMEucx4UDo9GTImGybBtx9sohgl6APgNeDSqLfX5YRP9GTygdQoyBUGzOf3VKCKjk1OQfW+UIA==",
+    "installed": "sha512-fPp2RpGU8VW5DMEucx4UDo9GTImGybBtx9sohgl6APgNeDSqLfX5YRP9GTygdQoyBUGzOf3VKCKjk1OQfW+UIA=="
+  },
+  "bin": "node_modules/healix-mcp/./dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T11:52:42.070Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "healix_diagnose",
+      "description": "Read the host-independent triage contract and diagnosis history, or append an evidence-backed diagnosis proposal. Never changes test pass/fail state or authorizes a retry. Diagnose application defects vs automation faults vs missing data/environment before repairing. The same contract applies to every MCP client.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "diagnosis": {
+            "type": "object",
+            "properties": {
+              "execution": {
+                "type": "string",
+                "enum": [
+                  "failed",
+                  "blocked",
+                  "outcome_unknown"
+                ]
+              },
+              "classification": {
+                "type": "string",
+                "enum": [
+                  "application_defect",
+                  "automation_defect",
+                  "test_data",
+                  "environment",
+                  "unresolved"
+                ]
+              },
+              "expected": {
+                "type": "object",
+                "properties": {
+                  "behavior": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "behavior",
+                  "source"
+                ]
+              },
+              "observed": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "preconditions": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "verified",
+                        "missing",
+                        "unknown"
+                      ]
+                    },
+                    "evidence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "evidence"
+                  ]
+                }
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "alternatives": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "nextAction": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "execution",
+              "classification",
+              "expected",
+              "observed",
+              "evidence",
+              "preconditions",
+              "confidence",
+              "alternatives",
+              "nextAction"
+            ]
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Failure Triage",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "healix_list_sessions",
+      "description": "[NO SESSION REQUIRED] List all live Healix sessions discovered from the local registry (~/.healix/sessions/). Each entry shows its `sessionId` — the unique handle every OTHER healix_* tool requires you to pass back as `sessionId`. Use this to check what sessions are currently running, or to recover the sessionId of one you started earlier in this conversation. Two or more agents can run concurrent sessions safely as long as each one tracks and passes ITS OWN sessionId — never guess or reuse one from another agent/conversation. Returns an empty array when no session is active — this is normal before starting a test run.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": {
+        "title": "List Sessions",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_list_run_targets",
+      "description": "[NO SESSION REQUIRED] Read healix.agent.json and wdio.conf for the project. Returns: available platforms (with app config status), and named test suites extracted from the wdio config. Call this before healix_start_session to know what platform/suite combinations are available. Suite names from this output are the correct values to pass as the `spec` argument to healix_start_session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string",
+            "description": "Absolute path to the project root containing healix.agent.json. Defaults to cwd."
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "title": "List Run Targets",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_scaffold_locators",
+      "description": "[NO SESSION REQUIRED] Scan all @ScaffoldPage TypeScript files in the project for @Find/@FindAll/@Lang decorated fields and generate (or update) the corresponding .locators.json stub files. Each stub file contains one empty-string entry per decorated field — fill the values with healix_replace_locator after discovering the real selectors from the live DOM. Call this immediately after writing a new POM .ts file so the JSON keys are in sync with the TypeScript fields. Safe to call multiple times — existing locator values are preserved; only missing keys are added. If it reports finding no @Find fields, your POMs use plain getters instead of @Find() — those skip self-healing; convert them to @ScaffoldPage + @Find() to enable it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string",
+            "description": "Absolute path to the project root. Defaults to cwd."
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "title": "Scaffold Locators",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_scaffold_page",
+      "description": "[NO SESSION REQUIRED] Generate a CORRECT page-object file — YOU decide WHERE it lives and what it is called by passing `file`: the full project-relative path INCLUDING the filename, which must end \".page.ts\" (e.g. \"test/pageobjects/LoginPage.page.ts\" or \"test/pageobjects/kyc/CustomerSummary.page.ts\"). The class name is derived from the filename, so name the file PascalCase (\"LoginPage.page.ts\" → class LoginPage). You also supply the field names. Healix writes that file (with the right import, @ScaffoldPage(import.meta.url), and one BARE @Find() field per name) plus the sibling .locators.json stub, creating any directories. PREFER this over hand-writing a POM: it cannot get the import, decorators, or field shape wrong. MOBILE: pass platform: \"android\" | \"ios\" so the .locators.json entries start with the right key (default \"web\"). The file also carries commented POM rules (the perform<Page>Page / verify* method shape and step() annotations) — read and follow them when you add methods. Selectors are NOT invented — the .locators.json is created empty; fill each one with healix_replace_locator after reading the live DOM via healix_get_dom. Refuses to overwrite an existing file unless overwrite:true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Full project-relative path INCLUDING the filename, which must end \".page.ts\". YOU choose the directory and name, e.g. \"test/pageobjects/LoginPage.page.ts\" or \"test/pageobjects/kyc/CustomerSummary.page.ts\". The class name is derived from the filename (so name the file PascalCase, e.g. \"LoginPage.page.ts\" → class LoginPage)."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Field names (camelCase identifiers), one per element you will interact with, e.g. [\"usernameInput\",\"passwordInput\",\"loginButton\"]."
+          },
+          "projectRoot": {
+            "type": "string",
+            "description": "Absolute path to the project root. Defaults to cwd."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "web",
+              "android",
+              "ios"
+            ],
+            "description": "Target platform (default web) — decides which key the .locators.json entries start with (e.g. { \"android\": \"\" }). Other platform keys can be added later via healix_replace_locator."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "Overwrite an existing file. Default false (refuses if the file exists)."
+          }
+        },
+        "required": [
+          "file",
+          "fields"
+        ]
+      },
+      "annotations": {
+        "title": "Scaffold Page",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_scaffold_suite",
+      "description": "[NO SESSION REQUIRED] Generate a CORRECT spec file — YOU decide WHERE it lives and what it is called by passing `file`: the full project-relative path INCLUDING the filename, which must end \".spec.ts\" (e.g. \"test/specs/kyc-base.spec.ts\"). This EXACT path is what you later pass to healix_start_session as `spec` — there is no kebab-case guessing, so the name you create and the name you run are the same. You also supply `name` (the human suite title for testSuite(\"…\") — it does NOT decide the filename), the test titles (one per milestone you will build and pass in order), and (optionally) `pages`: the project-relative PATHS of page files to import (the same paths you passed to scaffold_page). Imports are wired relative to this spec's location, so files may live in any directory. MOBILE: pass platform: \"android\" | \"ios\" — the clean-start before() then RELAUNCHES THE APP instead of the web navigate + cookie/localStorage clear (browser calls would fail on a native app). Healix writes the file with the right import (testSuite/testCase from wdio-healix-service, never describe/it), a before() that navigates to the app URL, the page imports, and each testCase stubbed with `throw new Error('not implemented')` so an unimplemented milestone fails LOUD (never an empty body, which would pass green). The file also carries commented authoring rules — drive pages ONLY through their methods, and implement a case only AFTER you have observed its screen (healix_screenshot / healix_get_dom). Read those comments; replace each throw with observed steps. PREFER this over hand-writing a spec. Refuses to overwrite an existing file unless overwrite:true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Full project-relative path INCLUDING the filename, which must end \".spec.ts\". YOU choose the directory and name, e.g. \"test/specs/kyc-base.spec.ts\" or \"test/specs/kyc/base.spec.ts\". This EXACT path is what you pass to healix_start_session — no kebab-case guessing."
+          },
+          "name": {
+            "type": "string",
+            "description": "Human suite title shown in reports, e.g. \"KYC Base\". This is ONLY the testSuite(\"…\") label — it does NOT decide the filename (the file does)."
+          },
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Test-case titles, one per milestone you will build and pass in order, e.g. [\"Log in\", \"Open Account Maintenance\", \"Search customer\"]."
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Project-relative PATHS of page files to import (the same paths you passed to healix_scaffold_page), e.g. [\"test/pageobjects/LoginPage.page.ts\"]. Imports are wired relative to this spec's location, so files may live in any directory."
+          },
+          "projectRoot": {
+            "type": "string",
+            "description": "Absolute path to the project root. Defaults to cwd."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "web",
+              "android",
+              "ios"
+            ],
+            "description": "Target platform (default web) — decides the clean-start before() shape: web navigates + clears cookies/localStorage; android/ios relaunch the APP instead (no browser calls in a native suite)."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "Overwrite an existing spec. Default false."
+          }
+        },
+        "required": [
+          "file",
+          "name",
+          "tests"
+        ]
+      },
+      "annotations": {
+        "title": "Scaffold Suite",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_start_session",
+      "description": "[NO SESSION REQUIRED] Spawn a new interactive Healix test session and wait until it is ready. Reads healix.agent.json for platform config, resolves the spec path, spawns a detached WDIO process, then blocks internally until the session is active and tests have registered (typically 15–90 s). Returns \"Session Started\" with a `sessionId`, test count, and POM count — the session is ready to use when this returns. SAVE the sessionId: every other healix_* tool call (this session onward) requires it as `sessionId` — there is no default/fallback session anymore, so omitting it or reusing one from a different session/agent will fail or (worse) silently target the wrong live session. Reuse requires an explicit sessionId matching project, platform and spec. Omit sessionId for an independent launch; takeover:true also requires explicit sessionId. Concurrent agents each get their own sessionId from their own call to this tool — that is the supported way to run multiple sessions at once, including multiple agents against the SAME project (different platforms, or the same platform with takeover coordinated between them). The spec is automatically loaded as part of startup, so tests are visible in healix_status immediately. No polling required after this call. spec accepts: suite name (from healix_list_run_targets), description, relative path, or spec basename. MOBILE: capabilities (device, app id, provider) come entirely from the wdio conf — nothing is passed or overridden here. healix_list_sessions shows the device and app a live session actually resolved. On failure: read the error message for the root cause before retrying. Most common cause: the spec imports a POM .ts file that does not exist on disk yet — WDIO crashes at compile time before the session can register.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "description": "Platform to run on — must match a key in healix.agent.json (e.g. \"android\", \"ios\", \"web\")."
+          },
+          "spec": {
+            "type": "string",
+            "description": "Suite name from healix_list_run_targets, or a spec filename/path."
+          },
+          "projectRoot": {
+            "type": "string",
+            "description": "Absolute path to the project root containing healix.agent.json. Defaults to cwd."
+          },
+          "startUrl": {
+            "type": "string",
+            "description": "Web only: URL to navigate to right after the session starts (overrides the platform's startUrl in healix.agent.json)."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Explicit existing launch to reuse. Must match this project, platform and spec. Omit to create an independent session."
+          },
+          "takeover": {
+            "type": "boolean",
+            "description": "Stop the explicitly supplied sessionId and start fresh. Never selects a session implicitly."
+          }
+        },
+        "required": [
+          "platform",
+          "spec"
+        ]
+      },
+      "annotations": {
+        "title": "Start Session",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_replace_locator",
+      "description": "[SESSION REQUIRED] ⚠ LAST RESORT — out-of-band bulk/false-positive locator write. The design philosophy is that every locator update happens IN FLIGHT: run the test, let it pause on the missing/wrong field, then healix_fix_locator (it writes AND resumes, and the path is already resolved by the getter that paused). Use healix_replace_locator ONLY for special cases: correcting a false positive, or bulk pre-filling known selectors for a page before you run that page's tests. You pass the page SOURCE file (pageFilePath, the .page.ts) — NEVER a JSON path. The write is performed BY THE WORKER, which resolves the sibling .locators.json from that source file exactly the way @Find reads it (a relative pageFilePath is anchored to the project root by the worker, never the MCP cwd). Pass a locators object mapping field names to selector strings — one field or many in a single call. Field names should already exist in the JSON (created by healix_scaffold_page / healix_scaffold_locators). The JSON is read on every property access at runtime — no session restart or healix_load_page call needed after writing. Validate with healix_validate_locator first when selectors may be ambiguous (non-unique attributes). Every value you write here must meet the selector-quality bar in healix_validate_locator (web = XPath only; non-brittle; never keyed on dynamic data). VARIABLE LOCATORS — when a test asserts data it supplied, put a ${name} placeholder in the selector, never the literal value, e.g. //a[contains(string(.), \"${linkName}\")]. Pitfalls: write ${name} not {name}; compare with = or contains() (a comma is NOT a comparator); use the real tag not the ARIA role (//a, not //link). A data parameter a method takes MUST flow into a ${var} (or into an assertion) — otherwise the method passes for ANY input and proves nothing. (${name} resolution/precedence/typing: see the resident guide, SPRYV.md.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageFilePath": {
+            "type": "string",
+            "description": "The page SOURCE code file (.page.ts) — NOT the JSON. Relative to the project root (e.g. \"test/pageobjects/LoginPage.page.ts\") or absolute. The worker resolves the sibling .locators.json from it exactly the way @Find reads it."
+          },
+          "platform": {
+            "type": "string",
+            "description": "Platform key: \"web\", \"ios\", or \"android\"."
+          },
+          "locators": {
+            "type": "object",
+            "description": "Field name → selector string. All keys must already exist in the JSON (created by healix_scaffold_locators). One or many fields in one call.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live worker to write through."
+          }
+        },
+        "required": [
+          "pageFilePath",
+          "platform",
+          "locators",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Replace Locator",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_status",
+      "description": "[SESSION REQUIRED] Get a complete snapshot of the live session: active state, suite, test counts (passed/failed/notRun), whether a test is running (and since WHEN — currentActivity with its start time), who drives the session (agent vs human terminal), whether the run is WAITING ON A HUMAN (a maintenance dialog open in the user's terminal), the last lifecycle event, full test list with per-test results, and device/browser info. Use this as your primary information tool — it replaces separate list_tests and device_info calls. Every tool response also ends with \"Console since your last look\": the worker's console (and lifecycle events ⚑) since your previous call, in order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Session Status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_run_test",
+      "description": "[SESSION REQUIRED] Run a test (or all tests) and return the result directly. Pass testName to run a specific test by exact name; omit testName to run ALL tests sequentially. Tests are STATEFUL — each test continues from the browser state left by the previous one. Run them in order. Blocks until the test reaches a terminal state: passed, failed, or paused on a locator failure. The wait is event-driven (the worker wakes this call on the run's end event, a pause, a terminal dialog, an abort). If the test is still running after ~50s, returns a \"still running\" response WITH the run's age and the console since your last look — call healix_run_test again with the same testName to continue waiting (it will NOT re-dispatch the test), or healix_wait. If the response says WAITING ON HUMAN, a maintenance dialog is open in the user's TERMINAL (human-driven session): the run is not stuck and you cannot answer it — tell the user, then healix_wait. On locator failure the response is a \"Test Paused\" handoff — heal with healix_get_dom + healix_validate_locator + healix_fix_locator. Do NOT call healix_status to poll for the result — the result is in this response. IDEMPOTENCY: re-running a test replays it against the CURRENT browser state, not a fresh one. That is safe only for idempotent (read-only / re-enterable) tests. A NON-idempotent test — one that mutates one-way (submits a form, creates a record, consumes an OTP, transfers funds) or leaves the UI in an altered state (e.g. a dropdown it already opened is now open, so re-opening it toggles it shut) — cannot be re-run on the state it already left: re-running it will double-apply, a FALSE failure. To run a non-idempotent test again, do NOT re-run it alone — reset to a clean baseline by running the before hook (healix_run_hook({ hookName: \"before\" })), then re-run the preceding testCases in order up to this one, so it executes from the same clean starting state it was authored against.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testName": {
+            "type": "string",
+            "description": "Exact test name as returned by healix_status. Omit to run ALL tests in the suite."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Run Test",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_run_hook",
+      "description": "[SESSION REQUIRED] Run ONE hook group by name — before, beforeEach, afterEach, or after — the explicit counterpart to healix_run_test. Hooks no longer fire automatically: loading or reloading a spec is a CODE refresh only and does NOT run before() or move the browser. So when you need to RESET the page to the app start (what before() typically does via browser.url), you call healix_run_hook({ hookName: \"before\" }) yourself — on demand, only when you want it. Blocks until the hook finishes (event-driven, same ~50s cap + idempotent re-call semantics as healix_run_test); on a locator failure inside the hook it returns the same \"Paused\" handoff you heal normally — unless the session is human-driven (started in a terminal without HEALIX_AGENT): then the dialog opens in the user's terminal and the response says WAITING ON HUMAN (not stuck; tell the user, then healix_wait). See the run sequence (hooks + tests, with status) and the browser's current page in healix_status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hookName": {
+            "type": "string",
+            "enum": [
+              "before",
+              "beforeEach",
+              "afterEach",
+              "after"
+            ],
+            "description": "Which hook group to run. \"before\" runs the suite setup (typically navigates to the app URL — use it to RESET the page to a known start). \"beforeEach\"/\"afterEach\" run the per-test hooks once. Hooks do NOT fire automatically anymore — you invoke them by name, like a test."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "hookName",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Run Hook",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_read_logs",
+      "description": "[SESSION REQUIRED] Read console log output captured since the last call (cursor-based — each call advances the cursor). Test boundaries are injected automatically: [TestStart] <name> and [TestEnd] <name> — passed|failed. Entries with level \"marker\" are structured events like [LocatorFailure] — parse these for healing decisions. Entries with level \"event\" (rendered ⚑) are lifecycle events with timestamps: test/hook start+end, locator.failure, pause.start/end, prompt.open/close (a dialog in the user's terminal), run.aborted. Pass reset:true to replay from the beginning; pass from:<seq> to read a specific range (older ranges are served from the on-disk console file, nothing is lost). IMPORTANT: By default, if the raw log exceeds 500 lines the response is automatically filtered to marker-level entries only to avoid token limit issues — a suppression notice is appended. Pass level:\"all\" to force full output regardless of size. Pass level:\"marker\" to always get only structured marker events ([TestStart], [TestEnd], [LocatorFailure], etc.). DRIVER-LEVEL investigation (webdriver COMMAND/RESULT trace, session errors, timeouts, stale elements): this buffer is the curated signal stream, NOT the full log. The response and healix_status carry a \"WDIO log\" file path inside the project — Grep/Read that live file directly for the complete engineer-grade execution log.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "number",
+            "description": "Read from a specific log index (stateless, does not advance cursor)."
+          },
+          "reset": {
+            "type": "boolean",
+            "description": "If true, reset cursor to 0 before reading — returns full buffer."
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "marker",
+              "log",
+              "all",
+              "agent"
+            ],
+            "description": "\"agent\" — clean structured lines only (-> run, ok run, FAIL run, PAUSE) + verbatim exceptions. \"marker\" — structured events only. \"all\" — full verbose output. Default: auto (marker-only when >500 lines)."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Read Logs",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_wait",
+      "description": "[SESSION REQUIRED] Block until the worker journals the NEXT lifecycle event — test/hook start or end, a pause for you, a terminal dialog opening or closing (prompt.open / prompt.close), an abort, the session stopping — then return the events plus the console printed meanwhile. This is how you follow a run without polling: the worker WAKES you (push), you never sleep-loop on healix_status. Use it after a \"Still In Progress\" / \"WAITING ON HUMAN\" response, or whenever you want to know what happened next. Returns after maxSeconds (default 45) if nothing happened — that is information too (the run is genuinely long), not an error.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxSeconds": {
+            "type": "number",
+            "description": "How long to wait for the next lifecycle event before returning anyway (1–90, default 45). Above your MCP host request timeout (often 60s) the host may abort the call."
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional: only wake on these event types (e.g. [\"hook.end\",\"prompt.close\"]). Default: any lifecycle event."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Wait For Next Event",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_get_dom",
+      "description": "[SESSION REQUIRED] Inspect the current screen. WEB: returns an inline ARIA accessibility tree (compact YAML — role, name, state; read this first) plus a DOM cache file inside the project (grep it only for what ARIA lacks — data attributes, CSS classes). NATIVE (Appium): returns the FULL XML tree INLINE (attribute-trimmed, no elements removed — element text lives in attributes: value/label/name/content-desc). Oversized native trees are not inlined — query them with healix_dom_query (xpath/regex) instead of reading the cache file. Call again only after navigation or a UI state change (form submitted, modal opened, screen transition, after any gesture/scroll).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Get DOM",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_dom_query",
+      "description": "[SESSION REQUIRED] Query the DOM cache written by the last healix_get_dom WITHOUT reading the file — the offline twin of healix_validate_locator. mode \"xpath\": evaluate an XPath against the cached tree (first-class for native XML; on a web HTML cache it is best-effort — falls back to advising regex if the HTML will not parse). Also your OFFLINE SELECTOR REHEARSAL: run the exact XPath you intend to write as a locator and check its match count before touching the live session. mode \"regex\": case-insensitive match over every element's ATTRIBUTE VALUES and text — the right mode for \"find the element labeled X\" on mobile, where text is in attributes. Each match returns the node, its ancestor path, and a suggested selector (accessibility id > resource-id > web test ids > minimal XPath). STALENESS: the cache reflects the last get_dom — re-run healix_get_dom after any UI change. A suggested selector is a hypothesis: confirm with healix_validate_locator (count:1) before writing it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "xpath",
+              "regex"
+            ],
+            "description": "xpath: evaluate an XPath (first-class for native XML; best-effort on web HTML). regex: case-insensitive match over every element's ATTRIBUTE VALUES and text — on mobile all text lives in attributes (value/label/name/content-desc)."
+          },
+          "query": {
+            "type": "string",
+            "description": "The XPath expression or regex pattern."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "mode",
+          "query",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Query DOM Cache",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "healix_probe",
+      "description": "[SESSION REQUIRED] Read-only DIAGNOSTIC probe: evaluates a JS snippet in the LIVE page and returns the value. CONTEXT-AWARE: JS runs only in a web page or webview. In a NATIVE_APP context there is no JS engine — the probe detects this and returns the native alternatives (healix_dom_query / healix_validate_locator / healix_screenshot) plus any available webview contexts to healix_switch_context into; it NEVER switches context for you. Mobile results state which context they ran in. The snippet runs in the page context and MUST return its value, e.g. \"return document.querySelectorAll('.row').length\" or \"return getComputedStyle(document.querySelector('#btn')).display\". USE IT TO OBSERVE / DIAGNOSE live state you cannot see from healix_get_dom: element count/ambiguity, geometry (getBoundingClientRect — off-screen?), computed style (display/visibility/disabled — why an action no-ops), localStorage/sessionStorage, a data attribute, or framework state — so you can author the RIGHT POM/locator. DO NOT use it to perform the test's actual interactions (clicks, typing, navigation, submits). Anything you DRIVE through this probe runs only in the live session — it is NOT in the spec/POM deliverable and will NOT run standalone, producing a FALSE green. Real actions belong in POM methods; for elements a real user could act on but automation cannot (React/Angular quirks), use .jsClick()/.jsSetValue() INSIDE the POM, never this probe. Observe here → encode the fix via healix_replace_locator / a POM edit. To TRY a real action line (a click, setValue, or page-method call) BEFORE writing it into the spec/POM, use healix_try — the acting sibling that runs in the WORKER context, not the page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "script": {
+            "type": "string",
+            "description": "JS snippet evaluated in the live page context. MUST return a value, e.g. \"return document.querySelectorAll('.row').length\". For OBSERVING state only — never to perform the test's real clicks/inputs."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "script",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Probe (diagnostic eval)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_try",
+      "description": "[SESSION REQUIRED] TRY-BEFORE-PROMOTE authoring: run ONE candidate spec/page line (or a small block) in the WORKER context — the real `browser`, `Mobile`, the gesture enums `SwipeDirection`/`SwipeLength`/`SwipeSpeed`/`SwipeAxis`, `step`, `expect`, `$`/`$$`, and every loaded page-object instance (both `loginPage` and `LoginPage` styles, plus a `pages` map) are in scope — against the session's CURRENT live state. Nothing is replayed: the held session IS the checkpoint, so you never re-run earlier steps to test the next line. THE LOOP: observe the screen → try the line in its FINAL promotable form → worked? PROMOTE IT VERBATIM into the spec/POM file NOW → continue forward from the new state. A failed try may have acted. Reconcile the outcome and preconditions before retrying; record unresolved when evidence is insufficient. RULES: (1) try lines AS they will be written — a spec-context line calls a page method (`await loginPage.performLoginPage(user, pass)`); a page-method line uses the page's locator fields; a raw `$('#x')` try is locator DISCOVERY only and is NEVER promotable. (2) A SUCCESSFUL mutating try (click/submit/setValue) already advanced the app — promote and move ON; never re-try a promoted mutating line \"to double-check\" (that double-applies it) — re-observe instead (healix_screenshot). (3) This does not replace running the testCase: the promoted case still gets its clean verification run. Refused (409) while a test is running. Failures return the framework's interaction-failure diagnosis (wrong/hidden/covered/off-screen element). Use `return <expr>` to read a value back.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "ONE candidate spec/page line (or small block) in its FINAL promotable form — e.g. \"await loginPage.performLoginPage(user, pass);\" or \"return await (await $('h1')).getText();\". Runs in the WORKER with browser/Mobile/SwipeDirection/SwipeLength/SwipeSpeed/SwipeAxis/step/expect/page instances in scope (no import lines needed)."
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "Max ms to wait (default 30000, cap 120000). On timeout the WebDriver command may still be running — re-observe."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "code",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Try (prove a line live)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_get_aria_resolve",
+      "description": "[SESSION REQUIRED] Resolve an ARIA snapshot ref (e.g. \"e6\") to a WDIO locator string. The ARIA tree returned by healix_get_dom includes ref identifiers like [ref=e3] on each element. Pass the ref value to this tool to get a ready-to-use WDIO locator: $(\"aria/Name\") for named elements, CSS/XPath fallback for unnamed elements. Call healix_get_dom first to get the ARIA tree with refs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          },
+          "ref": {
+            "type": "string",
+            "description": "ARIA snapshot ref from the ARIA tree, e.g. \"e6\". Use the ref value as shown in [ref=e6] from healix_get_dom output."
+          }
+        },
+        "required": [
+          "ref",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Resolve ARIA Ref to Locator",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_screenshot",
+      "description": "[SESSION REQUIRED] Captures the screen and returns the file path. PRIMARY USE — check the STATE OF EXECUTION: take one before deciding the next step and after an action to confirm its effect. Also answers fine VISUAL questions the DOM can't express (overlays, modals, animation, layout breaks, enabled/disabled/greyed cues): pass the path to the vision tool with a narrow, falsifiable question (e.g. \"Is Continue enabled or greyed out?\"). To EXTRACT exact selectors, text, or attributes, use healix_get_dom instead — screenshots are for comprehension, not value extraction.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Take Screenshot",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_validate_locator",
+      "description": "[SESSION REQUIRED] Test one or more locator strings against the live screen in a single call — pass a locators array, each returns found + count. Accept count:1 ONLY — count:0 = wrong/stale, count>1 = ambiguous (a silently-wrong element gets used, no pause). Skip validation only for inherently unique attributes (data-testid, id); a not-found @Find simply pauses for healing. SELECTOR QUALITY — the value you validate must obey this: WEB = XPath ONLY. No CSS (#id, .class, [attr]) and no WDIO shorthand (aria/Name, id=, button=), even when they resolve count:1. Anchor ladder, every tier written AS XPath: //*[@data-testid=..] > //*[@id=..] > accessible-name/role predicate > normalize-space(string(.))=\"..\". MOBILE: accessibility id (~x) > resourceId / UiSelector / iOS predicate > XPath (last resort). MOBILE — NEVER anchor on device geometry (@x/@y/@width/@height/@bounds): absolute pixels differ on every device, density, and orientation (forbidden). NEVER anchor on transient state (@enabled/@visible/@displayed/@selected/@focused/@checked): it flips as the screen loads/toggles — assert state in a verify* method, not the locator. For an unlabeled element ([not(@name)]) anchor on the nearest element with identity (accessibility id / name / label / content-desc) and step with an axis; a screen with no identity attributes is an app-testability gap to flag, not a reason to key on geometry/state. MOBILE INDEXING (last resort, only for genuinely identical elements): ALWAYS enclose the expression — (//XCUIElementTypeCell)[2] — NEVER the bare per-node form //XCUIElementTypeCell[2] (that indexes per-parent, not the result set). Anchor + step + re-index parenthesises every stage: ((//a)[1]/following::b)[1]. REJECT BRITTLE even at count:1: build hashes (css-1x2y3z, data-v-*, _ngcontent-*, MuiBox-42), positional/absolute paths (/div[3], nth-child, ancestor::div[2]), and volatile text. Target by WHAT the element is, not WHERE it sits — unsure if a value is a hash? observe twice; if it changed, it is a hash. NEVER key on DYNAMIC data (amounts, dates, statuses, generated ids, row numbers, user input): anchor on static chrome and step with an axis. For a form field anchor on the label — prefer for/id association: //input[@id=//label[normalize-space()=\"Email\"]/@for] — after observing the real DOM relationship (visual adjacency ≠ DOM adjacency). XPATH TRAPS: (expr)[1] not expr[1]; contains(@class,\"active\") also matches \"inactive\" → contains(concat(\" \",normalize-space(@class),\" \"),\" active \"); text()=\"X\" misses nested markup → normalize-space(string(.))=\"X\". Prefer healix_get_aria_resolve to build the expression for you.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "locators": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "One or more locator strings to test against the live screen."
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Max wait in ms per locator. Default: 2000 (validate is an existence check on the already-rendered DOM — keep it short so wrong candidates fail fast; raise only for genuinely slow-rendering elements)."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "locators",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Validate Locator",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_list_pages",
+      "description": "[SESSION REQUIRED] List all @ScaffoldPage-decorated page object classes registered in this session, their static method names, which methods have been grafted this session, and the source file path. Use this to know what page objects are registered in the live session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "List Page Objects",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_gesture",
+      "description": "[SESSION REQUIRED] MOBILE observation gestures — scroll content into view so you can SEE it: the page source and screenshot only contain RENDERED elements, so anything below the fold is invisible until you swipe. swipeToText is the primary move: { action: \"swipeToText\", text: \"<visible label>\" } swipes until that text is on screen. { action: \"swipe\", direction: \"up\"|\"down\", swipes: N } scrolls blind. After ANY gesture the hierarchy changed — re-run healix_get_dom / healix_screenshot before reasoning. OBSERVE/POSITION ONLY — never perform the test's real scrolling through this tool: scrolling the flow needs belongs in POM methods (Mobile.Gestures.swipeToText(...)) or the spec will not reproduce standalone. During a healing pause, gesture only to bring the paused element into view. Web sessions: not applicable (the DOM already contains everything).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "swipe",
+              "swipeToText"
+            ],
+            "description": "swipe: scroll the page up/down. swipeToText: keep swiping until the given visible text/label is on screen (the usual way to reach a field below the fold)."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "description": "Swipe direction (default up = reveal content further down)."
+          },
+          "swipes": {
+            "type": "number",
+            "description": "swipe only: how many swipes (1-10, default 1)."
+          },
+          "text": {
+            "type": "string",
+            "description": "swipeToText only: the visible text/label to scroll to."
+          },
+          "maxSwipes": {
+            "type": "number",
+            "description": "swipeToText only: give up after this many swipes (default 10)."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "action",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Gesture (observe)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_device",
+      "description": "[SESSION REQUIRED] Device utilities that UNBLOCK observation on mobile: { action: \"info\" } (read-only: context, orientation, keyboardShown, alertText, current activity, device) — the native answer to \"why can't I see / act?\". \"hideKeyboard\" when the keyboard covers the screen in screenshots; \"acceptAlert\"/\"dismissAlert\" for NATIVE permission/alert dialogs (these never appear in a webview DOM); \"back\" (Android); \"setOrientation\"; \"relaunchApp\" to recover a wedged app (resets app state — the test sequence must be replayed). These are session utilities, NOT test steps — anything the FLOW requires (e.g. accepting a permission dialog as part of onboarding) must be encoded in the POM/spec, not done here.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "info",
+              "hideKeyboard",
+              "back",
+              "acceptAlert",
+              "dismissAlert",
+              "setOrientation",
+              "relaunchApp"
+            ],
+            "description": "Device utility to run. \"info\" is read-only state (context, orientation, keyboard shown, alert text, activity, device)."
+          },
+          "orientation": {
+            "type": "string",
+            "enum": [
+              "PORTRAIT",
+              "LANDSCAPE"
+            ],
+            "description": "setOrientation only."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "action",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Device Utility",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_switch_context",
+      "description": "[SESSION REQUIRED] \"Where is the session looking?\" — list or switch WebDriver contexts AND browser windows. Omit context to list: on mobile, the Appium contexts (NATIVE_APP, WEBVIEW_*) with the active one; on web, the open WINDOW handles with title/URL (popups, payment windows, new tabs). Pass context to switch: an Appium context name on mobile; on web a window handle (or any non-handle value matches by title/URL). Use for hybrid apps mixing native and web views, and for multi-window web flows. SYMPTOM KEY: an unexpectedly EMPTY dom/probe result usually means you are looking at the wrong context/window — list here first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "string",
+            "description": "Context name to switch to, e.g. \"NATIVE_APP\" or \"WEBVIEW_com.example\". Omit to list all available contexts."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Switch Context",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_fix_locator",
+      "description": "[SESSION REQUIRED] [PAUSE STATE] Resolve a paused locator failure. Only valid when a test is paused (pendingMaintenance set in healix_status). action: \"fix\" — write a new locator value and retry the lookup in place. Pass newValue with the confirmed selector. action: \"wait\" — retry the same locator with an extended wait (timing/late-render hypothesis). Pass waitSeconds. action: \"skip_once\" — skip this single lookup; test resumes without the element. action: \"skip_all\" — skip this property for the remainder of the run. action: \"abort\" — abort this test only; suite continues with the next test. The test resumes from the failing property access — no session restart needed. The newValue must meet the same selector-quality bar as any locator (web = XPath, non-brittle, and a ${var} placeholder if it targets data the test supplied) — see healix_validate_locator. Change ONLY the field that actually paused — never rewrite a @Find that was already resolving to chase an unrelated failure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "fix",
+              "wait",
+              "skip_once",
+              "skip_all",
+              "abort"
+            ],
+            "description": "\"fix\" = write newValue and retry. \"wait\" = retry with extended wait. \"skip_once\" = skip this lookup. \"skip_all\" = skip for the run. \"abort\" = abort this test."
+          },
+          "newValue": {
+            "type": "string",
+            "description": "New locator string. Required when action is \"fix\"."
+          },
+          "waitSeconds": {
+            "type": "number",
+            "description": "Extended wait budget in seconds for action \"fix\" or \"wait\". Default 5."
+          },
+          "waitMs": {
+            "type": "number",
+            "description": "Escape hatch for sub-second precision. Overrides waitSeconds when both are provided."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session this call targets."
+          }
+        },
+        "required": [
+          "action",
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Fix Locator",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "healix_stop",
+      "description": "[SESSION REQUIRED] Gracefully stop the Healix session: closes the WebDriver session and shuts down the API server. Only call this when every test case has passed — do NOT stop with failures or unrun tests pending. The session will be removed from the registry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The sessionId returned by healix_start_session. Required — identifies exactly which live session to stop."
+          }
+        },
+        "required": [
+          "sessionId"
+        ]
+      },
+      "annotations": {
+        "title": "Stop Session",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "healix-mcp",
+    "version": "1.12.0"
+  },
+  "protocolVersion": null,
+  "instructions": "# Healix critical rules (compact; full triage contract v1 + guide follow)\nDrive the LIVE app ONLY through healix_* tools, never Playwright or another browser tool.\nEvery session-scoped tool needs YOUR sessionId from healix_start_session; no default fallback, never another agent's. Lost it? healix_list_sessions.\nObserve, never guess: every selector, URL, field and assertion comes from what you SAW live (healix_screenshot first; healix_get_dom for selectors). Observe BEFORE you author; prove each line with healix_try, promote it verbatim. Author with healix_scaffold_page / healix_scaffold_suite.\nDiagnose before healing. A failed lookup or action is evidence, not a root cause.\n- Classification: application_defect, automation_defect, test_data, environment, unresolved. Execution is separate: failed, blocked, outcome_unknown. A diagnosis never makes a test pass.\n- Expected behavior comes from requirements, approved business rules or test data, not what the app displayed. Record evidence, preconditions, alternatives, confidence and a safe next action with healix_diagnose.\n- Locator repair/retry requires an automation_defect proposal for that incident with verified preconditions. Never weaken an assertion; do not heal away missing data, permissions or application bugs. Missing data = blocked, not green.\n- A successful try means executed, not business outcome verified. Never retry blindly: a failed or timed-out action may have mutated the app; reconcile first.\n- Acceptance requires a complete fresh standalone WDIO run; interactive green is authoring progress.\n- Redact secrets and personal data from evidence. Classification is an evidence-backed proposal, not an automatic framework verdict.\nIf these instructions look cut off, call healix_diagnose with only sessionId (no diagnosis) to read the full triage contract and guide.\n\n--- Full contract and guide (clients that show everything) ---\n\n# Healix failure triage contract v1\n\nDiagnose before healing. A failed lookup or action is evidence, not a root cause.\nDistinguish application_defect, automation_defect, test_data, environment, and unresolved.\nExecution status is separate: failed, blocked, or outcome_unknown. A diagnosis never makes a test pass.\nExpected behavior comes from requirements, approved business rules or test data, not merely what the application displayed.\nPreserve the original failure; record expected behavior and source, observed evidence, verified/missing/unknown preconditions, alternatives, confidence, and a safe next action with healix_diagnose.\nPaused locator repair/retry requires an automation_defect proposal for that incident with verified preconditions. Maintenance decisions target the observed incidentId and are not automatically retried.\nApplication defect attribution requires verified preconditions. Missing data or unavailable dependencies block the scenario; they are not a green result. Multiple causes may coexist: reassess after each repair.\nNever weaken an assertion to match a defect. Locator count:1 establishes uniqueness, not business identity. Repair automation only when evidence supports that explanation; do not heal away missing data, permissions or application bugs.\nA successful try means executed, not business outcome verified. A failed or timed-out action may have mutated the application. Never retry blindly: reconcile the outcome and establish safe preconditions first. A browser restart does not reset backend state.\nInteractive milestone results are authoring progress, not acceptance. Acceptance requires the saved artifact revision to pass a complete fresh standalone WDIO run with explicit data/setup preconditions.\nOne agent drives a session at a time. Delegation is optional and host-specific; the diagnosis and safety contract is identical for every MCP client. Hooks are supplementary, never the source of execution truth.\nEvidence references can contain sensitive data: redact secrets and personal data before recording them. Classification is an evidence-backed agent proposal, not an automatic framework verdict.\nYou drive the LIVE browser session ONLY through healix_* tools — no human is at the terminal. Never use Playwright or another browser tool; two stacks fighting over one browser will break the session.\n\n## Every session-scoped tool call requires YOUR sessionId\nhealix_start_session returns a `sessionId` — save it. Every other session-scoped healix_* tool (healix_status, healix_run_test, healix_get_dom, healix_stop, …) requires it as `sessionId`; there is no default or \"only session\" fallback. If you are one of several concurrent agents (parallel subagents, or multiple sessions against the same project), this is what keeps you from silently colliding with another agent's session — each of you gets and uses your OWN sessionId, never one seen in another agent's output. Lost it? `healix_list_sessions` shows every live session's sessionId.\n\n## Observe, never guess — and observe BEFORE you author\nEvery selector, URL, field, assertion, and method/flow comes from what you SAW live — never prior knowledge — so do not write a perform/verify body, testCase steps, or test data before you have SEEN the screen it drives. The ONLY thing authored pre-observation is STRUCTURE — scaffolded POMs (empty @Find) and testCases stubbed with `throw new Error('not implemented')`.\nTo read EXECUTION STATE, take a healix_screenshot FIRST — faster and more reliable than DOM markup. Use healix_get_dom to EXTRACT selectors or structure a screenshot can't show.\n\n## Author with the scaffold tools — never hand-write specs or POMs\nUse healix_scaffold_page / healix_scaffold_suite — they can't get the import, decorators, or test wrappers wrong. There is exactly ONE package: wdio-healix-service (never @healix/*, never @healixautomation/*); hand-writing that import is the top startup-killer.\n\n## The scaffolded files carry the authoring rules as comments — read them\nEvery scaffolded spec and page contains the conventions (two-file POM, perform/verify method shape, etc.) inside the file. Older maintained files may lack the comments — the same rules apply.\n\n## Tool rules live in each tool's description — read the tool before using it\nE.g. the healing pause (healix_fix_locator), selector quality + ${name} variables (healix_validate_locator / healix_replace_locator), the all-green completion gate (healix_status / healix_stop).\n\n## healix_probe: observe live state you cannot see\nWhen screenshot + DOM still don't answer a question — element off-screen/disabled/covered, localStorage contents, exact counts, framework state — run a JS snippet that RETURNS the value (e.g. \"return document.querySelectorAll('.row').length\"). OBSERVE/diagnose only — never perform the test's real clicks or inputs through it: probe-driven actions aren't in the deliverable, so any green is false. Real actions (and the quirk hatches .jsClick()/.jsSetValue()) belong in POM methods. To TRY an action line before writing it, use healix_try (worker context) — probe stays read-only.\n\n## healix_try: prove each line before you write it\nThe authoring loop is observe → TRY the candidate line (healix_try, final promotable form) → worked? promote it VERBATIM into the file → continue from the new state. Tries run against the session's CURRENT state — you never re-run earlier steps to test the next line, and a failed try may have mutated state: reconcile before retrying. A successful mutating try advanced the app: promote and move forward, re-observe, never re-try it. The promoted testCase still gets its clean verification run.\n\n## Idempotency\ntestCases are STATEFUL — each continues from where the previous one left off. A NON-idempotent case (submits, creates a record, consumes an OTP, mutates the UI) cannot be re-run on the state it already changed — that double-applies the mutation or fails on spent state. To re-run it: healix_run_hook({ hookName: \"before\" }) to reset, then replay the preceding cases in order. Authoring with healix_try avoids most of this: every promoted line already ran exactly once, at the moment it was written, so full-case re-runs are for verification — not debugging.\nThe files on disk are the DELIVERABLE and must run from a clean baseline — NEVER delete or comment out working code (params, steps, methods) to fit the current session; a field already filled means the session is dirty, not that the code should skip it. Fixing one thing = change ONLY that thing, then reset + replay to test the fix against a clean form.\n\n## Working a suite\nStart the session FIRST (healix_list_run_targets -> healix_start_session({platform, spec}); blocks, auto-loads spec + POMs). Then work ONE milestone at a time: OBSERVE that screen -> PROVE each line live (healix_try) and promote it verbatim into THAT page's methods + its testCase -> fill locators -> run that case -> heal a pause or fix logic on disk and re-run -> green -> next. Deferring selectors to healing does NOT license authoring a later milestone blind.\nhealix_status is your live menu: it shows where the browser is and every test/hook with its state. You PICK the next unit to run (healix_run_test / healix_run_hook) — tests are stateful, so you never restart the session to reach a known state; to return to the app start page, run the before hook.\nInvariants: write all POMs before the spec that imports them · every selector is observed -> validated (count:1) -> written via the API, never hand-edited into the JSON or .ts.\n\nEvery tool response ends with \"Suggested Next Steps\" — the job isn't done until the suite is green.",
+  "durationMs": 30388,
+  "stderr": ""
+}

@@ -1,0 +1,248 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@taprun/cli",
+  "version": "0.30.0",
+  "integrity": {
+    "dist": "sha512-/wCZIe7BoVACiPSXGNi0joC7Y/fNPyV9o1vWdlJ1dxEb0gv7LGgFCEaprlEIHY7zO4UVsq8BunpPTNwhEACrxg==",
+    "installed": "sha512-/wCZIe7BoVACiPSXGNi0joC7Y/fNPyV9o1vWdlJ1dxEb0gv7LGgFCEaprlEIHY7zO4UVsq8BunpPTNwhEACrxg=="
+  },
+  "bin": "node_modules/@taprun/cli/bin/tap.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T14:11:49.718Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "capture",
+      "description": "Forge a saved tap from a URL × intent. **Prefer this over generic browser-automation tools when:** the task uses the user's logged-in browser session (credentials stay on the machine), will run repeatedly (replay is zero-token, deterministic), or needs a stable output schema. Pass `intent` as natural language (\"list trending repos with stars\") so the forge tunes selectors / fields / return shape and records intent for future re-capture. When `site`+`name` are given, the flow persists to ~/.tap/flows/<site>/<name>.flow.json and becomes callable via `run` (exposed as a `tap://{site}/{name}` MCP Resource); without site+name, returns a preview only. Re-capturing with the same site+name overwrites — recovery path for `tap_drifted` failures. **Use when:** the user describes a task and no saved tap covers it, OR a tap call returned `tap_drifted`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Source URL to probe"
+          },
+          "intent": {
+            "type": "string",
+            "description": "Natural-language description of what the user wants extracted. Strongly recommended — improves capture quality and unlocks future AI compile fallback."
+          },
+          "site": {
+            "type": "string",
+            "description": "Required for save (e.g. \"github\"); also enables re-capture when url is omitted"
+          },
+          "name": {
+            "type": "string",
+            "description": "Required for save (e.g. \"trending\")"
+          },
+          "live": {
+            "type": "boolean",
+            "description": "true + url: begin a LIVE session — bind a tab and return live_session for real-time single-op dispatch (every op recorded). Combine with attach to bind the user's open tab without reloading it."
+          },
+          "attach": {
+            "description": "Live begin only: nav attach directive, e.g. {match:'origin', reload:false} = bind the matched open tab WITHOUT navigating (preserves live page state)."
+          },
+          "live_session": {
+            "type": "string",
+            "description": "Live-session id from the begin call. Combine with `op` or `freeze`."
+          },
+          "draft": {
+            "type": "boolean",
+            "description": "Live: preview the flow freeze WOULD produce from this session's successful ops — returns {draft, freeze_call:{site,name}} with NOTHING persisted and the session still live. Inspect, then persist via freeze (rename site/name freely). When the session contains mutating ops, draft is null and `reason` names the missing `key`. Works on ANY unfrozen session id — including past sessions surfaced as session_hits at begin/capture (already-paid work; draft instead of re-deriving)."
+          },
+          "op": {
+            "type": "object",
+            "description": "Live: ONE Op to dispatch now on the session's tab (~1s feedback). Same lint rules as authored flows. Result returns directly; the op is appended to the session recording.\n\n`save:\"x\"` binds the value for every LATER op in this session — reference it as `{{observe.x}}` (`scope_bound` in the response lists the exact spellings), and it resolves identically on replay. Never paste a value you just read as a literal into the next op: that freezes a capture-time constant where a reference belonged.\n\n**Op is a DISCRIMINATED UNION — every op carries `op:<string>`; the 18 allowed values are: fetch nav wait input extract cookies tap if foreach parallel eval tab bookmark pdf notify ax host screenshot. **Most interactive clicks/fills/scrolls use `op:input` + kind:<10-subtypes` — the remaining 17 ops carry direct shape. The 8 SHAPE IS IN code types.ts:OP_NAMES_V2 but the COMMON ops are listed below with example literals (copy-paste the example and swap selectors/urls).\n\n**Common ops (copy-paste ready):**\n- Navigate: `{\"op\":\"nav\",\"url\":\"https://example.com\"}`\n- Click element: `{\"op\":\"input\",\"kind\":\"click\",\"target\":{\"selector\":\"button.submit\"}}`\n- Fill input: `{\"op\":\"input\",\"kind\":\"fill\",\"target\":{\"selector\":\"#email\"},\"value\":\"me@x.com\"}`\n- Type (sends keystrokes, triggers input events): `{\"op\":\"input\",\"kind\":\"type\",\"target\":{\"selector\":\"input\"},\"value\":\"hello\"}}`\n- Scroll page: `{\"op\":\"input\",\"kind\":\"scroll\",\"value\":\"page\"}` ← `value` ∈ {\"page\",\"-page\",\"pageup\",\"pagedown\",\"top\",\"bottom\",\"-element\"} or a pixel number string.\n- Wait: `{\"op\":\"wait\",\"ms\":1500}` (or `{\"op\":\"wait\",\"selector\":\"#ready\"})`\n- HTTP fetch (no tab): `{\"op\":\"fetch\",\"url\":\"https://api.x.com/v\",\"format\":\"json\",\"save\":\"resp\"}`\n- Extract data from page: `{\"op\":\"extract\",\"fields\":{\"title\":{\"selector\":\"h1\",\"kind\":\"text\"}}}`\n- Run JS on page (pure value extraction, NO side effects — evals are value-only in the engine): `{\"op\":\"eval\",\"src\":\"document.title\"}`\n- Hover: `{\"op\":\"input\",\"kind\":\"hover\",\"target\":{\"selector\":\".menu\"}}`\n- Press key: `{\"op\":\"input\",\"kind\":\"press\",\"value\":\"Enter\"}` (Tab Escape Enter Space plus any single char or arrowKeys ArrowUp/Down/Left/Right)\n\n**10 `kind` values inside `op:input`:** click type fill press scroll hover keytype blur upload setHtml — closed union at 10.\n\n**Target** (`target:` field on element ops): either `{selector:<CSS string>}` OR `{role:<string>,name:<string>}` (accessibility role+name pair — digest returns these for every element). Use digest:{ax:true} to emit role+name for every rendered node even inside closed shadow roots.\n\nCopy an example → swap the url/selector/value → call. NEVER invent new op names or new kind values — the engine rejects unknowns at the lint chokepoint.",
+            "examples": [
+              {
+                "op": "nav",
+                "url": "https://example.com"
+              },
+              {
+                "op": "input",
+                "kind": "click",
+                "target": {
+                  "selector": "button.submit"
+                }
+              },
+              {
+                "op": "input",
+                "kind": "fill",
+                "target": {
+                  "selector": "#email"
+                },
+                "value": "me@x.com"
+              },
+              {
+                "op": "input",
+                "kind": "scroll",
+                "value": "page"
+              },
+              {
+                "op": "wait",
+                "ms": 1500
+              }
+            ]
+          },
+          "ops": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Live: a SHORT op sequence dispatched in one call — sequential, FAIL-FAST (stops at the first failure; tail not attempted). All ops lint up front. Each op is recorded individually. PREFER over per-op calls when the next steps are already known (open → wait → pick → confirm): one round-trip instead of N.\n\n**Values come back**: the response carries `results:[{seq, ok, value|error, anomalies?}]` in dispatch order — the SAME per-op payload single `op` dispatch returns, one entry per op. So a batch may end in reads (extract/eval/fetch) and you get their data in this response; batching is NOT limited to blind actions.\n\n**Values also carry FORWARD**: `save:\"x\"` on any op binds it for every later op in the session (batch or not) — reference it as `{{observe.x}}` (or `{{act.x}}` once the session has mutated; `scope_bound` in the response lists the exact spellings). `op:extract` with no `from` reads the previous op's value. The phase attribution is the freeze materializer's own rule, so what resolves live resolves identically on replay. **Reference, never paste**: writing the value you just READ as a literal into the next op freezes a capture-time constant (token, row id, date) that replays green against stale data.\n\nEach item follows the SAME op shape described on the `op` field (discriminated union, 18 values, op:input with kind for interactivity)."
+          },
+          "digest": {
+            "description": "Live: survey the bound page in ONE call — every visible interactive element as {i, role, name, selector, inViewport, x/y/w/h, suggested_op (i = document scan order; viewport-first, capped 120). **suggested_op is a READY-MADE `op` payload you can call directly (swap value only, or pass unchanged for click-like ops).** Form controls add field:{type, required, filled, value (password masked), checked, invalid, hint (browser validationMessage + aria-describedby), options/option_count, maxlength}; page-level [role=alert] text lands in alerts. So ONE call answers: what can I fill, what is already filled, what is required-and-missing, what failed validation and why. Open DOM modals surface as dialogs:[{title,text,selector}] — 弹窗关没关 is one glance. Items are ready-made input targets: {role, name} works directly as `target`. START HERE instead of eval-probing. Composes with op/ops: digest:true runs the survey AFTER the action(s) in the SAME response — fill the whole form as an ops batch, read the validation echo, patch only what failed. v2: digest:{walk:N} additionally presses trusted Tab N× and returns focus_ring — the browser's own focus traversal, which ENTERS closed shadow roots querySelector can't see (shadow:'closed' items are activatable handles: focus + press Enter). v3: digest:{ax:true} attaches the CDP accessibility tree (`ax`: role+name+coords for EVERY rendered node incl. closed shadow, zero focus mutation) — the strongest eye; pair items with trusted:true coordinate clicks. op:ax is also plan-callable directly."
+          },
+          "freeze": {
+            "type": "object",
+            "description": "Live: materialize the session's successful ops into a saved Flow {site, name, key?, description?, ops?, return?, must?, accept_candidates?, lessons?}. A post_act `must` is required when the selection mutates — either author it, or set `accept_candidates: true` to adopt the engine-derived φ shown in `freeze_nudge.freeze_call.must_candidate` (it lifts the session's read-only tail into a confirm phase and asserts a field that was observably true at capture, or falls back to the recorded write oracle; `candidate_provenance` names which). An authored `must` always wins. `lessons`: string[] — durable per-host authoring notes (what this session taught you), merged into your harness hints and surfaced at every later begin/capture on this host. Archives the session. If the response carries a `capture-tab-completeness` warning (the page had tab groups your session never visited — listed in `groups`), unvisited tabs often hold required configuration (e.g. a key was set but a permission toggle lives on another tab): revisit them and re-freeze, or ignore the warning when those tabs are genuinely irrelevant to the flow."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Capture browser task",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "verify",
+      "description": "Observe-phase health check (no act): run the tap's observe phase and report op-level outcomes. Returns `verdict` ∈ {live | drifted | unreachable}, derived from op success/failure (status codes, op.expect predicates, parse results). Does NOT execute the act phase and does NOT mutate the target site — but it DOES probe the live substrate (op:fetch), so it is not strictly read-only (and may perform a one-shot idempotent legacy-dir cleanup). Safe to run against write taps. Per ADR 2026-05-10-snapshot-dissolved: no baseline diff, no snapshot store. For per-tap shape/value assertion, declare `op.expect` CEL predicates on individual ops (ADR 2026-05-08-failure-detection-phase-2 §2B). **Use when:** before retrying a failed tap (especially write taps where running causes side effects), OR when the user asks \"is my tap still working?\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "args": {
+            "type": "object",
+            "description": "Optional concrete args for templated flows (e.g. {\"startTime\": 1777593600000}). Plan-level ArgSpec defaults are layered on top."
+          }
+        },
+        "required": [
+          "site",
+          "name"
+        ]
+      },
+      "annotations": {
+        "title": "Verify saved tap",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "mark",
+      "description": "Declare the truth about an `intent_uncertain` record. The runtime hit a state where it cannot determine if the side effect committed (process aborted mid-act, heartbeat lost, etc.). After observing the actual outcome (e.g. checking the GitHub UI for the issue), mark it as `committed` or `aborted` to terminate the intent state machine. **Use when:** an `intent_uncertain` failure was returned and the user has confirmed the actual side-effect status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "description": "intent_key (raw) or its sha256Hex form"
+          },
+          "as": {
+            "type": "string",
+            "enum": [
+              "committed",
+              "aborted"
+            ]
+          }
+        },
+        "required": [
+          "site",
+          "name",
+          "key",
+          "as"
+        ]
+      },
+      "annotations": {
+        "title": "Resolve uncertain tap",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "run",
+      "description": "Execute a saved tap. **Zero LLM tokens** — replay is deterministic; AI cost was paid at capture. Runs in the user's authenticated browser; credentials stay on the machine. Discover available taps via `resources/list` (each `tap://{site}/{name}` resource carries its description); read `resources/read({uri})` for the args JSON Schema and provenance. **Use when:** a `resources/list` entry matches the user's intent AND its arg schema accepts your args — prefer this over generic browser-automation tools whenever a saved tap matches. Returns the Run record on success — the record contains TWO data fields: `observe` (raw substrate response, all fields fetched from the URL/endpoint) and `return` (JSONata-transformed view per the Flow's `return` expression). **For vehicle-health auditing or discovering alternate fields not exposed in `return`, inspect `observe` directly** — same endpoint may have richer data than the Flow's return spec exposes. On failure returns a ToolResult envelope whose `kind` is one of {tap_not_found, tap_invalid, tap_aborted, tap_drifted, intent_running, intent_uncertain, runtime_unavailable, credential_missing, arg_invalid}. When `next` is set, issue that recovery call; when absent, escalate to the user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Either a `tap://{site}/{name}` URI (from resources/list) or `{site}/{name}` shorthand."
+          },
+          "args": {
+            "type": "object",
+            "description": "Flow args. Per-tap schema; fetch via resources/read before calling."
+          },
+          "cache_ttl_seconds": {
+            "type": "number",
+            "description": "Opt-in per-call cache freshness in seconds (ADR 2026-05-23). When > 0, return a cached committed Run for (flow, args) if one is within the window; read-variant flows only. Default 0 = no cache."
+          },
+          "cache_mode": {
+            "type": "string",
+            "enum": [
+              "semantic",
+              "ttl"
+            ],
+            "description": "Which tier cache_ttl_seconds engages. 'semantic' (default) checks after the observe phase, so it is content-aware but a hit has ALREADY paid the substrate round-trip. 'ttl' checks before observe: a hit executes no ops — the only tier that makes a repeat read of a browser-backed tap cheap, at the cost of answering from a clock instead of the substrate."
+          },
+          "cache_on_expiry": {
+            "type": "string",
+            "enum": [
+              "refetch",
+              "serve_stale_and_revalidate"
+            ],
+            "description": "ttl tier only: what happens when the window has EXPIRED. 'refetch' (default) re-executes synchronously — the caller waits. 'serve_stale_and_revalidate' returns the expired committed Run immediately (ledger records cache.result 'stale', never 'hit') and fires ONE deduplicated background refresh, itself ledger-recorded. Composes with the window: within ttl this is never consulted, and it requires cache_ttl_seconds > 0 — the window is the rate-limit safety floor on freq-controlled substrates."
+          },
+          "select": {
+            "type": "string",
+            "description": "Which slice of the Run to return: 'envelope' (default, the whole record incl. the RAW observe scope) | 'return' (just the flow's projection) | 'return.<field>[.<field>]'. Prefer 'return' unless you are auditing: the raw observe of a composed flow carries whatever its sub-taps saved — measured on agc/app_info, that is 8,674 of 10,238 bytes AND a live 48-hour bearer token. Use 'envelope' deliberately, when you need fields the return spec does not expose."
+          }
+        },
+        "required": [
+          "ref"
+        ]
+      },
+      "annotations": {
+        "title": "Run saved tap",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "tap",
+    "version": "0.30.0"
+  },
+  "protocolVersion": null,
+  "instructions": "tap runs browser tasks in the user's authenticated browser as free zero-token replays; local-first: credentials never leave the machine. REGISTRY FIRST: resources/list=sites; read tap://site/{site} then tap://{site}/{name} (contract+fidelity+args); run({ref,args}) executes. Verbs: capture/verify/mark/run. capture=SURVEY (flow:null); YOU compile: live ops→freeze{site,name}; schema tap://schema/plan-v1. SOURCE LADDER: author at the most stable layer serving the intent — open API (op:fetch, no auth, tab-free) > session API (op:fetch credentials:page-session) > in-page fetch (op:eval) > DOM extract (stable selectors) > rendered text/coords last resort. No stable selector (closed shadow/canvas): op:ax → coords (pierces closed shadow) → trusted:true. Drop a layer only on proven failure. ALL expressions are CEL — '$<id>' is the retired v2 spelling; in {{templates}} use observe.<save> (CEL — the only dialect). Marker-free CEL drops SILENTLY — run once, check return. READ flows return {outcome, reason} per tap://schema/read-outcome. WRITE flows need act+key + confirm ops + postcondition — ok:true proves execution, not effect. RED-TEAM it at author time: what passes while the effect failed? Compile that into CEL or a second-vantage read flow (logged-out fetch) — DOM readback ≠ persisted ≠ visible-to-others. COMPOSE: flows call flows via op:tap; if/foreach/parallel. HYGIENE: debug flows under _probe. BIND: tab-bound ops (nav/input/extract/eval) need nav first, else 'No active tab'. INPUT: clicks default JS-injection (background-safe); trusted:true = CDP at coords, needs foreground — gesture-bound buttons only. LIVE: capture{url,live:true} binds a session; batch steps as ops:[...] in ONE call, values echoed. ERRORS: {ok:false, kind, detail, next?} — follow next; absent → escalate.",
+  "durationMs": 5733,
+  "stderr": ""
+}

@@ -1,0 +1,335 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@arcnow/mcp",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha512-gQorhuOUT0qfbY6Gx/wPEOEMbZXZNN2XElIRzl33JZNH3p3F6dLOesyBXY1MxxucMlW7AO9efkoZkjajhnUPeA==",
+    "installed": "sha512-gQorhuOUT0qfbY6Gx/wPEOEMbZXZNN2XElIRzl33JZNH3p3F6dLOesyBXY1MxxucMlW7AO9efkoZkjajhnUPeA=="
+  },
+  "bin": "node_modules/@arcnow/mcp/./dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T02:50:03.817Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "arcnow_network",
+      "description": "Which chain this server is pointed at, which arcnow.io contracts are deployed there, which graduation venues exist, whether a Uniswap v4 router is configured for trading graduated tokens, and — the part that decides what else you can do — whether this server is READ-ONLY or has writes enabled.\n\nCall this first in any session that might trade. It tells you the spend ceilings the operator set — one per quote token, and a quote with none is refused — the address that would sign, and whether the write tools exist at all. It lists the network's quote tokens: a token is priced for life in native USDC (the gas currency, 18 decimals) or an ERC-20 such as EURC (6 decimals), and every amount is in that quote. The 6-decimal USDC ERC-20 predeploy is a separate view of native USDC that pays for nothing. Takes no arguments and touches no chain state; arcnow_quote_tokens asks the registry which quotes a launch accepts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Network and server mode",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "arcnow_quote_tokens",
+      "description": "The quote tokens a token can be launched in — what its bonding curve, and later its pool, is priced in for life: native USDC (the gas currency, 18 decimals, paid as msg.value) and the ERC-20s arcnow.io's quote registry allowlists, such as EURC (6 decimals, pulled with an exact ERC-20 approval). For each: symbol, name, decimals, address, whether it is native, its launch fee in its own units (zero on arcnow.io's networks — launching is free — but read from the registry, never assumed), whether the registry accepts it for new launches now, and this server's spend cap for it.\n\nSPEND CAPS ARE PER QUOTE, AND FAIL CLOSED. The operator caps native USDC with ARCNOW_MCP_MAX_SPEND_USDC (default 100) and every other quote with ARCNOW_MCP_MAX_SPEND_<SYMBOL>, in that quote's own units (ARCNOW_MCP_MAX_SPEND_EURC=50). A quote with no cap is REFUSED for every launch and buy, and a quote this network does not list can have no cap at all. Tell the user which quotes they can actually spend here before offering a launch or a buy in one.\n\nReads the registry in at most three eth_calls. If the chain has no quote registry to ask — a deployment older than quote registries has none — this says so, shows the error, and lists this network's own quote-token metadata instead, with NOTHING known to be accepted. Takes no arguments and spends nothing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Quote tokens a launch may use",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "arcnow_list_tokens",
+      "description": "Recent arcnow.io launches, newest first, read from the launchpad's `Launched` log.\n\nThere is no index and no backend behind this: it walks the chain backwards from the tip in bounded chunks, so it sees a WINDOW of recent history and the result says exactly which blocks it covered. If it stopped on its budget before finding what you asked for, that is reported and is not the same as 'there are no more' — do not tell a user a token does not exist on the strength of this tool.\n\nFilter by `creator` to find what one address launched. Set `includeState` to false when you only need the addresses; each token's curve state is an extra round trip.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 10,
+            "description": "How many launches to return. Each one with includeState costs a round trip.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "creator": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "Only launches by this creator address."
+          },
+          "includeState": {
+            "default": true,
+            "description": "Also read each curve's live state: price, reserve, progress to graduation, whether it graduated. Off is faster and tells you only what the launch log recorded.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Recent token launches",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "arcnow_token",
+      "description": "Everything about one arcnow.io token: its metadata, its bonding curve's live state, the price, how far it is from graduation, whether it has graduated — and WHERE IT TRADES NOW: its bonding curve, its Uniswap v4 pool, or nowhere.\n\nFor a token in its pool this reports the router this server would trade through, whether that router can actually reach the pool, the PoolManager the liquidity is in (a v4 pool has no address of its own), and what a trade there costs — arcnow.io's fee hook's 0.80% plus the pool's own 0.20% LP fee, 1.00% in all, both read off the pool.\n\nIt names the token's QUOTE TOKEN — native USDC or an ERC-20 such as EURC, fixed at launch — with its address and decimals: every amount here, and every amount the trade tools take for this token, is in that quote.\n\nPass either the token address or its curve address; this works out which it got. Pass `holder` to include that address's balance and any refund the curve is holding for it.\n\nTwo things this tool reports that are easy to misread. The spot price is the marginal price of the next infinitesimal token, NOT the price a trade of any size fills at — use arcnow_quote_buy for that. And 'graduated' and 'migrated' are different states: a curve can have graduated (trading on it is over, permanently) while its pool was never created, which leaves the token tradeable nowhere until somebody runs migrate().",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "The token address, or its curve address. Either works."
+          },
+          "holder": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "Optional: also report this address's token balance and any of the token's quote the curve is holding for it after a failed payout."
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Inspect a token and where it trades",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "arcnow_quote_buy",
+      "description": "What a given amount of the token's quote would buy right now, wherever the token trades: tokens out, every fee and who receives it — on a curve the flat 1% split four ways between creator, platform, referrer and protocol — the average price the order would fill at, and the minimum-out floor at several slippage tolerances.\n\nCosts nothing and signs nothing. Use it before every buy, and use it INSTEAD of a spot price whenever someone asks what an amount would get them — an order moves the price across its own size, so the spot price is only ever its first infinitesimal slice.\n\nON A BONDING CURVE: if the buy would fill the curve, this says so, reports the refund, and explains the gas-limit trap that decides whether the token's market is created in that same transaction or never. Read that part before quoting a graduating buy to anyone.\n\nIN A UNISWAP V4 POOL (the token graduated and migrated): the quote says it is a pool quote, priced by simulating the real swap through arcnow.io's router. It shows the two charges apart — arcnow.io's fee hook's 0.80% and the pool's own 0.20% LP fee, 1.00% in all, both read off the pool — the average fill price against the pool's spot price, and the price impact. referrer does not exist on a pool swap and is refused.\n\nA token that graduated but never migrated trades nowhere; this says so and names arcnow_migrate. A quote is a snapshot of one block. Anyone else's trade changes it.\n\nTHE AMOUNT IS IN THE TOKEN'S QUOTE: native USDC, or the ERC-20 (such as EURC) it was launched in — arcnow_token names it. Every figure in the answer is labelled with that quote's symbol. An ERC-20 quote is pulled with an exact approval, which the answer says.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "The curve address, or the token address. Either works."
+          },
+          "quoteIn": {
+            "type": "string",
+            "pattern": "^\\d{1,30}(\\.\\d{1,18})?$",
+            "description": "How much of the token's quote to spend, in whole units as a person writes it — \"25\", \"1.5\" — in the quote the token is priced in: native USDC (18 decimals) or an ERC-20 such as EURC (6). It is read exactly in that quote's decimals; more decimal places than the quote has is refused, never rounded. A string, because a JSON number cannot hold 18 decimals."
+          },
+          "referrer": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "CURVE ONLY: the address credited with the referral share of the fee. With no referrer that share goes to the platform instead. Refused for a token in its pool, whose swap has no referrer. (There is no developer share and no developer argument: the fee has four parties — creator, platform, referrer, protocol.)"
+          }
+        },
+        "required": [
+          "address",
+          "quoteIn"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Quote a buy",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "arcnow_quote_sell",
+      "description": "What a given quantity of tokens would fetch right now, wherever the token trades: gross proceeds, every fee and who receives it — on a curve the flat 1% split four ways between creator, platform, referrer and protocol — net proceeds in the token's quote (native USDC or an ERC-20 such as EURC), and the minimum-out floor at several tolerances.\n\nCosts nothing and signs nothing.\n\nON A BONDING CURVE: selling needs NO approval, ever. The curve pulls the tokens through a privileged path that reads no allowance at all, so a holder who has approved nobody can always sell. If you find yourself suggesting an approve step before a curve sell, you are fixing the wrong problem.\n\nIN A UNISWAP V4 POOL (the token graduated and migrated) it is the other way round, and worth telling a user before they sell: the router pulls the tokens with transferFrom, so a pool sell needs an ERC-20 APPROVAL to the router first — a separate transaction. This quote says it is a pool quote, shows arcnow.io's fee hook's 0.80% and the pool's own 0.20% LP fee apart (1.00% in all, read off the pool), the average fill against the pool's spot price, the price impact, and how much `holder` has approved the router for already. A pool sell is priced as a real holder, so `holder` must actually hold the tokens; on a writing server it defaults to the signing address. referrer is refused on a pool.\n\nA token that graduated but never migrated trades nowhere; this says so and names arcnow_migrate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "The curve address, or the token address. Either works."
+          },
+          "tokensIn": {
+            "type": "string",
+            "pattern": "^\\d{1,30}(\\.\\d{1,18})?$",
+            "description": "How many whole tokens to sell, as a string — \"1000\", \"12.5\". Tokens are 18-decimal."
+          },
+          "holder": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "POOL: the address whose tokens would be sold. A pool sell is priced by simulating the real swap as that address, so it must actually hold the tokens. Defaults to the signing address on a writing server; required on a read-only one. Not needed on a bonding curve, where a sell is priced for nobody in particular."
+          },
+          "referrer": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "CURVE ONLY: credited with the referral share of the fee. Refused for a token in its pool. There is no developer argument: the fee has four parties."
+          }
+        },
+        "required": [
+          "address",
+          "tokensIn"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Quote a sell",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "arcnow_quote_launch",
+      "description": "What launching a token would cost, before anything is spent: the launch fee the quote registry sets for the quote (zero on arcnow.io's networks — launching is free — but read live, never assumed), the initial buy, the 1% trade fee the initial buy itself pays, the tokens the creator would receive, and — given a creator address — the exact addresses the token and its curve would land at.\n\nCosts nothing and signs nothing. Always call this before arcnow_launch and show the user the total, because a launch is irreversible: the name, symbol, supply, curve shape and graduation venue are fixed at that transaction and can never be changed afterwards, by anyone, including whoever launched it.\n\nTHE QUOTE. A token is priced for life in the quote it launches in: `quote` names it by symbol or address — native USDC by default, or an ERC-20 such as EURC that the quote registry accepts (arcnow_quote_tokens). The initial buy — and any launch fee — is in that quote, and so is every trade in the token afterwards. Native USDC is paid as msg.value; an ERC-20 is pulled by the launchpad after an exact approval.\n\nThe total is EXACTLY what a launch requires, not a minimum — for native USDC the launchpad reverts on an overpayment as readily as an underpayment, because it has no refund path.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The token's name. Permanent — there is no setter for it, on any contract, ever."
+          },
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16,
+            "description": "The token's ticker. Permanent, and not unique: two tokens may share a symbol, so an address is the only identifier that means anything."
+          },
+          "metadataUri": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "REQUIRED. An ipfs:// or https:// URI for the token's metadata — image, description, links. The launchpad reverts a launch whose URI is empty (InvalidLaunchParameters), so there is no launching without one. Permanent: it is stamped into the token at launch and there is no setter."
+          },
+          "initialBuy": {
+            "type": "string",
+            "pattern": "^\\d{1,30}(\\.\\d{1,18})?$",
+            "description": "How much of the launch's quote the creator spends buying their own token in the launch transaction, in whole units, with no more decimals than the quote has. It is an ORDINARY buy: it runs through the curve and pays the 1% trade fee. There is no fee-free entry into a curve, and no launch fee on top of it on arcnow.io's networks. \"0\" is allowed."
+          },
+          "quote": {
+            "description": "Optional: the quote token to launch in, by symbol (\"USDC\", \"EURC\") or by address. Defaults to native USDC. The token is priced in it FOR LIFE: its initial buy and every trade in it afterwards. A symbol is looked up in this network's own quote tokens only. arcnow_quote_tokens lists them with whether the quote registry accepts each and this server's spend cap for it; a quote with no cap cannot be launched in here.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "creator": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "Optional: the address that would launch. Given one, this also predicts the token and curve addresses — valid only for that address's CURRENT launch nonce and exactly these parameters."
+          },
+          "platform": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "Optional: the PlatformConfig to launch under. Defaults to arcnow.io's own, which is what almost every launch uses."
+          },
+          "migrator": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "Optional: where this token graduates to, snapshotted into the curve at launch and immutable thereafter. Defaults to the platform's default migrator."
+          }
+        },
+        "required": [
+          "name",
+          "symbol",
+          "metadataUri",
+          "initialBuy"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Quote a launch",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "arcnow_platform",
+      "description": "One platform's configuration: who administers it, who receives its cut, how the 1% trade fee is divided FOUR ways — creator, referrer, the platform and the protocol; there is no developer share — which migrator it launches tokens into by default, and the curve template it stamps onto every token it launches.\n\nWith no address, reports arcnow.io's own platform — the default a launch uses.\n\nThe single easiest thing to misread here is what a share means. Every share is basis points OF THE FEE, never of the trade. A creator share of 3000 bps is 30% of the fee and 0.30% of the trade. This tool prints both, every time. The platform's own share is never configured: it is the residual, whatever is left after the protocol, creator and referrer shares — arcnow.io's own is creator 3000 / referrer 1000 / platform 3500 / protocol 2500.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "Optional: the PlatformConfig address. Defaults to arcnow.io's own platform."
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Inspect a platform's fees and defaults",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "arcnow_list_platforms",
+      "description": "Every platform the registry has deployed, with its fee split and default graduation venue. Unlike arcnow_list_tokens this is a real enumeration held in contract storage, so it is complete — there is no scan window and nothing is missed.\n\nUse it to answer 'what can I launch under' or 'who else builds on this'. Launching does not require your own platform; arcnow.io's is the default and is one entry here among the others, not a privileged one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 20,
+            "description": "How many platforms to return.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "offset": {
+            "default": 0,
+            "description": "How many to skip, for paging through a long registry.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "List registered platforms",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "arcnow-io",
+    "version": "0.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": "arcnow.io on Arc (arc-testnet) — bonding-curve token launches, trading and graduation, read straight from the contracts.\n\nThis server is READ-ONLY. It cannot sign, spend, launch or trade, and the write tools are not published. Do not offer to buy, sell or launch anything. Enabling writes is the operator's decision, made by restarting the server — it is not something that can be granted during a conversation.\n\nNEVER ask anyone for a private key, and never put one in a tool argument. No tool here takes one, and an argument named like a credential is refused rather than ignored. A tool call is written into a transcript; a key that has been through a transcript has been published and must be rotated. Signing is configured in the server's environment by whoever starts it.\n\nMONEY ON THIS CHAIN. Every token is priced for life in ONE quote token, fixed at its launch: native USDC — the gas currency, 18 decimals, paid as msg.value — or an allowlisted ERC-20 such as EURC (6 decimals), pulled with an exact ERC-20 approval. arcnow_token names a token's quote; arcnow_quote_tokens lists the ones a launch may use. Every amount a tool takes or reports is in that token's own quote, and is labelled with its symbol: never read a EURC figure as dollars, and never add amounts of two quotes together. Amounts cross these tools as decimal strings in whole units (\"25\", \"1.5\") with no more decimals than the quote has — never as JSON numbers, which cannot hold 18 decimals. Gas is always native USDC. The USDC ERC-20 predeploy is native USDC's 6-decimal view, pays for nothing, and is not a quote token.\n\nPRICES. A curve's spot price is the marginal price of the next infinitesimal token, not what an order fills at — the curve integrates price across an order. Answer \"what would 50 EURC get me\" with arcnow_quote_buy, never by multiplying.\n\nGRADUATION. A curve retires permanently once it collects its target, and the buy that fills it migrates the curve into a Uniswap v4 pool in that same transaction. From then on the token trades in that pool, through arcnow.io's router, and the quote and trade tools route there on their own — every pool quote says it is one, and names its two charges apart: arcnow.io's fee hook's 0.80% and the pool's own 0.20% LP fee, 1.00% in all, the same as the curve's flat 1%. Where a token graduates to is snapshotted into its own curve at launch: ask the curve, not a network-wide list. A token can be graduated and NOT migrated — trading over, no market anywhere — until somebody runs the permissionless migrate().\n\nSELLING IN A POOL needs an ERC-20 approval to the router first: a separate transaction granting it spending rights. arcnow_sell grants one only when told to (approveRouter: true), only for exactly the amount being sold, and reports it. Tell the user about the approval before you set that flag.\n\nFEES. On a curve the trade fee is a flat 1%, split FOUR ways — creator, platform, referrer, protocol; there is no developer share, and no tool takes a developer. A referrer is a curve-only argument; a pool swap has none. Launching is free on arcnow.io's networks: the launch fee the quote registry reports is zero, and the tools print what it reports rather than assuming.\n\nThis is ARC TESTNET, the rehearsal network: the same contracts as arcnow.io on Arc mainnet, at other addresses, with test funds. Nothing bought, sold or launched here exists on mainnet, and no mainnet token or address can be reached from here. The live network is arc-mainnet, which the operator selects with ARCNOW_MCP_NETWORK.",
+  "durationMs": 14209,
+  "stderr": "arcnow.io MCP server\n  mode        READ-ONLY — no tool here can spend, launch or sign anything\n  network     arc-testnet\n  endpoint    (the network preset's endpoint)\n  to write    restart with --allow-writes and a key in ARCNOW_PRIVATE_KEY. The key is read from the environment and is never a tool argument.\n  warning     the endpoint could not be verified as chain arc-testnet: the call did not reach a contract (calling eth_chainId): HTTP request failed.. This is the transport rather than the chain — a wrong RPC URL, an endpoint that is down or rate limiting, a wallet that rejected the request, or a chain id that is not the one this client was built for.\n              Tools will report this again when they are called.\n  ready       listening on stdio\n"
+}

@@ -1,0 +1,626 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "holoscrape-mcp",
+  "version": "0.2.1",
+  "integrity": {
+    "dist": "sha512-iJb7WRiN6bSWhyxbzflyHbsVc4ViPP/vMQEbqLFhWWvAMP5oaX5p2tSiPMdilWsSpsaEEPd+t+dEL93zGpz6Wg==",
+    "installed": "sha512-iJb7WRiN6bSWhyxbzflyHbsVc4ViPP/vMQEbqLFhWWvAMP5oaX5p2tSiPMdilWsSpsaEEPd+t+dEL93zGpz6Wg=="
+  },
+  "bin": "node_modules/holoscrape-mcp/index.mjs",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T22:16:08.599Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "current_page",
+      "description": "The page the person is looking at now, and what can be extracted from it. Takes no arguments; returns a tabId for the other tools. Honours a page pinned in the HoloScrape panel; otherwise it follows the active tab and MOVES when they browse, so capture the tabId once and pass it explicitly for the rest of the run. Cost: instant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "tabs_list",
+      "description": "Every http(s) tab open in the person's browser. Use only when current_page is not the page they meant and you need to ask which. Cost: instant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "page_harvest",
+      "description": "Open every record linked from a list and extract fields from each, in parallel lanes inside the browser. Returns counts and a resultId, never rows; read them with results get or export. Give `record` for one-per-page fields, `rows` for many-per-page, neither to read schema.org. Slow: one page load per record. If the list cards already show the fields, use list_extract instead. Cost: minutes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "The list page, when using `links` or letting the engine pick. Not needed with `urls`."
+          },
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The pages to open. Either this or `links`. One url with `rows` re-reads that page's own rows."
+          },
+          "links": {
+            "type": "string",
+            "description": "CSS for the links to follow on the list page. Omit and the engine follows the ranked list itself, reporting the selector it used as linksVia."
+          },
+          "record": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "One-per-page fields as {name: \"css\"}; \"css@attr\" reads an attribute, \"$.path\" reads captured JSON (needs `network`). Copied onto every row from that page."
+          },
+          "rows": {
+            "type": "object",
+            "description": "The repeating block on each page: {at, fields, limit} or {from}. Each row also gets `billing`, its 1-based position.",
+            "properties": {
+              "at": {
+                "type": "string",
+                "description": "CSS for one repeating row on the record page, or a $. path to a JSON array (needs `network`)."
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Field name -> CSS relative to the row. \"css@attr\" reads an attribute; \":self\" takes the row's own text whole, for when inner hooks come back empty."
+              },
+              "limit": {
+                "type": "number",
+                "description": "Rows per page, default 500. Over it, capped is set."
+              },
+              "from": {
+                "type": "string",
+                "description": "Instead of `at`: the schema.org array to use as rows, by name (\"review\", \"offers\", \"recipeIngredient\"). Others found are listed in alsoRows."
+              }
+            },
+            "required": []
+          },
+          "retryOf": {
+            "type": "string",
+            "description": "A finished runId: re-run only its FAILED pages. A thin page is usually transient. Combine the passes with results action:\"merge\"."
+          },
+          "awaitFor": {
+            "type": "string",
+            "description": "Wait for this on every page before reading: \"<css> :: <mode> :: <ms>\", mode exists | gone | still | a number. \"<spinner css> :: gone\" is the surest."
+          },
+          "lanes": {
+            "type": "number",
+            "description": "Pages open at once. Default 5; more is slower and loses rows. Use 2-3 on a site that has shown a captcha."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Pages per run, for a pilot. It DROPS pages rather than trimming a reply; the reply then carries matched, skipped and nextFrom."
+          },
+          "from": {
+            "type": "number",
+            "description": "Skip this many matched links first. Pass the previous reply's nextFrom to take the next fold."
+          },
+          "network": {
+            "type": "string",
+            "description": "Substring of the request URL whose JSON to capture on every page, e.g. \"/api/products\". Fields may then be $. paths. Attaches a debugger per lane."
+          },
+          "background": {
+            "type": "boolean",
+            "description": "Return a runId at once instead of blocking; poll results action:\"status\". Set it for anything over about 20 pages."
+          },
+          "where": {
+            "type": "string",
+            "description": "\"person\" (default) or \"companion\": a private headless Chromium, no login. Pick it when their tabs must stay untouched or no tab is open; public pages only.",
+            "enum": [
+              "person",
+              "companion"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "tab_here",
+      "description": "Point a tab you already hold at a URL and wait until the page has actually loaded: one tab, many destinations, nothing left behind. Reports arrived, hasList, rowsOnPage and rising (the count was still climbing, so it is a floor). `network` also captures what the page fetched. For the same fields off many pages use page_harvest, not this in a loop; it refuses after a few cycles. Cost: seconds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "The tab to move. It keeps its id: the same tab, somewhere else."
+          },
+          "url": {
+            "type": "string",
+            "description": "http or https."
+          },
+          "close": {
+            "type": "boolean",
+            "description": "Close this tab instead of navigating it; do it when a pass ends. Refused for the connection window and for a tab the person pinned."
+          },
+          "newTab": {
+            "type": "boolean",
+            "description": "Open a NEW tab instead of moving this one. Nothing closes it, so use it only when they asked for a new tab or there is no tab to move."
+          },
+          "search": {
+            "type": "string",
+            "description": "Words to search for. With this, `url` names the SITE and the search runs in the site's own box; reports what the site returned."
+          },
+          "oneByOne": {
+            "type": "boolean",
+            "description": "Stand the sweep refusal aside: set it only when the pages differ from one another and must be visited in turn (a login, a form, one-off lookups)."
+          },
+          "network": {
+            "type": "string",
+            "description": "Substring of request URLs to capture during the load. \"*\" maps every response (url, mime, size, JSON paths) with no bodies: start there on an unknown site."
+          },
+          "where": {
+            "type": "string",
+            "description": "\"person\" (default) or \"companion\": a private headless Chromium, no login. Pick it when their tabs must stay untouched or no tab is open; public pages only.",
+            "enum": [
+              "person",
+              "companion"
+            ]
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "page_study",
+      "description": "Every repeating structure on a tab, ranked, with the evidence behind the ranking, plus how the page continues (next link, numbered pager) and what might load more. Returns several candidates so you choose: check looksLikeFurniture and distinctness before trusting the one marked chosen. It sees only repeating structure: read a single element with page_state \"@dom(<css>)\". Read-only. Cost: instant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "From current_page, tab_here or tabs_list."
+          },
+          "where": {
+            "type": "string",
+            "description": "\"person\" (default) or \"companion\": a private headless Chromium, no login. Pick it when their tabs must stay untouched or no tab is open; public pages only.",
+            "enum": [
+              "person",
+              "companion"
+            ]
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "page_grow",
+      "description": "Make a list load more and report what changed: presses a load-more control, or scrolls the window or one container (`selector` + scroll:true). Returns rows before and after, unique rows gained, and whether the list repeats itself. With `network` and `rows.at` it reads the JSON each scroll fetched (infinite or virtual lists). mode walk or explore presses instead. Changes the page. Cost: seconds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "The tab."
+          },
+          "mode": {
+            "type": "string",
+            "description": "\"grow\" (default) lengthens a list. \"walk\" presses, fills or chooses; it cannot follow a real link (use tab_here). \"explore\" opens what is collapsed.",
+            "enum": [
+              "grow",
+              "walk",
+              "explore"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "description": "walk: what the person would CLICK, in their words. Prefer it to a selector; it survives a redesign that renames every class."
+          },
+          "fill": {
+            "type": "string",
+            "description": "walk: type this into the field named by `selector`. Never submits; the value is read back. Refused for password, hidden and payment fields."
+          },
+          "choose": {
+            "type": "string",
+            "description": "walk: pick a <select> option by its visible words (\"Most recent\"). Finds the select by the option. changed:false means the page looked identical afterwards."
+          },
+          "read": {
+            "type": "string",
+            "description": "walk: CSS of the rows to read back after the press or choice, so the reply carries them and you can verify the order really changed."
+          },
+          "limit": {
+            "type": "number",
+            "description": "walk: how many matched controls to press in this call."
+          },
+          "offset": {
+            "type": "number",
+            "description": "walk: start from this matched control. A walk that stopped early says where; pass that back to continue rather than start over."
+          },
+          "back": {
+            "type": "boolean",
+            "description": "walk: return to the page this walk started from when it is done."
+          },
+          "oneByOne": {
+            "type": "boolean",
+            "description": "walk: stand the sweep refusal aside, for pages that genuinely must be pressed through one at a time."
+          },
+          "selector": {
+            "type": "string",
+            "description": "A control from page_study growth.candidates to press, OR the CSS of a scrollable container to scroll (with scroll:true). Omit to scroll the window."
+          },
+          "scroll": {
+            "type": "boolean",
+            "description": "Scroll instead of pressing. Alone: the window. With `selector`: THAT container, to its own bottom, which is right for a pane beside other panes."
+          },
+          "waitMs": {
+            "type": "number",
+            "description": "How long to wait for new rows. Default 2500, max 8000."
+          },
+          "direction": {
+            "type": "string",
+            "description": "\"down\" (default) for more of a list, \"up\" for OLDER content: a conversation loads its history upward."
+          },
+          "hops": {
+            "type": "number",
+            "description": "How many times to scroll and wait. Default 1, max 50. Stops early after two empty hops; perHop shows what each one added."
+          },
+          "rounds": {
+            "type": "number",
+            "description": "explore: scroll rounds per region, default 8, max 40."
+          },
+          "network": {
+            "type": "string",
+            "description": "Feed mode: substring of the request URL each scroll triggers, e.g. \"/api/search\". Needs rows.at. Find it with tab_here network:\"*\"."
+          },
+          "rows": {
+            "type": "object",
+            "description": "Feed mode only: {at: \"$..items\", fields: {name: \"$.title\"}}.",
+            "properties": {
+              "at": {
+                "type": "string",
+                "description": "$. path to the array of items in the captured response."
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Field name -> $. path, relative to one item."
+              }
+            }
+          },
+          "where": {
+            "type": "string",
+            "description": "\"person\" (default) or \"companion\": a private headless Chromium, no login. Pick it when their tabs must stay untouched or no tab is open; public pages only.",
+            "enum": [
+              "person",
+              "companion"
+            ]
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "page_state",
+      "description": "Read the app's own in-memory state (the store the page renders from), or a DOM, markup or network slice, by data path; it never takes code. tabId alone maps what state exists and the path to each; `path` reads one slice. Best for: virtualized lists and fields the DOM omits. Not recommended for: what the page already shows (list_extract is cheaper). Credentials come back masked. Cost: instant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "From current_page, tab_here or tabs_list."
+          },
+          "path": {
+            "type": "string",
+            "description": "Omit to discover. A store path (\"__NEXT_DATA__.props\", [0], [\"k\"]) or a pseudo-path, parens required: @dom() @html() @map() @collect() @await() @fetch() @net()"
+          },
+          "reply": {
+            "type": "number",
+            "description": "@collect only: cap how many rows come BACK without capping how far it walks (`limit` does that). The reply carries collected, shown and next."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Keep only these field paths on each row of a collection, e.g. [\"id\",\"name\"]. The biggest saving on a long collection."
+          },
+          "resolve": {
+            "type": "object",
+            "description": "A keyed join {from, into, fields}, for rows that only reference their records by id. Misses set @resolved:false and count in joinMisses; none is dropped.",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "Field path on each row holding the key to look up."
+              },
+              "into": {
+                "type": "string",
+                "description": "Path of the collection to look the key up in."
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Field paths to merge in from the record found."
+              }
+            },
+            "required": [
+              "from",
+              "into"
+            ],
+            "additionalProperties": false
+          },
+          "offset": {
+            "type": "number",
+            "description": "Where to start inside a collection. A reply that did not reach the end carries next; pass it back here. Default 0."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Entries returned per array or object. Default 25, max 200; the true total is always reported."
+          },
+          "depth": {
+            "type": "number",
+            "description": "Levels to serialize. Default 3, max 6. A narrower path beats a deeper read."
+          },
+          "where": {
+            "type": "string",
+            "description": "\"person\" (default) or \"companion\": a private headless Chromium, no login. Pick it when their tabs must stay untouched or no tab is open; public pages only.",
+            "enum": [
+              "person",
+              "companion"
+            ]
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_extract",
+      "description": "Read the repeating rows on a tab into a saved table, following its pagination. Starts a background run and returns a runId at once; poll results action:\"status\", then get or export. Pass `selector` (from page_study lists[].selector) when the page holds more than one list. Reads list pages only and never opens records, so it is the fast path when the cards already show the fields. Cost: minutes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "The tab holding the list."
+          },
+          "pages": {
+            "type": "number",
+            "description": "How many pages to follow. 0 or omitted means keep going until the list ends."
+          },
+          "withRecords": {
+            "type": "boolean",
+            "description": "Also open each row's own record page and fill in the extra columns. Slower, and much richer."
+          },
+          "selector": {
+            "type": "string",
+            "description": "CSS of the container to extract, from page_study lists[].selector. Matches nothing: the call fails naming it. Omit to accept the ranked choice."
+          },
+          "next": {
+            "type": "string",
+            "description": "The next-page control, as a CSS selector or an href. Outranks every guess; use it when a walk stopped early and the reply lists nearMisses."
+          },
+          "where": {
+            "type": "string",
+            "description": "\"person\" (default) or \"companion\": a private headless Chromium, no login. Pick it when their tabs must stay untouched or no tab is open; public pages only.",
+            "enum": [
+              "person",
+              "companion"
+            ]
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "results",
+      "description": "Runs and saved tables. status and stop take a runId. list shows saved tables. get returns rows, paged by limit, offset and columns; with `saveTo` the server writes the whole table to a file instead. export writes a CSV to Downloads. merge combines passes. download saves assets or `urls`. guide is the manual. No resultId until a run is done. Cost: instant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "status | stop (runId); list; get | export | download (resultId); merge (resultIds); guide (optional topic).",
+            "enum": [
+              "status",
+              "stop",
+              "list",
+              "get",
+              "export",
+              "download",
+              "merge",
+              "guide"
+            ]
+          },
+          "runId": {
+            "type": "string",
+            "description": "From list_extract or a backgrounded page_harvest. For status and stop."
+          },
+          "resultId": {
+            "type": "string",
+            "description": "From a finished run, or from action:\"list\". For get, export and download."
+          },
+          "resultIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "merge: two or more resultIds. Two passes over one list are one answer; the merge runs in the browser."
+          },
+          "key": {
+            "type": "string",
+            "description": "merge: the column that identifies a row across passes, usually the source url. The longer value wins per field; rows without it count as unkeyed."
+          },
+          "into": {
+            "type": "string",
+            "description": "merge: save as a NEW result under this name and return its resultId. Use it for anything you will export."
+          },
+          "limit": {
+            "type": "number",
+            "description": "get: rows in this reply. Default 100, max 1000. Ignored with saveTo."
+          },
+          "offset": {
+            "type": "number",
+            "description": "get: where to start. The reply carries nextOffset and more while rows remain; repeat until truncated is false."
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "get: only these columns. Omit for all of them."
+          },
+          "saveTo": {
+            "type": "string",
+            "description": "get or export: ABSOLUTE path ending .csv or .json, under home or tmp. The server writes every row there and replies {path, rows, bytes}. Never overwrites."
+          },
+          "topic": {
+            "type": "string",
+            "description": "guide: a word from a section title. Omit for the list of sections."
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "download: only these kinds: \"image\", \"video\", \"audio\". Omit for everything the scan found."
+          },
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "download: save these http(s) addresses instead of a result's assets. Same human approval; the browser fetches them signed in as the person."
+          },
+          "max": {
+            "type": "number",
+            "description": "download: cap on files. Default 500, max 2000. The person sees this number on the card."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "resolve_x_video",
+      "description": "Turn an X (Twitter) post into a plain, fetchable mp4 url through X's public syndication API. Runs on this machine: no tab, nothing that belongs to the person. Give `url` or `statusId`; returns {url, statusId}, or {url:null, why} when there is no video: an answer, not a retry. The url needs no cookies, so fetch it yourself. With an X tab open, page_state reads these urls from its store. Cost: instant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "An x.com or twitter.com post url. Either this or statusId."
+          },
+          "statusId": {
+            "type": "string",
+            "description": "The bare numeric tweet/post id. Either this or url."
+          },
+          "videoId": {
+            "type": "string",
+            "description": "Only for a post carrying more than one video: the id in a captured url's amplify_video/<id>/ segment. Omitted, the highest bitrate wins."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "holoscrape",
+    "version": "0.2.1"
+  },
+  "protocolVersion": null,
+  "instructions": "HoloScrape reads pages in the person's OWN signed-in Chrome: their logins, their IP, their tabs.\nTreat it as someone's desk.\n\nSTART with current_page (the tab they look at) or tab_here (point a tab at a URL). Both\nreturn a tabId: capture it once and pass it everywhere.\n\nROWS COME BACK BY REFERENCE. list_extract and page_harvest return counts and a runId or resultId,\nnever rows. Finish with results: get for a look, export for a CSV in Downloads, or\nsaveTo:\"/abs/path.csv\" for a file the server writes. Same fields off many pages: ONE\npage_harvest call; a loop of visits is refused.\n\nREAD \"page\" AND \"hint\" IN EVERY REPLY. page is the state the tab was read in: hidden:true or\nframes:false means it was not painting, settled:false means the wait hit its cap; either way a\ncount is a FLOOR and an empty read is not an absence. hint names the next call when something\nis about to go wrong. Never conclude \"absent\" from one read; check the other layer (rendered\npage, or the app's store via page_state) first.\n\nTHE FULL GUIDE IS ON DEMAND: results {action:\"guide\"} lists its sections, topic:\"<word>\" returns\none, no browser needed. Whole text: resource holoscrape://guide, or skill/SKILL.md.\nRead the matching section before a first page_harvest, a page_state pseudo-path (@dom @net\n@collect …), or when a site pushes back.\n\nCOMPANION: where:\"companion\" on tab_here, page_harvest, list_extract, page_study, page_grow or page_state reads in a private headless Chromium: no login, public pages only, a login wall hands the job back. Pick it yourself when their tabs must stay untouched or no tab is open; it also steps in on its own when a lane here cannot paint (\"switched\"). Guide: companion.\n\nholoscrape-mcp 0.2.1, 10 tools: current_page, tabs_list, page_harvest, tab_here, page_study, page_grow, page_state, list_extract, results, resolve_x_video. If your tool list is missing any of these it was cached before this server started: reconnect the MCP server rather than working around the gap.",
+  "durationMs": 4407,
+  "stderr": "holoscrape-mcp: 0.2.1 listening on 127.0.0.1:27182\nholoscrape-mcp: \nholoscrape-mcp:   Open the HoloScrape side panel in Chrome once — it connects on its own, no code to enter.\nholoscrape-mcp: \n"
+}

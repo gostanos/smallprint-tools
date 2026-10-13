@@ -1,0 +1,266 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "pypi",
+  "name": "wrapper-mcp",
+  "version": "0.8.8",
+  "integrity": {
+    "dist": "sha256:bce2e1ea703611b44a584a52b4e9be7004603151d24b2a079966877ec0d546b2",
+    "installed": "sha256:bce2e1ea703611b44a584a52b4e9be7004603151d24b2a079966877ec0d546b2"
+  },
+  "bin": "wrapper-mcp = wrapper_mcp:main",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/python:3.12-slim-bookworm",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T02:51:04.249Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "extract_entities",
+      "description": "Rozpozná pojmenované entity pomocí NameTag 3 — CZ i 30+ dalších jazyků.\n\n    Pro **češtinu** používá bohatý CNEC 2.0 tagset (osoba/firma/instituce/\n    PSČ/telefon/datum/…). Pro ostatní jazyky (SK, EN, DE, FR, IT, ES, PT,\n    NL, PL, HU, UK, RU, RO, SL, BG, EL, HR, SR, FI, LT, LV, ET, DA, SV,\n    NO, ZH, AR, TR, VI, HI a další) přepne na multilingvální UNER model\n    s tagsetem PER/ORG/LOC.\n\n    Args:\n        text: Vstupní text (UTF-8).\n        model: ``auto`` (default) — automatická detekce CZ vs non-CZ.\n            ``czech`` vynutí CNEC 2.0 (bohatý CZ tagset). ``multilingual``\n            vynutí UNER PER/ORG/LOC pro non-CZ. Lze zadat i plné jméno\n            modelu (např. ``nametag3-multilingual-onto-250203``).\n        fix_romance: Default True. Pro PT/ES texty oprava typického\n            UNER bugu, kdy se \"X de Place\" zaeviduje celé jako PER —\n            wrapper rozdělí na PER + LOC a generuje warning.\n        include_xml: Default ``False``. Inline XML s ``<ne type=\"...\">`` tagy\n            pro HTML highlighting (extra API call).\n        include_vertical: Default ``False``. Tabulkový formát ``id\\ttype\\ttext``\n            (extra API call).\n\n    Returns:\n        ``entities`` (list s ``type``, ``label``, ``text``, ``tokens``,\n        ``nested``), ``model``, ``count``, ``warnings``,\n        ``detected_language`` (jen u ``auto``),\n        ``xml`` (jen pokud ``include_xml``),\n        ``vertical`` (jen pokud ``include_vertical``).\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "model": {
+            "default": "auto",
+            "title": "Model",
+            "type": "string"
+          },
+          "fix_romance": {
+            "default": true,
+            "title": "Fix Romance",
+            "type": "boolean"
+          },
+          "include_xml": {
+            "default": false,
+            "title": "Include Xml",
+            "type": "boolean"
+          },
+          "include_vertical": {
+            "default": false,
+            "title": "Include Vertical",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "extract_entitiesArguments"
+      }
+    },
+    {
+      "name": "anonymize",
+      "description": "Production-grade pseudonymizace českých právních textů (v0.6.0).\n\n    Pipeline (8 kroků):\n\n    1. **Regex pre-pass** (`regex_pre_pass=True`) — strukturovaná PII\n       (telefon, IČO, RČ, č.j., sp. zn., e-mail, URL, PSČ, SPZ, IBAN, DIČ,\n       OP, datovka) se anonymizuje **PŘED** MasKITem, aby nebyly fragmentovány.\n       Telefon \"777 123 456\" se anonymizuje **celý** jako jeden blok TELEFON1.\n\n    2. **Strict wrapper pre-pass** (`strict=True`) — NameTag najde\n       firmy/úřady/instituce, které MasKIT vynechává nebo fragmentuje,\n       a anonymizuje je sentinely → FIRMA1, INSTITUCE1.\n\n    3. **MasKIT** — pseudonymizace zbývajících PII (jména, adresy, ...).\n\n    4. **Stop-list filter** (`stop_list_filter=True`) — MasKIT občas\n       chybně nahrazuje běžná slova (\"stát\" → \"UniAgentury\", \"sporu\" →\n       \"Pardubic\"). Wrapper detekuje a vrátí originál, přidá warning.\n\n    5. **Restore sentinely** → finální placeholdery (TELEFON1, FIRMA1, ...).\n\n    6. **Fragmentation warnings** — detekce známých MasKIT problémů.\n\n    7. **Type classification** — NameTag dohledá typ entity pro každou náhradu.\n\n    8. **Placeholder mode** (`placeholder_mode=True`) — místo MasKIT náhodných\n       fake names (`Jan Novák`) použij deterministické `OSOBA1`, `OSOBA2`...,\n       `MESTO1`, `ULICE1`, ... S dedupingem: Jiří × 15× v textu → OSOBA1 × 15×.\n       **Reprodukovatelné** (stejný vstup → stejný výstup) a **auditovatelné**.\n\n    Args:\n        text: Vstupní text (čeština).\n        output: Formát výstupu — ``txt`` (default), ``html``, ``conllu``.\n        keep_mapping: Když True, vrátí mapping. **POZOR**: pokud má text\n            dál opustit důvěrné prostředí, mapping vypni!\n        classify_types: NameTag dohledá typ entity. Default ``True``.\n        strict: Wrapper pre-pass na firmy/úřady. Default ``True``.\n        placeholder_mode: ⭐ **NEW v0.6.0** — deterministic placeholdery\n            místo MasKIT fake names. Pro reprodukovatelnost a auditovatelnost.\n        regex_pre_pass: Default ``True``. Strukturovaná PII regexem PŘED MasKITem.\n        stop_list_filter: Default ``True``. Rollback MasKIT false positives.\n\n    Returns:\n        ``anonymized`` (čistý text), ``raw`` (MasKIT raw), ``replacements``\n        (list s ``original``, ``placeholder``, ``type``, ``source``),\n        ``warnings``, ``sources`` ({maskit, wrapper-regex, wrapper-strict,\n        wrapper-placeholder}).\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "output": {
+            "default": "txt",
+            "enum": [
+              "txt",
+              "html",
+              "conllu"
+            ],
+            "title": "Output",
+            "type": "string"
+          },
+          "keep_mapping": {
+            "default": true,
+            "title": "Keep Mapping",
+            "type": "boolean"
+          },
+          "classify_types": {
+            "default": true,
+            "title": "Classify Types",
+            "type": "boolean"
+          },
+          "strict": {
+            "default": true,
+            "title": "Strict",
+            "type": "boolean"
+          },
+          "placeholder_mode": {
+            "default": false,
+            "title": "Placeholder Mode",
+            "type": "boolean"
+          },
+          "regex_pre_pass": {
+            "default": true,
+            "title": "Regex Pre Pass",
+            "type": "boolean"
+          },
+          "stop_list_filter": {
+            "default": true,
+            "title": "Stop List Filter",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "anonymizeArguments"
+      }
+    },
+    {
+      "name": "analyze_morphology",
+      "description": "Tokenizuje, lemmatizuje a označuje slovní druhy pomocí UDPipe 2.\n\n    Pro každý token vrací **lemma** (základní tvar), **UPOS** (universal POS tag),\n    **morphological features** (pád, rod, číslo, čas...) a volitelně závislostní\n    parse (head + deprel) nebo character ranges (offsety do originálu).\n\n    UDPipe 2 podporuje **961 modelů** pro téměř všechny jazyky světa.\n    Auto-detect (default) rozezná: czech, slovak, ukrainian, russian, polish,\n    german, english, french (via heuristics).\n\n    Hodí se pro:\n    - Fulltextové vyhledávání v právních textech (lemma \"soud\" matchuje \"soudu/soudem/soudy\")\n    - Filtrování podle slovních druhů (jen substantiva, jen verba)\n    - Detekce pasivních konstrukcí (Voice=Pass)\n    - Vícejazyčné dokumenty (UA legal aid, EN smlouvy, DE Klage…)\n\n    Args:\n        text: Vstupní text.\n        model: UDPipe model alias. ``auto`` (default) detekuje jazyk podle markerů.\n            Explicit: ``czech``, ``slovak``, ``english``, ``ukrainian``, ``russian``,\n            ``polish``, ``german``, ``french``, atd. — 961 modelů celkem.\n        include_parse: True = vrátí závislostní parse (head, deprel).\n        include_ranges: True = vrátí ``token_range`` (char offsets do originálu).\n            Užitečné pro inline highlighting nebo mapování token → text position.\n\n    Returns:\n        ``sentences``, ``model``, ``token_count``, ``sentence_count``,\n        ``detected_language`` (jen u auto).\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "model": {
+            "default": "auto",
+            "title": "Model",
+            "type": "string"
+          },
+          "include_parse": {
+            "default": false,
+            "title": "Include Parse",
+            "type": "boolean"
+          },
+          "include_ranges": {
+            "default": false,
+            "title": "Include Ranges",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "analyze_morphologyArguments"
+      }
+    },
+    {
+      "name": "check_readability",
+      "description": "Analyzuje čitelnost českého textu pomocí PONK — 4 feature sety (v0.7.0).\n\n    PONK byl navržen pro úřední komunikaci s občany. V0.7.0 wrapper vystavuje\n    všechny 4 jeho feature sety, ne jen metriky:\n\n    1. **Overall metrics** — ARI (years of education needed), Verb Distance,\n       Activity, Lexical diversity. (Always returned.)\n\n    2. **Grammatical rules** (``include_rules=True``) — list pravidel které se\n       v textu aktivovala. Každé pravidlo má český název a popis. Aktuálně PONK\n       detekuje: Nedostatek sloves, Přemíra podstatných jmen, Dlouhé věty,\n       Sloveso příliš daleko v klauzi, ...\n\n    3. **Lexical surprise** (``include_lexical_surprise=True``) — distribuce\n       sémantické překvapivosti slov (1=běžné, 16=velmi vzácné/odborné).\n       Vrátí summary: kolik slov je common / surprising / very_surprising.\n\n    4. **Speech acts** (``include_speech_acts=True``) — typy vět (Situace,\n       Kontext, Postup, Proces, Podmínky, Doporučení, Odkazy, Prameny).\n\n    Args:\n        text: Vstupní text.\n        input_format: ``txt`` (default), ``md``, ``docx``.\n        include_rules: Default ``True``. List aktivovaných gramatických pravidel.\n        include_lexical_surprise: Default ``True``. Distribuce vzácnosti slov.\n        include_speech_acts: Default ``True``. Typy vět/řečové akty.\n        include_highlighted_html: Default ``False`` (úspora bandwidthu — HTML\n            má 100+ KB). Zapni pro vizualizační report/PDF.\n\n    Returns:\n        ``metrics``, ``counts``, ``version``, ``processing_time_s``,\n        + volitelné ``rules`` (list), ``lexical_surprise`` (dict),\n        ``speech_acts`` (dict), ``highlighted_html`` (str).\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "input_format": {
+            "default": "txt",
+            "enum": [
+              "txt",
+              "md",
+              "docx"
+            ],
+            "title": "Input Format",
+            "type": "string"
+          },
+          "include_rules": {
+            "default": true,
+            "title": "Include Rules",
+            "type": "boolean"
+          },
+          "include_lexical_surprise": {
+            "default": true,
+            "title": "Include Lexical Surprise",
+            "type": "boolean"
+          },
+          "include_speech_acts": {
+            "default": true,
+            "title": "Include Speech Acts",
+            "type": "boolean"
+          },
+          "include_highlighted_html": {
+            "default": false,
+            "title": "Include Highlighted Html",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "check_readabilityArguments"
+      }
+    },
+    {
+      "name": "correct_text",
+      "description": "Opraví český text pomocí Korektor — pravopis nebo doplnění diakritiky.\n\n    Use cases pro legal-tech:\n    - **spellcheck** (default) — kontrola pravopisu před odesláním podání\n    - **spellcheck_strict** — agresivnější (až 2 edits/word)\n    - **diacritics** — doplnění diakritiky do textu bez ní\n      (OCR výstupy, emaily, mobilní zprávy: ``Jan Vzorek bez hacku`` → ``Jan Vzorek bez háčků``)\n    - **strip** — odstranění diakritiky (např. pro URL slugy nebo legacy systémy)\n\n    Pozor: CZ-only. Modely jsou z roku 2013, vlastní jména a nová slova mohou\n    mít omezenou přesnost.\n\n    Args:\n        text: Vstupní český text.\n        mode: Operace — ``spellcheck`` (default), ``spellcheck_strict``,\n            ``diacritics``, ``strip``.\n\n    Returns:\n        ``corrected`` (upravený text), ``model``, ``mode``, ``changed`` (bool).\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "mode": {
+            "default": "spellcheck",
+            "enum": [
+              "spellcheck",
+              "spellcheck_strict",
+              "diacritics",
+              "strip"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "correct_textArguments"
+      }
+    },
+    {
+      "name": "translate_text",
+      "description": "Přeloží text přes Charles Translator (LINDAT) — 8 jazyků, 17 přímých párů\n    + auto EN-pivot pro nepřímé páry.\n\n    Podporované jazyky: ``cs`` (čeština), ``en``, ``fr``, ``de``, ``pl``,\n    ``ru``, ``uk`` (ukrajinština), ``hi`` (hindština).\n\n    **Přímé páry** (17): cs↔en (+doc), cs↔uk, cs↔ru, en↔fr, en↔de, en↔ru,\n    en↔pl, en→hi (jednosměrně).\n\n    **EN-pivot** (auto): pro páry mimo seznam (typicky de→cs, pl→cs, fr→cs,\n    fr→de) wrapper provede 2 volání ``src→en→tgt`` a vrátí finální překlad\n    + warning + ``pivot=True``. Doc-mode v pivotu nepodporován.\n\n    Klíčové páry pro legal-tech:\n    - ``cs-en`` / ``en-cs`` — anglické sumáře, mezinárodní komunikace\n    - ``doc-cs-en`` / ``doc-en-cs`` (s ``document_mode=True``) — celé dokumenty\n      se zachovanou strukturou odstavců\n    - ``cs-uk`` / ``uk-cs`` — ukrajinští klienti / legal aid pro UA migranty\n    - ``cs-ru`` / ``ru-cs`` — ruskojazyční klienti\n    - ``de-cs`` / ``pl-cs`` / ``fr-cs`` — automatický EN-pivot pro EU sousedy\n\n    Pozor: SK ↔ CZ pár v Charles Translatoru chybí. SK je auto-alias na CS\n    (mutual intelligibility). HI lze jen jako tgt (en→hi), ne jako src.\n\n    Charles Translator umí vlastní jména zachovat v originále — užitečné\n    pro legal: *\"Jan Vzorek podal žalobu u Krajského soudu v Ostravě.\"*\n    → *\"Jan Vzorek filed a lawsuit at the Krajský soud v Ostrava.\"*\n\n    Args:\n        text: Text k překladu (UTF-8).\n        src: Zdrojový jazyk (default ``cs``).\n        tgt: Cílový jazyk (default ``en``).\n        document_mode: True pro doc mode (cs↔en only). Zachová strukturu.\n\n    Returns:\n        ``translated`` (přeložený text), ``src``, ``tgt``, ``pair``\n        (skutečně použitý model name), ``document_mode``, ``input_chars``,\n        ``output_chars``.\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "src": {
+            "default": "cs",
+            "title": "Src",
+            "type": "string"
+          },
+          "tgt": {
+            "default": "en",
+            "title": "Tgt",
+            "type": "string"
+          },
+          "document_mode": {
+            "default": false,
+            "title": "Document Mode",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "translate_textArguments"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "wrapper",
+    "version": ""
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 13801,
+  "stderr": "\n============================================================\n  wrapper-mcp has been RENAMED to  anonymize-mcp\n  Please switch:   pip install anonymize-mcp\n  https://github.com/Buggy1111/anonymize-mcp\n============================================================\n\n<string>:6: DeprecationWarning: wrapper-mcp is deprecated and renamed to anonymize-mcp; install and use 'anonymize-mcp' instead.\n"
+}

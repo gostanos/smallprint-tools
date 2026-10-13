@@ -1,0 +1,869 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "homes-mcp",
+  "version": "2.1.10",
+  "integrity": {
+    "dist": "sha512-uDpXmwIuiyI+i2HZcaVUa2UPUlnjKBiZq07np3qigY2bAhtaAYvALjFXyYjAEW11VSjkIAS91lIVCCwaEMArNQ==",
+    "installed": "sha512-uDpXmwIuiyI+i2HZcaVUa2UPUlnjKBiZq07np3qigY2bAhtaAYvALjFXyYjAEW11VSjkIAS91lIVCCwaEMArNQ=="
+  },
+  "bin": "node_modules/homes-mcp/dist/bundle.js",
+  "installScriptsRan": false,
+  "envNames": [
+    "HOMES_WS_PORT",
+    "HOMES_COMMUNITIES_FILE"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T07:25:01.098Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "homes_search_properties",
+      "description": "Search homes.com listings by free-text location (city, ZIP, neighborhood). Optionally filter by property_type (single_family/condo/townhouse/land/mobile/multi_family), listing_type (for_sale/sold/for_rent/open_houses/new_construction), and sort (newest). Slugifies the location into homes.com's URL routing (e.g. 'Atlanta, GA' + condo + for_sale → /atlanta-ga/condos-for-sale/). Parses the embedded Schema.org JSON-LD to return each listing's address, price, beds/baths, sqft, primary photo, listing agent + brokerage, and the homes.com property URL. `location` is required and must contain Latin letters or digits — a blank or unsluggable location (e.g. only punctuation or non-Latin script) is rejected with an error rather than returning an empty result. KNOWN CAP: homes.com server-renders ~40 listings per page; the response carries `truncated: true` + `total_estimated` when the market has more. To enumerate a busy market, price-band or sub-area your search until each segment fits under the cap. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Homes.com's payload untouched. No field projection: this server has no verified record of which Homes.com fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "location": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Free-text location: city, ZIP, neighborhood (e.g. \"Atlanta, GA\", \"Brooklyn, NY\", \"30311\", \"Park Slope\")"
+          },
+          "limit": {
+            "description": "Max listings to return (default 40, which is also the homes.com SSR page size). Passing >40 will still cap at the page size; the response will set `truncated: true` and `total_estimated` to homes.com's reported total.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "property_type": {
+            "description": "Restrict to a specific homes.com property type. Composes with listing_type.",
+            "type": "string",
+            "enum": [
+              "single_family",
+              "condo",
+              "townhouse",
+              "land",
+              "mobile",
+              "multi_family"
+            ]
+          },
+          "listing_type": {
+            "description": "Search axis. Defaults to for_sale. \"sold\" returns recently-sold listings (useful for market context). \"for_rent\" returns rentals. \"open_houses\" returns listings with scheduled open houses. \"new_construction\" returns builder listings under /new-homes/.",
+            "type": "string",
+            "enum": [
+              "for_sale",
+              "sold",
+              "for_rent",
+              "open_houses",
+              "new_construction"
+            ]
+          },
+          "sort": {
+            "description": "Sort order. Only \"newest\" is currently supported.",
+            "type": "string",
+            "enum": [
+              "newest"
+            ]
+          },
+          "price_min": {
+            "description": "Lower price bound in USD (inclusive). Emitted as homes.com's `?price-min=` filter. Composes with property_type / listing_type. Must be <= price_max when both are given.",
+            "type": "number",
+            "minimum": 0
+          },
+          "price_max": {
+            "description": "Upper price bound in USD (inclusive). Emitted as homes.com's `?price-max=` filter. Pair with price_min to band a busy market under the ~40-listing SSR cap.",
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "location"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Search homes.com listings",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_get_property",
+      "description": "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot_size_sqft plus the derived lot_size_acres (round(lot_size_sqft / 43560, 2); both null — never 0 — for condos and listings with no lot), parking, heating/cooling, MLS ID/source, and date posted/modified. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) derived server-side from the listing description so callers don't have to keyword-parse marketing prose. Pass `include_price_history: true` to inline the same data `homes_get_property_history` returns (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`) under `price_history`. Pass `include_tax_history: true` to inline `homes_get_tax_history` records under `tax_history`. Both are off by default; opting in costs nothing extra over the dedicated tools (same page fetch). The raw `description` is omitted by default; pass `include_description: true` to opt back in. `listing_agent` carries name / job title / profile url only; pass `include_agent_contact: true` for the agent's telephone and email. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "homes.com property detail URL or path (e.g. https://www.homes.com/property/3199-delmar-ln-nw-atlanta-ga/rxrzwg0kjnr32/). Required — pass the `url` field from a homes_search_properties result."
+          },
+          "include_description": {
+            "default": false,
+            "description": "When true, include the raw listing `description` marketing prose. Default false — the structured `extracted_features` field surfaces the keywords callers usually want; the prose itself is heavy chat-history weight.",
+            "type": "boolean"
+          },
+          "include_price_history": {
+            "default": false,
+            "description": "When true, inline `price_history` (listing/ownership/lien events + events_normalized) on the response — the same data `homes_get_property_history` returns. Saves a second round trip when you need both (#27).",
+            "type": "boolean"
+          },
+          "include_tax_history": {
+            "default": false,
+            "description": "When true, inline `tax_history` records — same data `homes_get_tax_history` returns. Saves a second round trip when you need both (#27).",
+            "type": "boolean"
+          },
+          "include_agent_contact": {
+            "default": false,
+            "description": "When true, include the listing agent's `telephone` and `email` on `listing_agent`. Default false — name, job title, profile url and brokerage are returned without the contact details.",
+            "type": "boolean"
+          },
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Homes.com's payload untouched. No field projection: this server has no verified record of which Homes.com fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get homes.com property details",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_calculate_mortgage",
+      "description": "Local-only mortgage payment calculator. Returns a full PITI breakdown (principal + interest, property tax, insurance, HOA, PMI) and total interest over the life of the loan. No network call — fully deterministic, safe to use for scenario comparison without burning a fetch. Provide either `down_payment` OR `down_payment_percent`; defaults to 20%. Property tax can be given as `property_tax_annual` or `property_tax_rate` (% of home price). PMI applies automatically when LTV > 80% and `pmi_rate` is provided.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "home_price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "down_payment": {
+            "type": "number",
+            "minimum": 0
+          },
+          "down_payment_percent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "interest_rate": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Annual %, e.g. 6.5"
+          },
+          "loan_term_years": {
+            "description": "Default 30, max 50",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50
+          },
+          "property_tax_annual": {
+            "type": "number",
+            "minimum": 0
+          },
+          "property_tax_rate": {
+            "description": "Annual % of home price",
+            "type": "number",
+            "minimum": 0
+          },
+          "insurance_annual": {
+            "type": "number",
+            "minimum": 0
+          },
+          "hoa_monthly": {
+            "type": "number",
+            "minimum": 0
+          },
+          "pmi_rate": {
+            "description": "Annual %, applied when LTV > 80%",
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "home_price",
+          "interest_rate"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Calculate mortgage payment (local)",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "homes_compare_properties",
+      "description": "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns the full per-property record (with server-side `extracted_features`, `hoa_monthly_usd`, `days_on_market`, `price_drop_*`, `lot_size_sqft` + the derived `lot_size_acres`, and `portal_url_hyperlink`). Per-target errors are captured per-row — one bad target will not fail the whole call: a failed row carries `status` = `error_kind` (`timeout` / `bridge_down` / `protocol` / `other`) plus `retryable` and `error`, and the envelope reports `count` / `ok` / `errored`. Calls are concurrent and bounded by an overall deadline: any row still unsettled comes back `status: \"pending\"` (retryable) with a top-level `pending` count — re-run just those targets. The raw `description` is omitted by default; pass `include_description: true` to keep the marketing prose. `listing_agent` omits the agent's telephone/email unless `include_agent_contact: true`. The cross-row `summary` table duplicates per-property fields (~30% of response weight); it is OPT-IN via `include_summary: true`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Homes.com's payload untouched. No field projection: this server has no verified record of which Homes.com fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "targets": {
+            "minItems": 2,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "homes.com property URL or path. Required per target — pass the `url` field from a homes_search_properties result."
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Array of 2–8 properties to compare"
+          },
+          "include_description": {
+            "default": false,
+            "description": "When true, include the raw listing `description` marketing prose on each per-property record. Default false.",
+            "type": "boolean"
+          },
+          "include_summary": {
+            "default": false,
+            "description": "When true, also emit a cross-row `summary` table aligned by field. Default false — the per-row records already carry every summary field, so the table is redundant context weight unless explicitly requested (#18).",
+            "type": "boolean"
+          },
+          "include_agent_contact": {
+            "default": false,
+            "description": "When true, include the listing agent's `telephone` and `email` on `listing_agent`. Default false — name, job title, profile url and brokerage are returned without the contact details.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "targets"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Compare homes.com properties side-by-side",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_calculate_affordability",
+      "description": "Solve for the maximum home price you can afford under the standard 28/36 DTI rule. Inputs: monthly income, recurring monthly debts (car loans, student loans, etc.), down payment, interest rate, and optional property-tax rate / insurance / HOA / loan term. Output: max home price, the binding constraint (front-end vs back-end), and the full PITI breakdown at that price. Same math across the realty MCP cohort (@chrischall/realty-core). No network — pure local math.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "monthly_income": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "monthly_debts": {
+            "description": "Sum of monthly debt payments (car, student loans, etc.)",
+            "type": "number",
+            "minimum": 0
+          },
+          "down_payment": {
+            "type": "number",
+            "minimum": 0
+          },
+          "interest_rate": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Annual %, e.g. 6.5"
+          },
+          "loan_term_years": {
+            "description": "Default 30, max 50",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50
+          },
+          "property_tax_rate": {
+            "description": "Annual % of home price, default 1.1",
+            "type": "number",
+            "minimum": 0
+          },
+          "insurance_annual": {
+            "type": "number",
+            "minimum": 0
+          },
+          "hoa_monthly": {
+            "type": "number",
+            "minimum": 0
+          },
+          "front_end_dti": {
+            "description": "Front-end DTI cap as decimal, default 0.28",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "back_end_dti": {
+            "description": "Back-end DTI cap as decimal, default 0.36",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "monthly_income",
+          "down_payment",
+          "interest_rate"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Calculate max affordable home price",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "homes_get_property_photos",
+      "description": "The full photo gallery for a homes.com listing. homes.com's JSON-LD only exposes one primary image, so this tool scrapes every <img> tag on the property detail page and filters to the homes.com CDN. Pass `url` — the full homes.com property URL or path (e.g. from a homes_search_properties result's `url` field). Returns `{ property_id, url, count, photos: [{ url, position, alt? }] }`. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "homes.com property detail URL or path. Required — pass the `url` field from a homes_search_properties result."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get homes.com property photo gallery",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_healthcheck",
+      "description": "Round-trips a small public www.homes.com URL (/robots.txt) through ContextMint Bridge (your signed-in browser tab) and returns diagnostics: the bridge's role (host/peer/null), port, version, the extension link (linked / pair pending / not attached / never answered), the elapsed round-trip time, and a plain-English hint distinguishing 'bridge never came up' from 'extension not connected' from 'this browser can't serve a capability' from 'real www.homes.com-side problem'. Read-only, no auth required. Call this when a real tool fails and you want to know which hop broke.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Verify the ContextMint Bridge connection end-to-end",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_get_property_history",
+      "description": "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_price_history: true })`. Same data, fewer round trips. Will be removed in a future major version. Three timelines for a homes.com property in one call: `listing_events`, `ownership_events`, `lien_events`. Also returns `events_normalized` mapped onto the cross-MCP enum. Each `events_normalized` row is `{ date, type, price?, price_change_pct?, list_to_sale_pct? }` — `price_change_pct` only on `PriceChange` rows; every other row carries homes.com's \"List to Sale\" figure as `list_to_sale_pct` (e.g. the sale-to-list ratio on a `Sold` row), never as a price change.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "homes.com property detail URL or path."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get homes.com property history (DEPRECATED — use homes_get_history)",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_get_tax_history",
+      "description": "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_tax_history: true })`. Same data, fewer round trips; note that `homes_get_history` returns the tax array as `tax_records` (not `records`). Will be removed in a future major version. Year-by-year property-tax records: tax paid, total assessed value, land/improvement split.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "homes.com property detail URL or path."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get homes.com property tax history (DEPRECATED — use homes_get_history)",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_get_history",
+      "description": "Combined history endpoint — replaces `homes_get_property_history` + `homes_get_tax_history` with a single fetch. Returns `{ property_id, url, listing_events, ownership_events, lien_events, events_normalized, tax_records }`. Pass `url` — the full property detail URL. Series are `[]` when the listing doesn't carry that section. Cross-MCP-normalized `events_normalized` carries the same enum across siblings (Listed/PriceChange/Pending/Contingent/Sold/Withdrawn/Relisted/Delisted). Each `events_normalized` row is `{ date, type, price?, price_change_pct?, list_to_sale_pct? }` — `price_change_pct` only on `PriceChange` rows; every other row carries homes.com's \"List to Sale\" figure as `list_to_sale_pct` (e.g. the sale-to-list ratio on a `Sold` row), never as a price change. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "homes.com property detail URL or path."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get homes.com property + tax history (combined)",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_get_nearby_listings",
+      "description": "Scrape the nearby-links section of a homes.com detail page (the tabbed list of `<ul id=\"nb-Property\">` near the bottom of the page) and return the nearby active listings. Pass `url` (the property whose neighborhood to inspect). By default returns the For Sale tab; pass `include_rentals: true` to also include the Rentals tab. Optional `limit` caps the count. Returns `{ property_id, url, count, listings: [{ property_id, url, address?, tab }] }`. Note: the nearby section is a curated cross-link list, not a comparable-sales set — only URL + address are exposed (no price/beds/baths/sqft/photo). To enrich a row, call `homes_get_property` on its url. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "homes.com property detail URL or path."
+          },
+          "limit": {
+            "description": "Max nearby listings to return (default unlimited).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "include_rentals": {
+            "description": "When true, also include the Rentals tab (`<ul id=\"nb-property\">` lowercase). Default false — For Sale tab only.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get nearby homes.com listings for a property",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_get_market_report",
+      "description": "Fetch homes.com's recently-sold listings for a city/ZIP/neighborhood and derive a market summary: count, median sale price, and average $/sqft across the sample. Pass `location` — free-text (e.g. 'Brooklyn, NY', '30311'). `location` is required and must contain Latin letters or digits — a blank or unsluggable location (e.g. only punctuation or non-Latin script) is rejected with an error rather than returning an empty result. Returns `{ region, slug, sold_summary, sample_sold }`. Note: homes.com's sold page typically returns ~40 recent listings — this is a sample-based summary, not an exhaustive market index. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Free-text location: city, ZIP, neighborhood"
+          },
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Homes.com's payload untouched. No field projection: this server has no verified record of which Homes.com fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "location"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get a homes.com market report for a location",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_get_saved_homes",
+      "description": "The signed-in user's saved (favorited) homes on homes.com. Scrapes /customer/dashboard/favorites/. Returns `{ count, homes: [{ property_id, url, address?, price?, beds?, baths?, sqft?, status? }] }`. REQUIRES the user to be signed into homes.com in their browser tab — if not, the request throws SessionNotAuthenticatedError. Card fields (price/beds/baths/sqft) are best-effort DOM scrapes — they may be missing on some card variants; treat absence as 'not surfaced on the saved-homes card', not 'no value'. Call `homes_get_property(url)` per row when you need the canonical record. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get the signed-in user's saved homes on homes.com",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_get_saved_searches",
+      "description": "The signed-in user's saved searches on homes.com. Scrapes /customer/dashboard/saved-searches/. Returns `{ count, searches: [{ name?, url, filters? }] }`. REQUIRES the user to be signed into homes.com in their browser tab — if not, the request throws SessionNotAuthenticatedError. `name` and `filters` are DOM-scraped from the saved-search card; absence means homes.com didn't render them, not that the search has none. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get the signed-in user's saved searches on homes.com",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_estimate_rent_vs_buy",
+      "description": "Project the cumulative cost of buying a home versus renting a comparable place over N years. Accounts for down payment, closing costs, monthly PITI, maintenance (~1%/yr default), appreciation (~3%/yr default), rent growth (~3%/yr default), and the opportunity cost of the down payment + closing costs (renter invests it at investment_return_rate, default 6%/yr). P&I stops once the loan term ends. Each year is the buyer's net position if they sold that year (cash out minus equity) versus the renter's net cost, so break-even year is independent of the horizon. Returns year-by-year cumulative net costs, break-even year, and the net difference at horizon (default horizon 7y). No network — pure local math. Same math contract as zillow_estimate_rent_vs_buy. NOTE: caller must supply `monthly_rent` — homes.com does not publish rental estimates anywhere on its consumer site (no rent_zestimate analogue, no comparable-rentals endpoint). For a rent estimate to plug in here, use `zillow_get_property` (its `rent_zestimate` field) or `redfin_get_comparable_rentals`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "home_price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "down_payment": {
+            "type": "number",
+            "minimum": 0
+          },
+          "interest_rate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "monthly_rent": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "horizon_years": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100
+          },
+          "loan_term_years": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50
+          },
+          "property_tax_rate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "insurance_annual": {
+            "type": "number",
+            "minimum": 0
+          },
+          "hoa_monthly": {
+            "type": "number",
+            "minimum": 0
+          },
+          "closing_cost_rate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "selling_cost_rate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "maintenance_rate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "appreciation_rate": {
+            "type": "number"
+          },
+          "rent_growth_rate": {
+            "type": "number"
+          },
+          "investment_return_rate": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "home_price",
+          "down_payment",
+          "interest_rate",
+          "monthly_rent"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Project cumulative buy-vs-rent cost over N years",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "homes_get_by_address",
+      "description": "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Walks three rungs: first the structured smartsearch typeahead (POST /routes/res/consumer/smartsearch/autocomplete/ — the primary rung, the same address-suggest API homes.com's search box fires, returning the real /property/<slug>/<hash>/ URL directly), then a slug-routed page (parsing the embedded Schema.org JSON-LD — both the CollectionPage search-results shape and the single-RealEstateListing detail redirect), and finally a city/zip search page with street-token fuzzy match. Every candidate is verified against the input with a whole-token street match (plus a unit guard so a multi-unit building resolves to the exact unit, not a neighbour). Optional `price_min` / `price_max` (USD) bound ONLY the city/zip search-fallback rung — when an address is ambiguous or the typeahead misses and you know the listing's rough price, this narrows the area search (homes.com `?price-min=`/`?price-max=` filter) so the fuzzy matcher picks from fewer, more-relevant candidates; omit for unchanged unbounded behaviour. Returns `{ url, property_hash, street_address, matched_via, resolved: true }` on success — `matched_via` is `'typeahead'` for the structured-API hit, `'slug'` for a direct routing hit, `'search_fallback'` for the search-page fuzzy match — or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). A retryable `{ resolved: false, status: 'timeout' | 'blocked', retryable: true }` means homes.com never answered (bridge timeout) or refused (sign-in / AWS WAF challenge / HTTP 403-429) — NOT a confirmed miss; for `blocked`, have the user open homes.com and clear the challenge, then retry. KNOWN FAILURE MODE: rural addresses and very-new construction can still miss because homes.com hasn't indexed them yet. Compare the returned `street_address` against your input to confirm. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Street address (e.g. \"126 Sleeping Bear Ln\")."
+          },
+          "city": {
+            "type": "string",
+            "description": "City (e.g. \"Lake Lure\")."
+          },
+          "state": {
+            "type": "string",
+            "description": "2-letter US state code (e.g. \"NC\")."
+          },
+          "zip": {
+            "description": "ZIP code (optional; improves precision when present).",
+            "type": "string"
+          },
+          "price_min": {
+            "description": "Optional lower price bound (USD). Applied ONLY to the city/zip search-fallback rung — bounds that area search with homes.com's `?price-min=` filter so an ambiguous address resolves against a narrower candidate set. Ignored by the typeahead/slug rungs (a single known address has nothing to narrow). Omit for unbounded fallback. Must be <= price_max when both are given.",
+            "type": "number",
+            "minimum": 0
+          },
+          "price_max": {
+            "description": "Optional upper price bound (USD). Applied ONLY to the search-fallback rung (homes.com's `?price-max=` filter). Useful when an address is ambiguous or the typeahead misses and you know the listing's rough price — improves disambiguation/recall. Omit for unbounded fallback.",
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address",
+          "city",
+          "state"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Resolve a street address to a homes.com property URL",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_register_session",
+      "description": "Record (or refresh) which Homes.com account the signed-in session belongs to, keyed by `account_identity`. Re-registering the same identity updates the existing entry. Returns a `session_id`; pass `mark_active: true` to mark it as the current account in the same call. The registry is a label only: it does not change which Homes.com account requests use. Every homes tool call goes through whichever browser tab the ContextMint Bridge extension is signed into; to read a different account, sign that tab into it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account_identity": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Caller-supplied identifier for the signed-in account (typically the saved-account email)."
+          },
+          "auth_expires_at": {
+            "description": "Optional ISO timestamp at which the session expires.",
+            "type": "string"
+          },
+          "mark_active": {
+            "default": false,
+            "description": "When true, immediately make the newly-registered session the active one.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "account_identity"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Register a signed-in Homes.com session",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "homes_set_active_session",
+      "description": "Mark a previously registered `session_id` as the current account label, for your own bookkeeping across a conversation. The registry is a label only: it does not change which Homes.com account requests use. Every homes tool call goes through whichever browser tab the ContextMint Bridge extension is signed into; to read a different account, sign that tab into it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Session id to make active."
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Set the active Homes.com session",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "homes_get_session_context",
+      "description": "List every registered account label plus the current `active_session_id`. When none are registered, `sessions` is empty and `active_session_id` is null. The registry is a label only: it does not change which Homes.com account requests use. Every homes tool call goes through whichever browser tab the ContextMint Bridge extension is signed into; to read a different account, sign that tab into it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "List all registered Homes.com sessions",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "homes_bulk_get",
+      "description": "Fetch up to 200 homes.com properties in one call and return their structured records. Pass `urls: string[]`. Results are ordered to match the input array and per-row errors are captured (one bad URL won't fail the whole call). Each row carries a `status`: `ok`, `pending`, or — on failure — the error kind (`timeout` / `bridge_down` / `protocol` / `other`, also in `error_kind`) with a `retryable` flag; the envelope reports `count` / `ok` / `errored` (+ `pending` when non-zero). Mirrors `homes_get_property` per-row, including `extracted_features`, `hoa_fee`, `highlights`, `schools`, `lot_size_sqft` + the derived `lot_size_acres` (null — never 0 — for condos / no-lot listings), and all standard listing fields. The raw `description` is omitted by default; opt back in via `include_description: true`. `listing_agent` omits the agent's telephone/email unless `include_agent_contact: true`. The whole call is bounded by an overall hard deadline: a single slow/hung URL never wedges the server — when the deadline is reached any unsettled row is returned with `status: \"pending\"` and a `pending` count so you can re-run just those URLs. Use this instead of looping `homes_compare_properties` (which caps at 8 + emits a redundant summary table) when you just want the records. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urls": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of homes.com property URLs or paths (e.g. from a homes_search_properties result). 1–200 per call."
+          },
+          "include_description": {
+            "default": false,
+            "description": "When true, include the raw listing `description` marketing prose per-row. Default false.",
+            "type": "boolean"
+          },
+          "include_agent_contact": {
+            "default": false,
+            "description": "When true, include the listing agent's `telephone` and `email` on `listing_agent`. Default false — name, job title, profile url and brokerage are returned without the contact details.",
+            "type": "boolean"
+          },
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Homes.com's payload untouched. No field projection: this server has no verified record of which Homes.com fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "urls"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Bulk-fetch homes.com properties (structured records only)",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "homes_resolve_addresses",
+      "description": "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same rungs `homes_get_by_address` runs (structured smartsearch typeahead → slug → city/zip search fallback), verifying each candidate with the same whole-token street + unit match. Per-row outcomes parallel `homes_get_by_address` (with `property_hash` renamed to `property_id` here so the field name lines up with `homes_bulk_get`): `{ resolved: true, url, property_id, street_address, matched_via }` on success — `matched_via` is `'typeahead'`, `'slug'`, or `'search_fallback'` — `{ resolved: false, error }` otherwise; one bad row won't fail the whole call. Each row's `status` is `resolved`, `unresolved`, `pending` (deadline reached — retry it) or `blocked` (homes.com returned a sign-in / AWS WAF challenge or HTTP 403/429 — not a miss; clear the challenge in the browser and retry). Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "address": {
+                  "type": "string"
+                },
+                "city": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "zip": {
+                  "type": "string"
+                },
+                "price_min": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "price_max": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "address",
+                "city",
+                "state"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Array of address records to resolve (1–100 per call). Each must include street `address`, `city`, and 2-letter `state`; `zip` is optional but improves precision. Optional per-row `price_min` / `price_max` (USD) bound that row's city/zip search-fallback rung — same semantics as `homes_get_by_address` (must be non-negative, min <= max; an invalid band fails only that row)."
+          }
+        },
+        "required": [
+          "addresses"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Bulk-resolve street addresses to homes.com property URLs",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "homes-mcp",
+    "version": "2.1.10"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 7665,
+  "stderr": "[homes-mcp:bridge] ready — 127.0.0.1:37149 binds on the first request (version=2.1.10)\n[homes-mcp] v2.1.10 — WebSocket bridge via @fetchproxy/server on 127.0.0.1:37149. Install the ContextMint Bridge extension (see https://github.com/nullnet-app/contextmint-bridge/releases) and sign into homes.com. This project was developed and is maintained by AI (Claude). Use at your own discretion.\n"
+}

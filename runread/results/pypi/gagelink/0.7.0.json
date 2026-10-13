@@ -1,0 +1,469 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "pypi",
+  "name": "gagelink",
+  "version": "0.7.0",
+  "integrity": {
+    "dist": "sha256:51c93ae7da97cf515475b3461575ce2bfed0e9068c61d1218e3bb6b6c4c752f8",
+    "installed": "sha256:51c93ae7da97cf515475b3461575ce2bfed0e9068c61d1218e3bb6b6c4c752f8"
+  },
+  "bin": "gagelink-mcp = gagelink.server:main",
+  "installScriptsRan": false,
+  "envNames": [
+    "GAGELINK_API_KEY"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/python:3.12-slim-bookworm",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T08:44:35.679Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "find_locations",
+      "description": "Search monitoring locations by state, county, hydrologic unit, site type, or bounding box. At least one filter is required. Returns identifiers of the form USGS-01646500, which every other tool takes. Pass country=FR to search the French network by river name, commune, department, or bbox, or country=GB for the Environment Agency by river, town, or station name.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "Full state name, as in Maryland"
+          },
+          "county": {
+            "type": "string",
+            "description": "Full county name"
+          },
+          "hydrologic_unit_code": {
+            "type": "string",
+            "description": "HUC, any level"
+          },
+          "site_type": {
+            "type": "string",
+            "description": "As in Stream, Lake, Well"
+          },
+          "bbox": {
+            "type": "string",
+            "description": "west,south,east,north in decimal degrees"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 10
+          },
+          "country": {
+            "type": "string",
+            "enum": [
+              "US",
+              "FR",
+              "GB"
+            ],
+            "default": "US",
+            "description": "Which network to search, since a search has no identifier to read an agency from. US is USGS; FR is the French Hub'Eau network, where state is the region, county the commune, and hydrologic_unit_code the department number; GB is the Environment Agency, where river is the watercourse as the agency writes it (River Thames, not Thames), county is the town, and state is free text matched against the station name, which is the one to use when the agency's spelling is not known."
+          },
+          "river": {
+            "type": "string",
+            "description": "Watercourse name, as the agency writes it: La Seine or Le Rhone with the article in France, River Thames with the word river in the UK. France and the UK only; the USGS collection has no river-name filter."
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Find monitoring locations",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "describe_location",
+      "description": "Metadata for one monitoring location: its name, position, drainage area, timezone, the vertical datum its stage readings are measured from, and how well that offset is known. Call this before comparing any stage against an elevation, because the answer depends on the offset it returns. Most US stations publish their offset on NGVD29 while modern surveys are on NAVD88; pass on_datum to have the offset converted before you difference anything. Takes a USGS identifier, an Environment Agency one as in EA-2604TH, or a Hub'Eau one as in FR-F700000102.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "on_datum": {
+            "type": "string",
+            "enum": [
+              "NAVD88",
+              "MLLW",
+              "MLW",
+              "LMSL",
+              "MTL",
+              "DTL",
+              "MHW",
+              "MHHW"
+            ],
+            "description": "Also return the station's offset expressed on this datum, with the uncertainty of the conversion. NAVD88 is what a modern survey or lidar product is on, and most stations publish their offset on NGVD29 instead, so this is the majority case rather than an edge one. The rest are tidal datums, for a question about the level relative to the tide rather than to the land; they exist only where the tide reaches. Contiguous states only, and it costs one extra request to NOAA's datum service, so it is not done unless asked for."
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Describe a location",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_latest",
+      "description": "The most recent value the service holds for each parameter at a location. Latest is not the same as current: the service returns the last value it has for each parameter independently, so one response can carry a discharge from this morning beside a turbidity from years ago. Pass max_age_hours to drop the stale ones. Values arrive with their unit, datum, and whether the record is provisional or approved. Takes a USGS identifier, an Environment Agency one as in EA-2604TH, or a Hub'Eau one as in FR-F700000102, whose values are published with no unit at all and are labelled here.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parameter codes, as in 00060 for discharge"
+          },
+          "max_age_hours": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Latest readings",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_series",
+      "description": "A date range of record, returned as a handle with a summary and a small sample rather than as its points, since a year of 15-minute record is 35,000 values. Use slice_series on the handle to narrow it. Resolution is daily or continuous.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "parameter": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string",
+            "description": "ISO date, as in 2026-08-01"
+          },
+          "end": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "continuous"
+            ],
+            "default": "daily"
+          }
+        },
+        "required": [
+          "identifier",
+          "parameter",
+          "start",
+          "end"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Time series",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "slice_series",
+      "description": "Narrow a series already fetched under a handle and summarise what remains. Costs no request against the hourly allowance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Slice a series",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_peaks",
+      "description": "Annual peak flow record for a location, largest first. A water year can carry more than one peak, so the count of peaks is not the count of years.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 10
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Annual peak flows",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_forecast",
+      "description": "Observed and forecast stage from the NOAA National Water Prediction Service, with the flood thresholds that give them meaning. Stages and thresholds here are on the gage's own datum, so they can be differenced against each other and against a gage height, but not against a surveyed elevation without the offset from describe_location. Takes the USGS identifier or the NWS location id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "River forecast and flood thresholds",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_model_forecast",
+      "description": "National Water Model streamflow for the reach a monitoring location sits on. These are modelled values, not measurements: the model covers reaches with no gauge on them, so a figure here may have nothing observed behind it, and it carries no record-quality grade. Series are analysis_assimilation, which looks back, and short_range, medium_range, medium_range_blend, and long_range, which look forward. Not every reach publishes every series.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "series": {
+            "type": "string",
+            "enum": [
+              "analysis_assimilation",
+              "short_range",
+              "medium_range",
+              "medium_range_blend",
+              "long_range"
+            ],
+            "default": "short_range"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Modelled forecast",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_satellite_passes",
+      "description": "Water surface elevation measured from orbit by the SWOT mission, for a river reach. Covers reaches no gauge stands on. Elevations are referenced to the EGM2008 geoid, not to a national datum and not to any gage datum, so they cannot be differenced against a stage or a surveyed elevation. A reach identifier is a SWORD river reach id and is not a USGS station number.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature_id": {
+            "type": "string",
+            "description": "SWORD reach id"
+          },
+          "start": {
+            "type": "string",
+            "description": "ISO date"
+          },
+          "end": {
+            "type": "string",
+            "description": "ISO date"
+          },
+          "on_datum": {
+            "type": "string",
+            "enum": [
+              "NAVD88",
+              "MLLW",
+              "MLW",
+              "LMSL",
+              "MTL",
+              "DTL",
+              "MHW",
+              "MHHW"
+            ],
+            "description": "Also return each elevation moved onto this datum. Satellite elevations are on the EGM2008 geoid and can be differenced against nothing until they are moved off it. One conversion is taken for the reach and applied to every pass, since the separation depends on position and not on height. Only reaches in the contiguous United States can be converted; SWOT observes the whole world and this datum service covers one country."
+          }
+        },
+        "required": [
+          "feature_id",
+          "start",
+          "end"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Satellite elevations",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "navigate_network",
+      "description": "Monitoring locations upstream or downstream of a point, following the river rather than a radius. Direction is upstream, upstream_main, downstream, or downstream_diversions, where upstream includes tributaries and upstream_main follows the main stem alone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "upstream",
+              "upstream_main",
+              "downstream",
+              "downstream_main",
+              "downstream_diversions"
+            ],
+            "default": "upstream"
+          },
+          "distance_km": {
+            "type": "number",
+            "default": 50
+          },
+          "limit": {
+            "type": "integer",
+            "default": 20
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Navigate the river network",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_basin",
+      "description": "The area draining to a point. The area is computed from the delineated boundary rather than published; where a site record also states a drainage area, that figure is surveyed and is the one to quote.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Contributing basin",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "lookup_parameter",
+      "description": "Resolve a parameter code to what it measures, or find a code by name. Readings carry a code and no name, so this is how 00065 becomes gage height.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Look up a parameter code",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "export_manifest",
+      "description": "The record of this session: every request made, every quantity returned, and the library versions. Enough to re-run the work and check the numbers. Call it last when the answer needs to be reproducible.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Export the session manifest",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "gagelink",
+    "version": "0.7.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Hydrology data for rivers, gages, forecasts, and basins, from USGS, NOAA, the UK Environment Agency, and the SWOT satellite. Use it for questions about streamflow, river level, flood risk, water quality, drainage areas, and what lies upstream or downstream of a point.\n\nIdentifiers are of the form USGS-01646500, with the agency prefix and the leading zero. Use find_locations to search by state, county, or bounding box if you have a place name rather than a number.\n\nUK stations are EA-2604TH, the Environment Agency's own reference. They answer describe_location and get_latest only: that service publishes no series, peaks, forecast, network, basin, or record grade. Find them with find_locations and country=GB, by river (River Thames), town, or station name.\n\nFrench stations are FR-F700000102, from Hub'Eau. Find them with find_locations and country=FR, by river as La Seine or Le Rhone. They answer describe_location, get_latest, and get_series only. Hub'Eau publishes no unit on any value: a level is millimetres above the station's own zero, a discharge is litres per second, and both are labelled here. Everything else is the United States.\n\nFour things decide whether an answer is right.\n\nA river level is not an elevation. Gage height is measured from the station's own datum, whose zero sits at some height on a national datum, and the two are both lengths in feet. Subtracting a stage from a surveyed elevation without adding that offset gives a number that looks like a freeboard and is wrong by tens of feet, in the direction of calling a levee safe. Call describe_location before any such comparison; it returns the offset and how well that offset is known, which is worse than a foot at most stations and bounds any freeboard computed through it. Flood thresholds from get_forecast are already on the gage datum and need no shift.\n\nLatest is not current. Each parameter returns the last value held for it, independently, so one response can carry a discharge from this morning beside a turbidity from years ago. Pass max_age_hours, and read the age on every reading you quote.\n\nModelled is not measured. get_model_forecast returns National Water Model output, which covers reaches with no gage, so a value from it may have nothing measured behind it. get_satellite_passes returns elevations on a geoid; pass on_datum to move them onto a national datum, in the US only.\n\nUnits are not interchangeable across these services. Discharge appears as cfs, kcfs, ft^3/s, and ft^3/s with a superscript, and every value comes back labelled with its unit, datum, and record quality. Use those labels; do not assume a unit from a magnitude.\n\nEvery value carries whether the record is provisional or approved. Say which when it matters. Never supply a number from memory: if a tool cannot provide it, report it as unavailable, and call export_manifest at the end when the answer needs to be reproducible.\n\nWithout a key the allowance is 50 requests an hour; each result says how many remain.",
+  "durationMs": 2995,
+  "stderr": ""
+}

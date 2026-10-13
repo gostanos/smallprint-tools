@@ -1,0 +1,406 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "pypi",
+  "name": "pmorun-mcp",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha256:839d86c414a0701c89d754f64b3648b6ba0e06d0286083d583866bb141fdab5d",
+    "installed": "sha256:839d86c414a0701c89d754f64b3648b6ba0e06d0286083d583866bb141fdab5d"
+  },
+  "bin": "pmorun-mcp = mcp_server.server:main",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/python:3.12-slim-bookworm",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T22:09:43.827Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "estimate_task_duration",
+      "description": "Estimate how long a single task will take from a three-point estimate.\n\n    Use when: you have a human optimistic / most-likely / pessimistic estimate for\n    one task and want the textbook PERT expected duration, plus — optionally — an\n    estimate adjusted for known real-world frictions.\n\n    The PERT expected value is ``(O + 4M + P) / 6`` and the standard deviation is\n    ``(P - O) / 6``; both are expressed in whatever time unit the estimates use\n    (days, weeks — the tool is unit-agnostic). Insight tags widen the pessimistic\n    tail to reflect frictions the raw estimate ignores.\n\n    Args:\n        task: The three-point estimate. Fields:\n            ``optimistic`` (O, best case), ``most_likely`` (M), ``pessimistic``\n            (P, worst case) — all in the same time unit, with ``O <= M <= P``.\n            ``tags`` (optional): insight tags, each a ``{name, severity}`` pair with\n            severity in ``[0, 1]``. Known names (case-insensitive):\n            FRAGMENTED_COMMUNICATION, MULTIPLE_STAKEHOLDERS, HIDDEN_DEPENDENCIES.\n\n    Returns:\n        A ``TaskEstimation`` with ``input`` (echo of O/M/P), ``textbook`` (PERT\n        ``expected``, ``std_dev``, ``variance`` and the 68/95/99% ranges), and\n        ``adjusted`` (the same stats after tags widen the tail, or ``null`` when no\n        tags were supplied).\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "$ref": "#/$defs/TaskInput"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "$defs": {
+          "TagInput": {
+            "description": "A tag to apply to a task's pessimistic estimate.",
+            "properties": {
+              "name": {
+                "maxLength": 255,
+                "minLength": 1,
+                "title": "Name",
+                "type": "string"
+              },
+              "severity": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Severity",
+                "type": "number"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "title": "TagInput",
+            "type": "object"
+          },
+          "TaskInput": {
+            "description": "Input for a single PERT task calculation.",
+            "example": {
+              "most_likely": 10,
+              "optimistic": 5,
+              "pessimistic": 20,
+              "tags": [
+                {
+                  "name": "FRAGMENTED_COMMUNICATION",
+                  "severity": 0.8
+                }
+              ]
+            },
+            "properties": {
+              "optimistic": {
+                "minimum": 0,
+                "title": "Optimistic",
+                "type": "number"
+              },
+              "most_likely": {
+                "minimum": 0,
+                "title": "Most Likely",
+                "type": "number"
+              },
+              "pessimistic": {
+                "minimum": 0,
+                "title": "Pessimistic",
+                "type": "number"
+              },
+              "tags": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/$defs/TagInput"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Tags"
+              }
+            },
+            "required": [
+              "optimistic",
+              "most_likely",
+              "pessimistic"
+            ],
+            "title": "TaskInput",
+            "type": "object"
+          }
+        },
+        "title": "estimate_task_durationArguments"
+      }
+    },
+    {
+      "name": "identify_schedule_risk",
+      "description": "Find how long a task network is likely to take, and which tasks drive the risk.\n\n    Use when: you have several tasks with three-point estimates and dependencies, and\n    want a probabilistic completion forecast rather than a single additive number.\n    Runs a Monte Carlo simulation, sampling each task from its beta-PERT distribution\n    and honouring the dependency graph.\n\n    Args:\n        tasks: The task network. Each task has ``name``, three-point estimates\n            (``optimistic`` / ``most_likely`` / ``pessimistic``, same time unit), and\n            an optional ``depends_on`` list of predecessor task names. (``risk_class``\n            is reserved for a future drift simulation and is ignored here.)\n            Note: if **no** task in the network declares a ``depends_on`` the tasks\n            are assumed to form a sequential chain (durations sum) — bare tasks are\n            *not* inferred to run in parallel. Declare ``depends_on`` to model genuine\n            concurrency, where the makespan is the longest path, not the sum.\n        config: Optional run settings — ``num_simulations`` (100–1,000,000; default\n            10,000) and ``seed``. When ``seed`` is omitted it defaults to 42 for a\n            reproducible run; pass a different integer to vary it.\n\n    Returns:\n        A ``SimulationResult`` with ``percentiles`` (P50/P75/P85/P95 of total\n        duration), ``critical_path_frequency`` (per task, the fraction of runs in\n        which it sat on the critical path — the higher, the more it drives schedule\n        risk), a 50-bin ``histogram`` of durations, and the run's ``mean``,\n        ``std_dev``, ``min_duration`` and ``max_duration``.\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/$defs/TaskInput"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SimulationConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "tasks"
+        ],
+        "$defs": {
+          "SimulationConfig": {
+            "description": "Configuration for a Monte Carlo simulation run.",
+            "properties": {
+              "num_simulations": {
+                "default": 10000,
+                "maximum": 1000000,
+                "minimum": 100,
+                "title": "Num Simulations",
+                "type": "integer"
+              },
+              "seed": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Random seed for reproducibility",
+                "title": "Seed"
+              }
+            },
+            "title": "SimulationConfig",
+            "type": "object"
+          },
+          "TaskInput": {
+            "description": "A task with three-point estimates and optional dependencies.",
+            "properties": {
+              "name": {
+                "maxLength": 255,
+                "minLength": 1,
+                "title": "Name",
+                "type": "string"
+              },
+              "optimistic": {
+                "description": "Best-case duration (O)",
+                "minimum": 0,
+                "title": "Optimistic",
+                "type": "number"
+              },
+              "most_likely": {
+                "description": "Most probable duration (M)",
+                "minimum": 0,
+                "title": "Most Likely",
+                "type": "number"
+              },
+              "pessimistic": {
+                "description": "Worst-case duration (P)",
+                "minimum": 0,
+                "title": "Pessimistic",
+                "type": "number"
+              },
+              "depends_on": {
+                "description": "Names of predecessor tasks",
+                "items": {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                "maxItems": 1000,
+                "title": "Depends On",
+                "type": "array"
+              },
+              "risk_class": {
+                "anyOf": [
+                  {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Optional risk-class identifier consumed by drift simulation. Ignored unless drift_config is also supplied.",
+                "title": "Risk Class"
+              }
+            },
+            "required": [
+              "name",
+              "optimistic",
+              "most_likely",
+              "pessimistic"
+            ],
+            "title": "TaskInput",
+            "type": "object"
+          }
+        },
+        "title": "identify_schedule_riskArguments"
+      }
+    },
+    {
+      "name": "compare_investment_options",
+      "description": "Compare options on real lifetime cost, not sticker price.\n\n    Use when: you have two or more options (vendors, platforms, tools), each with an\n    initial price, a useful life, and recurring costs, and want them ranked by\n    total cost of ownership rather than up-front price.\n\n    Args:\n        request: ``options`` — a list of at least two options. Each option has\n            ``name``, ``initial_price``, ``useful_life_years``, and optional\n            ``residual_value``, ``annual_maintenance``, ``annual_operating_cost`` and\n            ``discount_rate`` (default 0.03). Monetary fields share one currency;\n            the tool is currency-agnostic.\n\n    Returns:\n        A ``CompareResponse`` whose ``results`` are ranked by annual cost ascending\n        (rank 1 = cheapest). Each item carries ``total_cost``, ``annual_cost``,\n        ``monthly_cost``, ``cost_per_day``, NPV-adjusted ``npv_tco`` / ``npv_annual``,\n        and its ``rank``. ``best_option`` names the cheapest.\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "$ref": "#/$defs/CompareRequest"
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "$defs": {
+          "CompareOption": {
+            "description": "Option for comparison (TCOInput + name).",
+            "example": {
+              "annual_maintenance": 5000,
+              "initial_price": 450000,
+              "residual_value": 90000,
+              "useful_life_years": 12
+            },
+            "properties": {
+              "initial_price": {
+                "exclusiveMinimum": 0,
+                "title": "Initial Price",
+                "type": "number"
+              },
+              "useful_life_years": {
+                "exclusiveMinimum": 0,
+                "maximum": 100,
+                "title": "Useful Life Years",
+                "type": "integer"
+              },
+              "residual_value": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Residual Value",
+                "type": "number"
+              },
+              "annual_maintenance": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Annual Maintenance",
+                "type": "number"
+              },
+              "annual_operating_cost": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Annual Operating Cost",
+                "type": "number"
+              },
+              "discount_rate": {
+                "default": 0.03,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Discount Rate",
+                "type": "number"
+              },
+              "name": {
+                "maxLength": 255,
+                "minLength": 1,
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "initial_price",
+              "useful_life_years",
+              "name"
+            ],
+            "title": "CompareOption",
+            "type": "object"
+          },
+          "CompareRequest": {
+            "description": "Request for comparing multiple options.",
+            "properties": {
+              "options": {
+                "items": {
+                  "$ref": "#/$defs/CompareOption"
+                },
+                "maxItems": 1000,
+                "minItems": 2,
+                "title": "Options",
+                "type": "array"
+              }
+            },
+            "required": [
+              "options"
+            ],
+            "title": "CompareRequest",
+            "type": "object"
+          }
+        },
+        "title": "compare_investment_optionsArguments"
+      }
+    },
+    {
+      "name": "evaluate_project_health",
+      "description": "Judge whether a project is on track, at risk, or off track, using EVM.\n\n    Use when: you know the planned value, earned value, actual cost and total budget,\n    and want the standard earned-value indices plus a plain-English health verdict.\n\n    Args:\n        evm: The four earned-value fundamentals, all in one currency:\n            ``pv`` (Planned Value — budgeted cost of work scheduled by now),\n            ``ev`` (Earned Value — budgeted cost of work actually completed),\n            ``ac`` (Actual Cost — what was actually spent),\n            ``bac`` (Budget at Completion — total planned budget, must be > 0).\n\n    Returns:\n        An ``EvmCalculateResponse`` with ``metrics`` — schedule (``sv``, ``spi``),\n        cost (``cv``, ``cpi``), forecasts (``eac``, ``etc``, ``vac``, ``tcpi``) and\n        ``percent_complete`` / ``percent_spent`` — and ``health`` (a coarse\n        ``status`` of on_track / at_risk / off_track, the ``reasons``, and a one-line\n        ``summary``). Indices are unitless ratios where 1.0 is on-plan; an index that\n        is undefined (e.g. SPI when PV is 0) is reported as ``null``.\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "evm": {
+            "$ref": "#/$defs/EvmCalculateInput"
+          }
+        },
+        "required": [
+          "evm"
+        ],
+        "$defs": {
+          "EvmCalculateInput": {
+            "description": "Input for direct EVM metric calculation.",
+            "example": {
+              "ac": 95000,
+              "bac": 200000,
+              "ev": 85000,
+              "pv": 100000
+            },
+            "properties": {
+              "pv": {
+                "description": "Planned Value",
+                "minimum": 0,
+                "title": "Pv",
+                "type": "number"
+              },
+              "ev": {
+                "description": "Earned Value",
+                "minimum": 0,
+                "title": "Ev",
+                "type": "number"
+              },
+              "ac": {
+                "description": "Actual Cost",
+                "minimum": 0,
+                "title": "Ac",
+                "type": "number"
+              },
+              "bac": {
+                "description": "Budget at Completion",
+                "exclusiveMinimum": 0,
+                "title": "Bac",
+                "type": "number"
+              }
+            },
+            "required": [
+              "pv",
+              "ev",
+              "ac",
+              "bac"
+            ],
+            "title": "EvmCalculateInput",
+            "type": "object"
+          }
+        },
+        "title": "evaluate_project_healthArguments"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "pmo-logic",
+    "version": "1.30.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 14474,
+  "stderr": "[10/12/26 22:09:57] INFO     Processing request of type            server.py:733\n                             ListToolsRequest                                   \n"
+}

@@ -1,0 +1,868 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "pypi",
+  "name": "bettermemory",
+  "version": "8.0.0",
+  "integrity": {
+    "dist": "sha256:62935a84505b4f6dc9e71124f049d93b15dfbf377076525b9f4b59eab41b910f",
+    "installed": "sha256:62935a84505b4f6dc9e71124f049d93b15dfbf377076525b9f4b59eab41b910f"
+  },
+  "bin": "bettermemory = bettermemory.server:main",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/python:3.12-slim-bookworm",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T05:27:46.047Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "memory_search",
+      "description": "Search stored memories. Default: do NOT call — reach for it only when the user references shared context you lack (\"my project\", \"the script we wrote\") or a request is ambiguous in a way stored preferences could resolve. When a hit shapes your reply, announce it (\"Using your stored preference for…\") — non-negotiable. (Full policy: the server `instructions` block.)\n\nReturns ranked hits with snippets. Per-hit fields the model should branch on:\n- `relevance` (high/medium/low) — how much of your query wording the hit literally contains, not how good it is. Weak hits: re-query with different nouns.\n- `staleness_verdict` (fresh / spot_check_recommended / spot_check_required) — rolled-up signal; != fresh, act on `path_drift` below.\n- `match_terms` — which query words actually hit.\n- `path_drift_missing` (int) + `path_drift` ({checked, missing, verified} when drift detected) — body-cited paths gone. `claim_anchored_missing` (added when non-empty) is the escalating subset: memory_update those, memory_verify the rest. Prose-scraped `missing` rides `fresh` — evidence, not a tier.\n- `commit_drift_count` (int, when applicable) — commits since last_verified_at on the memory's origin repo. Non-zero means the project moved even if calendar-fresh.\n- `depends_on_resolved` (when present) — bounded auto-pull of `depends_on` link targets (max 3 per hit, max 10 per call). Each entry: `{id, scopes, summary, link_note}`. Surfaces context the query wouldn't on its own; saves a memory_show round-trip. OMITTED when the hit has no `depends_on` links.\n- `recent_negative_outcomes` (when present) — list of recent ignored/contradicted events for this memory (max two, one per outcome). The user already rejected this; don't re-surface unless you have new reason. OMITTED when none.\n\nParameters:\n- `query`: nouns a memory would contain (tool, file, error names) — vocabulary is the lever, not question phrasing. Weak hits: re-query, different nouns.\n- `scopes` (optional): filter to scope union.\n- `client` / `model`: writer's DECLARED actor, exact; undeclared matches neither.\n- `max_results` (default 5, cap 50).\n- `expand_top=True`: inline the full body of the top hit when it has high `relevance` or a decisive score lead over the runner-up — saves a memory_show round trip and surfaces the full path_drift + commit_drift detail.\n- `auto_scope=True` (default): filter to current repo+worktree; memories with no recorded origin always pass as global. Set False for explicit cross-project queries.\n- `since_prior_session=False` (default): when True, filter to memories whose `updated` is strictly after the prior session boundary (latest event from a different session_id in the log). The semantic is 'what has changed in the current session, since the last activity by other sessions' — i.e. this session's intra-session diff. A /loop iteration uses this to track what IT has written/updated; for what the prior iteration did, call episode_handoff instead. Returns empty when there's no prior session in the log; distinguish 'nothing new' (results=[]) from 'no baseline' by also calling memory_scope_overview and checking `curation_pending_new_since_last_session is None`.\n- `mode` (optional, default from config; package default `hybrid`): `keyword`, `bm25`, or `hybrid` (RRF fusion of both). Every mode is deterministic lexical ranking, so vocabulary is the lever — see `query`.\n\nOutcome is recorded automatically via the use_token within ~2 turns; only call memory_record_use to override (ignored / contradicted / corrected).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "expand_top": {
+            "default": false,
+            "type": "boolean"
+          },
+          "auto_scope": {
+            "default": true,
+            "type": "boolean"
+          },
+          "since_prior_session": {
+            "default": false,
+            "type": "boolean"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "memory_show",
+      "description": "Fetch a single memory's full content by id. Typically used after a memory_search snippet looks relevant. The response carries the same staleness signals as a search hit:\n- `verification.status` ('never' / 'stale' / 'fresh') with an actionable `recommendation` when not fresh.\n- `staleness_verdict` (fresh / spot_check_recommended / spot_check_required) — rolled-up signal across calendar, path and commit drift.\n- `path_drift` (the full report; missing-on-disk paths listed).\n- `commit_drift` (when caller is inside the memory's origin repo) — `status: 'clean' | 'drift'` + `commits_since_verify`.\n- Forward `links` and `reverse_links` for navigation.\n\nWhen the verdict isn't fresh, spot-check one claim before relying. memory_verify(id, …) if it holds; memory_update if drifted (content updates reset last_verified_at, so verify again after the fix).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_list",
+      "description": "List active memories. By default returns one-line summaries (IDs, scopes, summary, no body) — cheap triage. Pass `with_bodies=True` to inline full bodies in one call; useful for small stores where N round trips of `list -> show -> show` would be wasteful. Don't reach for `with_bodies` casually — it pulls every memory in scope into your context, which is the failure mode this project exists to avoid. Filter by `scopes` if you only care about a subset, or by `client` / `model` — each row's DECLARED actor, exact. A row's `staleness_verdict` is CALENDAR-ONLY — no path, claim or commit drift — so a row can read `fresh` while `memory_show` on it returns `spot_check_required`. Read a non-`fresh` row as a signal to look, never a `fresh` one as a clearance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "with_bodies": {
+            "default": false,
+            "type": "boolean"
+          },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_scope_overview",
+      "description": "Cheap session-start hint: per-scope counts, no bodies / ids / summaries. Call once at the start of a conversation; if `total` is 0, skip memory_search for the rest of the session unless explicitly asked.\n\n`proposals_pending` is the count of write-reflex proposals the Stop hook has captured awaiting review via `memory_proposals` (0 unless the opt-in [proposals] auto_propose is on). `pending_writes` is this session's staged writes awaiting memory_write_confirm/cancel — a dangling confirmation (silent 1h expiry). `curation_pending` is an integer-count rollup the model should branch on; the response names its legs. `conflicts` = contradiction pairs awaiting a memory_conflicts verdict. `unaccounted` = memories that entered outside every recorded path. `curation_unmeasured` names legs whose 0 is not a measurement (git or the index did not answer); never read a listed leg's 0 as clean. Non-zero `dead` or `drifted` is a cue to suggest a curation pass when there is time; non-zero `silent_misses` / `cold_endorsement_memories` is actionable audit backlog. A memory retrieved many times with zero explicit applies is weakly endorsed — worth a look, not a verdict.\n\nNon-zero `recently_removed_in_worktree` is a 'where did X go?' signal — material was deliberately trimmed here recently; don't blindly re-suggest it.\n\n`curation_pending_new_since_last_session` is the same shape, filtered to events emitted and memories *created* since the previous session ended (not memories that aged into a bucket; an older record aging into `stale` between sessions stays visible only in the absolute `curation_pending` view — note this is distinct from the separate `drifted` bucket, which tracks working-tree drift). Branch on it when deciding whether to *prompt* about curation — non-zero means new rot since the last session, vs. the absolute view which persists until resolved. `null` on the very first session — fall back to `curation_pending`.\n\nDefault-scoped to the caller's current repository; memories with no origin always pass as global. Set `auto_scope=False` for the cross-project view. Counts respect session-disabled scopes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "auto_scope": {
+            "default": true,
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_write",
+      "description": "Create a new memory. Call PROACTIVELY when something durable enters the conversation — aggressive writing is safe; the gates below catch bad writes.\n\nParameters:\n- `content`: the memory body.\n- `scopes`: non-empty list. Avoid the catch-all 'general'; prefer narrow tags like `tools`, `infrastructure`, `projects:<name>`.\n- `category` (default 'fact'): one of `fact`, `user-inference`, `ambient`.\n  - `fact`: project / infra / reference / tooling. Commits immediately (unless `require_write_confirmation`).\n  - `user-inference`: claims ABOUT THE USER. Commits like fact; the label keeps an inference distinguishable from an established fact, and correctable.\n  - `ambient`: context that shapes replies without being cited. Commits like fact, excluded from dead-weight curation; a body over 500 words gets a non-blocking `ambient_body_long` warning.\n- `confidence` ('low' / 'medium' / 'high'), `source` ('explicit-statement' / 'inferred').\n- `claims` (optional): claims the body makes about this repo — `path`, `path::symbol`, `path::NAME=literal`, `!path` (absent). Checked against the worktree NOW (false ⇒ refused); drift watches the claimed bindings, not whole files. Declare when citing code.\n- `groundedness_check=True` + `source_transcript`: optional gate. Sentences with <30% token overlap to the transcript return {status:'ungrounded', claims:[…]}. Override via `acknowledge_ungrounded=True` when grounding came from outside the transcript (file reads, tool results).\n- `supersedes` (optional): ids of active memories this write replaces (each gets a `supersedes` link, `superseded_by` on the stale hit). Also set unasked when a claim-sized body updates a stored claim — a change cue plus a diverging value; with no cue the pair is filed for memory_conflicts.\n\nReturn statuses:\n- `committed` — write succeeded; payload carries the new id, `related` matches, and any `supersedes` / `conflicts_filed` rows.\n- `duplicate` — content dedup fired; the matched memory is credited a corroboration (`corroboration_recorded: true`, once per session); the `hint` carries the remedy.\n- `transient_warning` / `credential_warning` / `previously_removed` / `scope_mismatch` — gate rejects; each returns what matched and a `hint` with the remedy and its `acknowledge_*` / `force=True` override.\n- `user_claim_warning` — the body reads as a claim ABOUT THE USER but `category` isn't `user-inference`. Re-issue as that or pass `acknowledge_user_claim=True` if the subject is someone else.\n- `pending` — `require_write_confirmation` is on (any category); memory_write_confirm or memory_write_cancel.\n- `ungrounded` — groundedness gate fired.\n\nA `committed` or confirm response may carry a one-shot per-session `curation_hint` block (`{pressure, threshold, counts, message}`) when curation pressure (`dead_weight + drifted + cold_endorsement_memories`) crosses the configured threshold; `memory_health` has the full buckets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "confidence": {
+            "default": "medium",
+            "type": "string"
+          },
+          "source": {
+            "default": "explicit-statement",
+            "type": "string"
+          },
+          "force": {
+            "default": false,
+            "type": "boolean"
+          },
+          "acknowledge_transient": {
+            "default": false,
+            "type": "boolean"
+          },
+          "acknowledge_scope_mismatch": {
+            "default": false,
+            "type": "boolean"
+          },
+          "acknowledge_ungrounded": {
+            "default": false,
+            "type": "boolean"
+          },
+          "acknowledge_credential": {
+            "default": false,
+            "type": "boolean"
+          },
+          "acknowledge_user_claim": {
+            "default": false,
+            "type": "boolean"
+          },
+          "category": {
+            "default": "fact",
+            "type": "string"
+          },
+          "groundedness_check": {
+            "default": false,
+            "type": "boolean"
+          },
+          "source_transcript": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "claims": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "content",
+          "scopes"
+        ]
+      }
+    },
+    {
+      "name": "memory_write_confirm",
+      "description": "Commit a memory_write that returned status='pending'. Pass the pending_id from that response. Pending writes expire after 1 hour; the confirm call will tell you which case fired (expired vs. never-existed). Re-gated at commit: `duplicate` / `previously_removed` / `credential_warning` can return instead of `committed` when the store changed during the wait. The staged write survives (`pending_retained: true`, same pending_id) — memory_write_cancel or resolve the match. The original write's overrides carry over.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pending_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pending_id"
+        ]
+      }
+    },
+    {
+      "name": "memory_write_cancel",
+      "description": "Drop a pending memory_write without committing. Pass the pending_id from the original write response. Pending writes expire after 1 hour; if the TTL elapsed (or the id never existed) the call returns `existed=False`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pending_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pending_id"
+        ]
+      }
+    },
+    {
+      "name": "memory_update",
+      "description": "Body edits clear `last_verified_at`; scope-only edits preserve it. Bundling a scope rename with a body edit clears verification.\n\nRefine an existing memory in place. Preferred over memory_remove + memory_write when correcting a stored fact — preserves `id`, `created`, and `source`; bumps `updated`.\n\nParameters (pass at least one):\n- `id`: required.\n- `content`: new body. Replacing the body clears `last_verified_at`, the verified-* attestations, and `claims` (the prior verification was for prose that no longer exists; call memory_verify again after, re-declaring claims). A body that reads as a claim ABOUT THE USER returns `user_claim_warning` unless the record is already `user-inference`; pass `acknowledge_user_claim=True` if the subject is someone else. A transient-state body returns `transient_warning`; `acknowledge_transient=True` overrides. An edit that SHRINKS the body and leaves it ending mid-sentence returns `truncation_warning`; pass `acknowledge_truncation=True` when the cut is deliberate.\n- `scopes` / `links`: REPLACE semantics — pass the full new list, or `[]` to clear.\n- `confidence`: low / medium / high.\n- `category`: accepts `fact` and `ambient`. `user-inference` is REJECTED here — file a claim about the user with memory_write.\n\nReturns `status=\"stale\"` when another agent updated the memory first; the `hint` says to re-fetch and retry. Each `links` entry is `{type, target_id (a ULID), note?}`. The types: `supersedes` (prefer this over the target), `contradicts` (both cannot be true), `extends` (adds nuance to it), `depends_on` (only makes sense in its context). docs/api.md carries the rest.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "links": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "acknowledge_credential": {
+            "default": false,
+            "type": "boolean"
+          },
+          "acknowledge_transient": {
+            "default": false,
+            "type": "boolean"
+          },
+          "acknowledge_user_claim": {
+            "default": false,
+            "type": "boolean"
+          },
+          "acknowledge_truncation": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_remove",
+      "description": "Tombstone a memory. The file is moved to .tombstones/ with a removal reason and the originating session id — never hard-deleted. Use when a stored fact is wrong or no longer relevant. Tombstones remain searchable via memory_list_tombstones and are surfaced as `removed_matches` on memory_write when a new body looks similar to a previously-removed fact, so the lesson encoded in the removal reason isn't lost. Use memory_restore(id) to undo an accidental removal.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "memory_verify",
+      "description": "Bump `last_verified_at` to now after spot-checking that a memory's claims still match reality (file paths exist, version still matches, configuration still what it says).\n\nOrthogonal to content edits: this tool does NOT bump `updated`; memory_update does NOT bump `last_verified_at`. A typo fix bumps `updated` only; a verify call bumps `last_verified_at` only. Idempotent — calling twice slides the timestamp forward.\n\nParameters:\n- `id`: memory id.\n- `note` (optional, ≤800 chars): what was checked, for the event log.\n- `verified_paths` (optional list of strings): the ONLY attestation the drift legs read — checked against the memory's own worktree, and the anchor narrowing commit drift. Prefer it when the memory cites paths. Paths absent here are REFUSED. Stored entries re-check when `None` preserves them — a vanished one blocks the stamp; pass a corrected list.\n- `verified_commits` / `verified_versions` (optional lists): audit trail only; nothing on the read path resolves them.\n- `verified_absent_paths` (optional): attest paths INTENTIONALLY absent here (remote host, other platform, not-the-location) — reported under `expected_absent`, not `missing`. Never for real drift.\n- `claims` (optional): memory_write's claim syntax; checked NOW, false ⇒ refused. Stored claims re-check on every verify — a false one blocks the stamp; memory_update first.\nAll five lists are REPLACE, not append — `None` preserves the prior attestation, `[]` clears it, a populated list supersedes it. Attest the full set each time. A verify attesting nothing on a memory whose cited paths resolve is refused; the error lists them as the paths to attest.\n\nThe stamp records the origin checkout's HEAD as `verified_head`; commit drift then counts the commits reachable since it (`basis: reachability`), which sees a branch merged after the stamp.\n\nAfter memory_update on a memory you later spot-check, verify again — memory_update clears `last_verified_at` because the prior verification was for prose that no longer exists.\n\nReturns `status=\"stale\"` when another agent verified first; the `hint` says to re-fetch and re-attest.\n\nAlso resolves an unresolved `record_use(contradicted)` flag in memory_health when the body still matches reality.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "verified_paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "verified_commits": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "verified_versions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "verified_absent_paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "claims": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_record_use",
+      "description": "Override the auto-`applied` outcome. Default behavior: every memory_search hit settles as `applied` at turn end (excerpts when the reply used it, `auto=true` otherwise). The common case handles itself — only call this tool when the model needs to record one of the three actionable outcomes below.\n\n| Outcome | When | What it does |\n|---|---|---|\n| `ignored` | retrieved but off-topic | annotates later hits; under `outcome_demotion`, mild 30d demotion (applied/update/verify clears) |\n| `contradicted` | stored fact disagreed AND not yet fixed | raises the unresolved-contradiction flag until a later memory_update or memory_verify clears it; demotes 2x under the same flag |\n| `corrected` | drifted and you fixed it inline (memory_update and/or memory_verify already called) | audit-only; does NOT raise the flag, never demotes |\n\n`applied` is also accepted explicitly (rarely needed — auto handles it; call only to force-commit early).\n\nParameters:\n- `memory_ids`: list (1+).\n- `outcome`: see table above.\n- `note` (optional, ≤800 chars): free-form context.\n- `claim_excerpts` (optional): list parallel to `memory_ids` (same length, `None` slots OK) carrying the load-bearing phrase that shaped the response. ≤500 chars per excerpt. Pass `None` for 'no specific claim' — empty strings are rejected (they're ambiguous: missing claim vs. zero-length claim). Especially useful on `contradicted` / `corrected` so the audit log records WHICH claim was wrong, not just that the memory drifted. Surfaces back in `recent_negative_outcomes` on later search hits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "claim_excerpts": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "memory_ids",
+          "outcome"
+        ]
+      }
+    },
+    {
+      "name": "memory_audit_turn",
+      "description": "Not for in-conversation use. This tool is dispatched by the client's end-of-turn Stop hook; the model should never call this directly.\n\nSilent-miss telemetry (full reference in docs/api.md). Runs the search probe `memory_search` would have run for `user_message` (`assistant_response` optional), then checks whether a `memory_search`, `memory_show`, `memory_list`, or hook-injected `prompt_recall` event fired in the same session within `lookback_seconds` (default 60). A high-relevance probe hit with no retrieval in that window is a miss. Auto-scopes to the caller's repo so the probe matches the model's view; honours session-disabled scopes. Returns a `MissReport` with `verdict` in {'miss', 'ok', 'no_signal'} plus the top probe hits. Side-effects: emits `turn_audited` always, plus `search_miss` when the verdict is `miss`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_message": {
+            "type": "string"
+          },
+          "assistant_response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "lookback_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "user_message"
+        ]
+      }
+    },
+    {
+      "name": "memory_scope_disable",
+      "description": "Disable a scope for the rest of this session. Subsequent memory_search and memory_list calls will exclude memories tagged with this scope. Useful when the user says 'this is unrelated to project X'. Resets when the server restarts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      }
+    },
+    {
+      "name": "memory_scope_enable",
+      "description": "Re-enable a previously disabled scope for this session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      }
+    },
+    {
+      "name": "episode_write",
+      "description": "Append a journal-shaped entry for the current session — for run-state, iteration takeaways, 'what we tried'. Episodes are NOT durable facts; the durability gate that rejects transient memory_write content (TRANSIENT_PHRASE_MARKERS) does not apply here. Stored at <root>/episodes/<session_id>/<ulid>.md with a default 30-day TTL.\n\nUse this for content memory_write would reject as transient:\n- 'iteration N tried X, fell over at step 3'\n- 'currently blocked on Y; next step is Z'\n- 'this branch's release plan' (state that changes weekly)\n\nEpisodes are invisible to memory_search / memory_health / memory_list — they are a sibling tier, not a memory category. Surface them via episode_handoff at iteration entry or episode_search for cross-session lookup. Promote a takeaway to durable memory via episode_promote (routes through memory_write, durability gate fires as normal).\n\nParameters:\n- `body`: free-form markdown. Required, non-empty. Capped by `max_content_bytes` (default 1 MB).\n- `swarm_id` (optional): cohort id for multi-agent fan-in — a sub-agent passes the coordinator's session id so the coordinator can gather every sub-agent's takeaways via `episode_search(swarm_id=…)`. A cross-cutting label, not a move: the episode still lives under this writer's own session, and it is distinct from `episode_handoff`'s predecessor link.\n- `takeaway` (optional): one-sentence summary. Surfaced preferentially at episode_handoff; when None, handoff falls back to the first line of body. Capped by `max_takeaway_bytes` (default 4 KB).\n- `scopes` (optional): list of scope tags. Empty list is valid (handoff keys on session_id, not scope). Capped by `max_scopes_per_write` (default 64).\n\nBoth caps guard one thing: takeaway and scopes serialise into the YAML frontmatter (64 KB ceiling), so an over-cap value corrupts the file and the episode vanishes from every read surface despite the write returning `committed`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "takeaway": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "swarm_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "episode_handoff",
+      "description": "Read the most-recent journal takeaways from a prior session in this worktree. Call this FIRST at a /loop iteration entry: it answers 'what did the last session conclude here?' without memory_search. Episodes are the sibling-to-memory primitive for journal-shaped writes (see episode_write).\n\nWhen `prior_session_id` is omitted the handler auto-resolves it from the event log under two implicit filters: caller-worktree strict equality (`None` matches only `None`) and the `disabled_scopes` cascade (a session whose only takeaways are scope-disabled is skipped; surviving episodes are scope-filtered). Pass it explicitly to override.\n\nReturns a dict:\n- `prior_session_id`: the resolved session id, or None when no prior session exists in the log.\n- `episodes`: list of {id, created, takeaway, scopes, provenance} dicts, oldest first, capped at `max_episodes` (default 5, cap 50). `provenance` is read from the event log: `local` (an episode_write event names the id), `untracked` (no event could have) or `unaccounted` (the file appeared with no event: the planted shape). `body` is present only with `include_bodies=True` (default False) and never for an unaccounted episode; episode_search(ids=[...]) is the explicit read for one body.\n- `note` (optional `str`): set ONLY when the immediately-prior worktree session left nothing visible; names the cause: floor-only, zero-episode, promoted-out, or all-scope-hidden. The last two DID journal, so a `note` never means 'wrote no journal'. `episodes` MAY be non-empty: the walk rewinds to an older takeaway.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prior_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "max_episodes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "include_bodies": {
+            "default": false,
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "episode_search",
+      "description": "Cross-session lookup for journal-shaped entries (episodes). NOT ranked — episodes are chronological and the filter set (scope / since / session_id) is the discovery surface. For the loop-iteration-entry case prefer `episode_handoff`, which auto-resolves the prior session and caps the surface.\n\nRows are oldest-first INSIDE the most-recent-`max_results` window: over the cap it keeps the MOST-RECENT N, so 'what did I conclude lately?' reads the tail, not the head.\n\nWORKTREE SCOPING: by default (`auto_scope=True`) the bare discovery walk (no `swarm_id` / `parent_session_id`) drops episodes whose captured git worktree differs from yours. PERMISSIVE, not a boundary, and weaker than the strict equality episode_handoff applies — it passes an episode through when there is nothing to compare (none captured, or you outside any git checkout), when the recorded worktree is gone from disk, and when you are in a LINKED worktree of the checkout that wrote it, so under agent fan-out the primary checkout's episodes stay visible. An EXPLICIT `swarm_id` / `parent_session_id` / `ids` is never worktree-filtered: naming a cohort or session is deliberate cross-worktree intent.\n\nParameters (full reference in docs/api.md):\n- `scopes` (optional): keep only episodes whose scope list intersects this filter.\n- `parent_session_id` (optional): restrict to one session's directory. Composes with `swarm_id` to narrow a fan-in.\n- `swarm_id` (optional): fan-in filter — episodes tagged with this cohort id, across all sessions.\n- `since` (optional ISO-8601): created at-or-after this instant.\n- `auto_scope` (default True): worktree-scope the bare walk (see WORKTREE SCOPING). False sweeps every worktree sharing the root.\n- `max_results` (default 20, cap 200): surfaces the most-recent N.\n- `ids` (optional): only these episode ULIDs — explicit selector, never worktree-filtered; unknown ids are absent, not an error.\n- `include_bodies` (default True): False OMITS `body` — takeaway-only rows. Scan, then re-read one via `ids`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "parent_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "swarm_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "auto_scope": {
+            "default": true,
+            "type": "boolean"
+          },
+          "include_bodies": {
+            "default": true,
+            "type": "boolean"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        }
+      }
+    },
+    {
+      "name": "episode_promote",
+      "description": "Promote a journal entry (episode) into a durable memory. Routes through memory_write — the durability gate, scope-mismatch detection, dedup, and the opt-in confirmation flow all apply.\n\nUse this when an iteration's takeaway turns out to be a fact worth keeping across sessions, not just a run-state note.\n\nLoop/working state belongs in episodes; session close is when to promote the takeaways that hardened.\n\nOn successful commit the source episode is deleted (its content has been distilled). On `pending` (require_write_confirmation), the source episode is held for memory_write_confirm to delete — memory_write_cancel keeps the episode so you can retry. On any other non-committed status (duplicate, previously_removed, transient_warning, scope_mismatch, ungrounded) the source episode is left untouched so you can adjust and re-promote.\n\nBody default: when `use_body=False` (default), the durable memory's body is the episode's takeaway. Set `use_body=True` to use the full episode body. An episode with no takeaway requires use_body=True.\n\nReturns the `memory_write` response shape plus `promoted_from_episode_id`, on every outcome.\n\nParameters:\n- `episode_id`: ULID of the source episode.\n- `scopes`: scopes for the durable memory. Required.\n- `category` (default 'fact'): memory category, as on memory_write.\n- `confidence` (default 'medium'), `source` (default 'explicit-statement'): standard memory_write fields.\n- `use_body=False`: when True, use the episode's body instead of its takeaway.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "episode_id": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "category": {
+            "default": "fact",
+            "type": "string"
+          },
+          "confidence": {
+            "default": "medium",
+            "type": "string"
+          },
+          "source": {
+            "default": "explicit-statement",
+            "type": "string"
+          },
+          "use_body": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "episode_id",
+          "scopes"
+        ]
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "bettermemory",
+    "version": "8.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Persistent memory between sessions lives in this server's MCP tools (listed below). Don't fragment memory across ad-hoc files alongside; future sessions only see what these tools surface.\n\nMemory is OPT-IN retrieval. Stored memories are NOT in your context unless you call memory_search. Default to NOT retrieving — false positives hurt more than false negatives. Call only when the user references shared context (\"my project\") or a request is ambiguous in a way stored preferences could resolve. Skip generic factual or self-contained questions.\n\nWriting is the OPPOSITE axis: PROACTIVE. memory_write is a routine reflex — reach for it whenever something durable enters the conversation: a stated preference (→ category='user-inference'), a project decision (→ category='fact'), a tool/infra/config fact, a finished unit of work with a why git won't capture. Don't wait for \"remember that\" — your job is to capture. Rejects are cheap — re-issue with the fix or pass `acknowledge_*`.\n\nSchema-deferred harness? Load the core set in ONE ToolSearch call: memory_scope_overview, memory_search, memory_write, memory_record_use.\n\nSession-start: memory_scope_overview returns counts plus curation_pending. If total=0, skip memory_search unless asked. memory_search auto-scopes to caller's repo + worktree.\n\nWhen a retrieved memory shapes your reply, say so briefly (\"Using your stored preference for…\"). memory_record_use settles as `applied` at turn end; call to override.\n\nVerify before relying. When staleness_verdict isn't fresh, spot-check; memory_verify if it holds, memory_update if drifted.",
+  "durationMs": 9885,
+  "stderr": "[bettermemory] created default config at /tmp/config/bettermemory/config.toml\n2026-10-12 05:27:55,434 [INFO] bettermemory: memory directory: /tmp/.claude-memory\n2026-10-12 05:27:55,435 [INFO] bettermemory: telemetry: on (event log at /tmp/.claude-memory/.events.jsonl)\n2026-10-12 05:27:55,435 [INFO] bettermemory: system prompt: server-level MCP `instructions` block carries the core policy; on Claude Code the block is truncated at ~1.8KB so the long-form addendum (docs/system_prompt.md) or the plugin's SKILL.md carries the writing-discipline / scope-hygiene tail\n2026-10-12 05:27:55,436 [WARNING] bettermemory.origin: git binary not found on PATH: [Errno 2] No such file or directory: 'git'\n"
+}

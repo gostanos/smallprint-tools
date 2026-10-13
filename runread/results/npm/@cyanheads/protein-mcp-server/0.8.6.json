@@ -1,0 +1,528 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@cyanheads/protein-mcp-server",
+  "version": "0.8.6",
+  "integrity": {
+    "dist": "sha512-/Jm+GUvJM8aFL9P0jEqeA3YDWRqcF1ENCsgDcgc8QHTnwovQaBysKRGUKxsPHSD+Ryx/BqZCaTX0+76hsMzwIg==",
+    "installed": "sha512-/Jm+GUvJM8aFL9P0jEqeA3YDWRqcF1ENCsgDcgc8QHTnwovQaBysKRGUKxsPHSD+Ryx/BqZCaTX0+76hsMzwIg=="
+  },
+  "bin": "node_modules/@cyanheads/protein-mcp-server/dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T11:11:10.182Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "protein_search_structures",
+      "description": "Search experimental (PDB) and predicted (computed-model) protein structures by free text, protein sequence (triggers an mmseqs2 similarity search), and/or organism, method, and resolution filters. Returns ranked hits; the experimental page is enriched with title, method, resolution, and organism. Chain hit IDs into protein_get_structure. Optionally returns a facet breakdown (counts by method / organism / release year / …) alongside the hits in the same response. A facet on a dimension you are already filtering (e.g. the organism facet while organism is set) lists unfiltered alternatives by design — it does not constrain by its own active filter, so you can see sibling values to pivot to. Numeric histogram buckets (resolution, molecular weight) carry explicit rangeFrom/rangeTo bounds so a boundary label is unambiguous.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Free-text query (protein name, gene, keyword, PDB title terms).",
+            "type": "string"
+          },
+          "sequence": {
+            "description": "One-letter amino-acid sequence; triggers an RCSB mmseqs2 sequence-similarity search.",
+            "type": "string"
+          },
+          "organism": {
+            "description": "Filter by source organism scientific name (e.g. \"Homo sapiens\").",
+            "type": "string"
+          },
+          "method": {
+            "description": "Filter by experimental method (e.g. \"X-RAY DIFFRACTION\", \"ELECTRON MICROSCOPY\").",
+            "type": "string"
+          },
+          "max_resolution": {
+            "description": "Maximum resolution in Å (lower is sharper); applies to experimental structures.",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "min_identity": {
+            "description": "Minimum sequence identity (0–1) for a sequence search. Requires sequence — supplying it without one is rejected, since the threshold filters only a sequence search. Default 0.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "max_evalue": {
+            "description": "Maximum E-value for a sequence search. Requires sequence — supplying it without one is rejected, since the threshold filters only a sequence search. Default 1.",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "content_type": {
+            "default": "all",
+            "description": "Which structure universe to search: experimental (PDB), predicted (computed models), or all.",
+            "type": "string",
+            "enum": [
+              "experimental",
+              "predicted",
+              "all"
+            ]
+          },
+          "facets": {
+            "description": "Optional dimensions to summarize as a facet breakdown alongside the hits. Each dimension at most once; repeating one is rejected.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "method",
+                "organism",
+                "polymer_type",
+                "resolution",
+                "release_year",
+                "molecular_weight"
+              ]
+            }
+          },
+          "limit": {
+            "default": 25,
+            "description": "Maximum hits to return (1–100).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "start": {
+            "default": 0,
+            "description": "Zero-based result offset. Combine with limit to retrieve later pages.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "protein_get_structure",
+      "description": "Fetch structures with metadata and coordinate-file URLs. source \"experimental\" takes PDB entry IDs, and also resolves the computed-model IDs protein_search_structures returns (AF_*/MA_*), which come back marked source \"predicted\" with their modelling provider; \"predicted\" takes UniProt accessions (AlphaFold, with pLDDT/PAE confidence); \"best_available\" takes UniProt accessions and returns the top federated model — the highest-resolution experimental structure if one exists (optimizing resolution, not biological representativeness, so it can return an engineered mutant over the wild-type entry), else the best prediction. Records fetched under source \"experimental\", computed models included, also carry polymer entities with both chain namespaces (labelAsymIds for protein_compare_structures, authAsymIds for protein_get_annotations), bound ligands, molecular weight, and release date. Resolves up to the configured batch cap per call with per-ID partial success — missed IDs are listed in failed[], and IDs beyond the cap are reported in the notice. Set include_coords to inline coordinate content; if the inlined bytes exceed the response budget the content is withheld and overflow lists each structure's size — re-call with sections:[ids] for specific structures, or for a single oversized file download it from that record's coordinateUrls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "PDB entry IDs or computed-model IDs such as AF_AFP69905F1 (source experimental), or UniProt accessions (predicted / best_available)."
+          },
+          "source": {
+            "default": "experimental",
+            "description": "Where to fetch: experimental (PDB), predicted (AlphaFold), or best_available (federated pick).",
+            "type": "string",
+            "enum": [
+              "experimental",
+              "predicted",
+              "best_available"
+            ]
+          },
+          "include_coords": {
+            "default": false,
+            "description": "Inline coordinate-file content — mmCIF, or PDB format when no mmCIF URL is available; coordinateFormat names which. Off by default — URLs are always returned.",
+            "type": "boolean"
+          },
+          "sections": {
+            "description": "Structure IDs to inline coordinates for, from a prior overflow outline.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "protein_find_similar",
+      "description": "Find structurally or evolutionarily related proteins. by:\"sequence\" runs an RCSB mmseqs2 sequence-similarity search (synchronous) over a sequence — supplied directly, or pulled from a PDB ID or UniProt accession. by:\"structure\" runs a Foldseek fold-similarity search (asynchronous) against experimental and predicted databases; if the job is still computing when the poll budget elapses, the response reports status \"computing\" with a ticket — re-call with ticket_id set to that value to resume the same job instead of resubmitting, and a complete response carries the same ticket so a finished job can be re-paged with a different start. Foldseek searches each chain of a multichain structure as its own query: a response covers one query (query, default 0), reports queryCount, and ranks that query's hits by score across all searched databases. Each mode reads only its own controls: sequence, max_evalue and min_identity belong to by:\"sequence\"; ticket_id, databases and query belong to by:\"structure\"; pdb_id, uniprot, start and limit are shared. A field the selected mode cannot consume is rejected rather than silently ignored. Output names the engine and database each hit came from.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "by": {
+            "type": "string",
+            "enum": [
+              "sequence",
+              "structure"
+            ],
+            "description": "Similarity axis: sequence (mmseqs2) or structure (Foldseek)."
+          },
+          "sequence": {
+            "description": "One-letter amino-acid sequence to search from (by:sequence).",
+            "type": "string"
+          },
+          "pdb_id": {
+            "description": "PDB entry ID to derive the query from.",
+            "type": "string"
+          },
+          "uniprot": {
+            "description": "UniProt accession to derive the query from.",
+            "type": "string"
+          },
+          "ticket_id": {
+            "description": "Foldseek ticket ID from a prior by:structure response whose status was \"computing\". When set, polls that existing job instead of submitting a new search (by:structure only) — pdb_id/uniprot/databases are ignored.",
+            "type": "string"
+          },
+          "databases": {
+            "description": "Foldseek target databases (by:structure). Default pdb100 + afdb50. e.g. afdb-swissprot, BFVD.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "description": "Zero-based Foldseek query index (by:structure). Default 0. Foldseek splits a multichain structure into one query per chain, in file order; queryCount in the response says how many the job holds. Pass the same value with ticket_id to resume or re-page that query.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "max_evalue": {
+            "description": "Maximum E-value (by:sequence). Default 1.",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "min_identity": {
+            "description": "Minimum sequence identity 0–1 (by:sequence). Default 0.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "limit": {
+            "default": 25,
+            "description": "Maximum hits to return (1–100).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "start": {
+            "default": 0,
+            "description": "Zero-based result offset. Pages a by:sequence search, and a completed by:structure job when re-called with its ticket_id.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "by"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "protein_track_ligands",
+      "description": "Ligand discovery and binding-site analysis across the PDB. mode \"find_ligand\" resolves a name or formula to chemical component IDs with metadata (formula, weight, SMILES), ranked by deposition frequency — most-deposited component first, so the top hit is the most common match for the name, not necessarily an exact name-string match. The ranking covers a bounded candidate pool; totalCount and candidatesConsidered report how many components matched and how many were ranked. mode \"structures_with_ligand\" returns PDB entries containing a ligand (by exact component ID — get the ID from find_ligand first), highest-resolution first, each with its resolution in Å. mode \"binding_site\" returns the protein residues lining a ligand's pocket in a given structure, with contact distances, each numbered in both the mmCIF label namespace (asymId, seqId) and the author namespace (authAsymId, authSeqId) used by deposited coordinates and most literature. Binding sites are experimental-only (computed from deposited coordinates; predicted models carry no bound ligands).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "find_ligand",
+              "structures_with_ligand",
+              "binding_site"
+            ],
+            "description": "Operation: resolve a ligand, find structures containing it, or analyze its binding site."
+          },
+          "query": {
+            "description": "Ligand name or formula (mode find_ligand).",
+            "type": "string"
+          },
+          "comp_id": {
+            "description": "Exact chemical component ID (modes structures_with_ligand and binding_site).",
+            "type": "string"
+          },
+          "pdb_id": {
+            "description": "PDB entry ID (mode binding_site).",
+            "type": "string"
+          },
+          "limit": {
+            "default": 25,
+            "description": "Maximum results to return (1–100).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "start": {
+            "default": 0,
+            "description": "Zero-based result offset (modes structures_with_ligand and binding_site; binding_site pages ligand instances).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "protein_compare_structures",
+      "description": "Structurally align multiple structures (up to the configured batch cap) via the RCSB Structural Comparison service (TM-align / jFATCAT). reference:\"first\" aligns every structure to the first; reference:\"all_pairs\" computes the full pairwise matrix. Each pair is an independent async alignment job with per-pair partial success — a pair still computing when the budget elapses returns status \"computing\" with its job UUID, and a failed pair degrades its row without sinking the others. Re-call with a matching entry in resume[] to poll a computing pair's UUID instead of resubmitting; a resumed pair reports a and b in the order its job was submitted, and a resume under a different method is rejected. Returns TM-score, RMSD, and aligned-residue count per pair, plus each structure's modeled-residue count and alignment coverage. TM-score is length-normalized and can shift sharply between structures that differ only by a terminal residue or two — the greedy superposition can settle into a worse local optimum — so read tmScore alongside rmsd, alignedResidues, modeledResidues and coverage, the columns that make such cases diagnosable.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "structures": {
+            "minItems": 2,
+            "maxItems": 25,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pdb_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "PDB entry ID."
+                },
+                "chain": {
+                  "description": "mmCIF label_asym_id restricting the alignment to a single chain. Read it from polymerEntities[].labelAsymIds on protein_get_structure (source experimental) or the pdb://{entry_id} resource. Author chain IDs are a different namespace — polymerEntities[].authAsymIds, what protein_get_annotations.chain takes — and are not interchangeable with this one. Case-sensitive.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pdb_id"
+              ],
+              "description": "A structure to align, by PDB entry ID with optional chain."
+            },
+            "description": "The structures to compare, up to the configured batch cap (excess is dropped with a notice). A structure repeated here is compared once."
+          },
+          "reference": {
+            "default": "first",
+            "description": "Align all to the first structure, or compute the full pairwise matrix.",
+            "type": "string",
+            "enum": [
+              "first",
+              "all_pairs"
+            ]
+          },
+          "method": {
+            "default": "tm-align",
+            "description": "Alignment algorithm: tm-align, fatcat-rigid, or fatcat-flexible.",
+            "type": "string",
+            "enum": [
+              "tm-align",
+              "fatcat-rigid",
+              "fatcat-flexible"
+            ]
+          },
+          "timeout_s": {
+            "description": "Poll budget per pair in seconds before returning \"computing\". Defaults to the server setting.",
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 120
+          },
+          "resume": {
+            "description": "Resume tickets from a prior call: for each pair whose labels match an entry here, poll the existing UUID instead of submitting a new alignment job. Copy a, b, and uuid verbatim from a prior response's pairs[]; keep structures, reference, and method unchanged. The order of structures may change — a resumed pair keeps the orientation its job was submitted in.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "a": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "First structure label (entry or entry.chain) of a pair from a prior response."
+                },
+                "b": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Second structure label (entry or entry.chain) of a pair from a prior response."
+                },
+                "uuid": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Alignment job UUID returned for that pair by a prior call."
+                }
+              },
+              "required": [
+                "a",
+                "b",
+                "uuid"
+              ],
+              "description": "A prior pair to resume by UUID instead of resubmitting."
+            }
+          }
+        },
+        "required": [
+          "structures"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "protein_analyze_collection",
+      "description": "Profile the PDB into distributions and trends over an optional scoping query: counts by method, organism, or polymer composition; resolution and molecular-weight histograms; release-year timelines; and multidimensional cross-tabs (e.g. method × release_year). Aggregation runs at RCSB, so the response carries compact counts per bucket rather than the matching entries. Pass one group_by dimension for a single breakdown, or two distinct dimensions for a cross-tab (the first nests the second). bucket_limit caps each dimension level separately rather than the response, so a cross-tab returns up to that many nested buckets under each of its capped parent buckets; bucketsReturned reports the realized total.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "group_by": {
+            "minItems": 1,
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "method",
+                "organism",
+                "polymer_type",
+                "resolution",
+                "release_year",
+                "molecular_weight"
+              ]
+            },
+            "description": "1 dimension for a breakdown, or 2 distinct dimensions for a cross-tab (the first nests the second). Repeating a dimension is rejected."
+          },
+          "query": {
+            "description": "Optional free-text scope (e.g. \"kinase\"); omit to profile the whole PDB.",
+            "type": "string"
+          },
+          "organism": {
+            "description": "Optional source-organism scope.",
+            "type": "string"
+          },
+          "method": {
+            "description": "Optional experimental-method scope.",
+            "type": "string"
+          },
+          "max_resolution": {
+            "description": "Optional maximum-resolution scope (Å).",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "content_type": {
+            "default": "experimental",
+            "description": "Which structure universe to profile. Default experimental. Computed models carry no experimental metadata, so method and resolution return nothing under \"predicted\".",
+            "type": "string",
+            "enum": [
+              "experimental",
+              "predicted",
+              "all"
+            ]
+          },
+          "interval": {
+            "description": "Bin width for a histogram dimension (a number, for resolution or molecular_weight) or period for a date histogram (\"year\", for release_year). Applies to whichever requested group_by dimension can consume that value type — primary or nested child — so a cross-tab like [\"method\",\"resolution\"] bins its nested resolution child. When both requested dimensions can consume it the primary takes it and the child keeps its default. When neither can, the call is rejected rather than silently ignoring the override.",
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Numeric bin width for a value histogram (e.g. resolution Å)."
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "year"
+                ],
+                "description": "Period granularity for a date histogram. Only \"year\"."
+              }
+            ]
+          },
+          "bucket_limit": {
+            "description": "Max buckets per dimension level, not per response. A cross-tab applies the cap separately to the parent dimension and to the nested child inside each parent bucket, so up to bucket_limit × (1 + bucket_limit) buckets can come back — 2550 at the default 50. The realized count comes back as bucketsReturned. Defaults to the configured server cap.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "group_by"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "protein_get_annotations",
+      "description": "Sequence and functional annotation for a protein: UniProt features (domains, binding sites, PTMs), natural variants, and InterPro domain/family memberships (Pfam, PROSITE, …) with GO terms. Provide a UniProt accession directly, or a PDB ID — it is resolved to its UniProt accession via the structure's sequence cross-reference. A multi-chain PDB entry can map to several accessions; the default pick is deterministic (lowest author chain ID) and the alternatives are listed in \"ambiguity\" — pass \"chain\" to select a specific one. Use \"include\" to scope which annotation classes are fetched. Every response carries an \"attribution\" block with the upstream data licenses and citations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uniprot": {
+            "description": "UniProt accession (e.g. P69905). Takes precedence over pdb_id.",
+            "type": "string"
+          },
+          "pdb_id": {
+            "description": "PDB entry ID; resolved to a UniProt accession via cross-reference.",
+            "type": "string"
+          },
+          "chain": {
+            "description": "Author chain ID (auth_asym_id, e.g. \"A\") that disambiguates a multi-chain PDB entry to a specific UniProt accession. Case-sensitive — must match the author chain ID exactly (large structures can carry distinct \"A\" and \"a\" chains). Only applies with pdb_id; ignored when uniprot is supplied directly. See polymerEntities[].authAsymIds in the pdb://{entry_id} resource for an entry's author chain IDs.",
+            "type": "string"
+          },
+          "include": {
+            "default": "all",
+            "description": "Which annotation classes to fetch: features, domains (InterPro), variants, or all.",
+            "type": "string",
+            "enum": [
+              "features",
+              "domains",
+              "variants",
+              "all"
+            ]
+          },
+          "limit": {
+            "default": 50,
+            "description": "Per-class cap (1–200): features, natural variants, and InterPro domains are each independently truncated to at most this many records. The default keeps a typical annotation set intact while bounding a densely-annotated protein (a well-studied protein can carry 150+ natural variants); a truncated class is disclosed in the response notice — raise it to retrieve more.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "protein-mcp-server",
+    "version": "0.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Find structures with protein_search_structures, then pass the returned IDs to protein_get_structure for metadata and coordinate URLs, or pass UniProt accessions there for AlphaFold predictions and the best available model. A PDB ID also chains into protein_get_annotations, protein_track_ligands, protein_find_similar, and protein_compare_structures for annotations, binding sites, homologs, and structural alignment, while protein_analyze_collection profiles the whole PDB as aggregate counts. A Foldseek search or structural alignment still running when the poll budget elapses returns status \"computing\" with a ticket (protein_find_similar) or a job UUID (protein_compare_structures); re-call with it to resume that job rather than resubmitting.",
+  "durationMs": 10955,
+  "stderr": "{\"level\":30,\"time\":1791803480848,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"loggerInit\",\"requestId\":\"P1JUN-OMTZB\",\"timestamp\":\"2026-10-12T11:11:20.847Z\",\"msg\":\"Logger initialized. MCP level: debug.\"}\n{\"level\":40,\"time\":1791803480849,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"loggerInit\",\"requestId\":\"I297Q-RD8RR\",\"timestamp\":\"2026-10-12T11:11:20.849Z\",\"droppedLogFiles\":[{\"code\":\"ENOENT\",\"name\":\"combined.log\",\"path\":\"/pkg/logs/combined.log\"},{\"code\":\"ENOENT\",\"name\":\"error.log\",\"path\":\"/pkg/logs/error.log\"},{\"code\":\"ENOENT\",\"name\":\"interactions.log\",\"path\":\"/pkg/logs/interactions.log\"}],\"msg\":\"File logging disabled for 3 sink(s): /pkg/logs/combined.log (ENOENT), /pkg/logs/error.log (ENOENT), /pkg/logs/interactions.log (ENOENT). Point LOGS_DIR at a writable directory to restore them.\"}\n{\"level\":30,\"time\":1791803480849,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"createStorageProvider\",\"requestId\":\"CHOYN-3XPKG\",\"timestamp\":\"2026-10-12T11:11:20.821Z\",\"msg\":\"Creating storage provider of type: in-memory\"}\n{\"level\":30,\"time\":1791803480850,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"ServerInit\",\"requestId\":\"SQZV0-7XCN1\",\"timestamp\":\"2026-10-12T11:11:20.850Z\",\"tools\":[\"protein_search_structures\",\"protein_get_structure\",\"protein_find_similar\",\"protein_track_ligands\",\"protein_compare_structures\",\"protein_analyze_collection\",\"protein_get_annotations\"],\"resources\":[\"pdb-structure-summary\",\"alphafold-structure-summary\"],\"prompts\":[],\"msg\":\"Core services constructed — 7 tool(s), 2 resource(s), 0 prompt(s). Storage: in-memory.\"}\n{\"level\":30,\"time\":1791803480850,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"ServerStartup\",\"requestId\":\"RLTV6-UEMR8\",\"timestamp\":\"2026-10-12T11:11:20.850Z\",\"applicationName\":\"protein-mcp-server\",\"applicationVersion\":\"0.0.0\",\"nodeEnvironment\":\"development\",\"msg\":\"Starting protein-mcp-server (v0.0.0)...\"}\n{\"level\":30,\"time\":1791803480851,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"TransportManager.start\",\"requestId\":\"1FY6M-WZL09\",\"timestamp\":\"2026-10-12T11:11:20.851Z\",\"transport\":\"stdio\",\"msg\":\"Starting transport: stdio\"}\n{\"level\":30,\"time\":1791803480851,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"connectStdioTransport\",\"requestId\":\"1FY6M-WZL09\",\"timestamp\":\"2026-10-12T11:11:20.851Z\",\"transport\":\"stdio\",\"transportType\":\"Stdio\",\"msg\":\"Attempting to connect stdio transport...\"}\n{\"level\":30,\"time\":1791803480852,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"connectStdioTransport\",\"requestId\":\"1FY6M-WZL09\",\"timestamp\":\"2026-10-12T11:11:20.851Z\",\"transport\":\"stdio\",\"transportType\":\"Stdio\",\"msg\":\"MCP Server connected and listening via stdio transport.\"}\n{\"level\":30,\"time\":1791803480852,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"ServerStartup\",\"requestId\":\"RLTV6-UEMR8\",\"timestamp\":\"2026-10-12T11:11:20.850Z\",\"applicationName\":\"protein-mcp-server\",\"applicationVersion\":\"0.0.0\",\"nodeEnvironment\":\"development\",\"msg\":\"protein-mcp-server is now running and ready.\"}\n{\"level\":20,\"time\":1791803480859,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"createMcpServerInstance\",\"requestId\":\"DWI16-K2TYB\",\"timestamp\":\"2026-10-12T11:11:20.859Z\",\"msg\":\"Initializing MCP server instance\"}\n{\"level\":20,\"time\":1791803480860,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"createMcpServerInstance\",\"requestId\":\"DWI16-K2TYB\",\"timestamp\":\"2026-10-12T11:11:20.859Z\",\"msg\":\"Registering all MCP capabilities via registries...\"}\n{\"level\":20,\"time\":1791803480861,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"ToolRegistry.registerAll\",\"requestId\":\"O7FUA-RQYGO\",\"timestamp\":\"2026-10-12T11:11:20.860Z\",\"msg\":\"Registering 7 tool(s)...\"}\n{\"level\":20,\"time\":1791803480861,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"ToolRegistry.registerTool\",\"requestId\":\"RGIGQ-4VPT6\",\"timestamp\":\"2026-10-12T11:11:20.861Z\",\"toolName\":\"protein_search_structures\",\"msg\":\"Registering tool: 'protein_search_structures'\"}\n{\"level\":20,\"time\":1791803480862,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":"
+}

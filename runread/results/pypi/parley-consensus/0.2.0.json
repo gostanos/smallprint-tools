@@ -1,0 +1,315 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "pypi",
+  "name": "parley-consensus",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha256:88f11e4f9f93645be91b402fb55990d53050b884594692d8317a4c7ed133aa77",
+    "installed": "sha256:88f11e4f9f93645be91b402fb55990d53050b884594692d8317a4c7ed133aa77"
+  },
+  "bin": "parley-consensus = parley.mcp:main",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/python:3.12-slim-bookworm",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T21:33:39.703Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "parley_decide",
+      "description": "Reach a decision among parties with conflicting interests. Give the options and each party's red lines (hard constraints, checked in code) and soft preferences. An option that crosses any party's red line is rejected outright; among the options acceptable to everyone the max-min rule picks the one whose least-satisfied party is best off, tie-broken by total score. No option acceptable to all parties yields an honest status 'deadlock' with decision null, never a forced choice. Returns JSON: status ('agreed'|'deadlock'), decision (the winning option object or null), transcript (every option with each party's masked verdict), and transcript_sha256 (the receipt hash; keep it to verify the transcript later with parley_verify_receipt). HONESTY NOTE: in this mode you, the caller, hold every party's spec and pass them all in one call, so there is no privacy between parties or from you. What still holds: red lines reject an option deterministically (a violating option cannot win), the max-min rule picks among options feasible for everyone, and the returned transcript is tamper-evident via transcript_sha256, provided the hash is kept by someone other than whoever might edit the transcript (it is unsigned and this server does not store it). For private sheets run one process per owner: examples/run_env.py.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "spec": {
+            "type": "object",
+            "description": "A DecisionSpec: the shared options plus every party's position, the same JSON as examples/demo/recipe_*.json. Extra keys are ignored.",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One candidate outcome as flat attributes; every attr a constraint or utility term names should be present."
+                },
+                "minItems": 1,
+                "maxItems": 500
+              },
+              "parties": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One party: a distinct owner name, hard red lines, soft utility terms.",
+                  "properties": {
+                    "owner": {
+                      "type": "string"
+                    },
+                    "hard": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "A red line: option[attr] <op> value must hold or the option is rejected for this party. A missing attr fails closed.",
+                        "properties": {
+                          "attr": {
+                            "type": "string"
+                          },
+                          "op": {
+                            "type": "string",
+                            "enum": [
+                              "==",
+                              "!=",
+                              "<",
+                              "<=",
+                              ">",
+                              ">=",
+                              "in",
+                              "not_in"
+                            ]
+                          },
+                          "value": {
+                            "description": "Compared against option[attr]; a list for in/not_in.",
+                            "maxItems": 1000
+                          }
+                        },
+                        "required": [
+                          "attr",
+                          "op",
+                          "value"
+                        ]
+                      },
+                      "default": []
+                    },
+                    "utility": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "One soft-preference term. Categorical: set `prefer`. Numeric: set `direction` (higher|lower) with `lo` and `hi` to normalise on. A party's score is the weighted average of its terms.",
+                        "properties": {
+                          "attr": {
+                            "type": "string"
+                          },
+                          "weight": {
+                            "type": "number",
+                            "default": 1
+                          },
+                          "prefer": {
+                            "description": "Full weight when option[attr] equals this value."
+                          },
+                          "direction": {
+                            "type": "string",
+                            "enum": [
+                              "higher",
+                              "lower"
+                            ]
+                          },
+                          "lo": {
+                            "type": "number"
+                          },
+                          "hi": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "attr"
+                        ]
+                      },
+                      "default": []
+                    }
+                  },
+                  "required": [
+                    "owner"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 50
+              }
+            },
+            "required": [
+              "title",
+              "options",
+              "parties"
+            ]
+          },
+          "rule": {
+            "type": "string",
+            "enum": [
+              "egalitarian"
+            ],
+            "default": "egalitarian",
+            "description": "Selection rule. Only 'egalitarian' (max-min) exists."
+          }
+        },
+        "required": [
+          "spec"
+        ]
+      }
+    },
+    {
+      "name": "parley_verify_receipt",
+      "description": "Two independent checks on a transcript from parley_decide. Returns JSON: match, max_min_verified, expected_sha256, recomputed_sha256. match=true means only that this transcript hashes to the sha256 you passed. The hash is unsigned and this server does not store it, so if the transcript and the hash come from the same party, match proves nothing: whoever edits the record can re-hash it. It detects tampering only when the hash was kept by someone other than whoever could edit the transcript. max_min_verified recomputes the decision from the recorded verdicts: true when the announced result is exactly the max-min option over them (or an honest deadlock), false when the announced winner does not follow from the recorded verdicts. Verdicts are unsigned, so whoever can rewrite the record can rewrite them to fit a swapped winner; only a hash kept by another party, or signed verdicts, rules that out. It needs every entry to carry exactly one verdict per owner. Pass expected_owners (the roster you know took part) so a record missing a whole owner also fails; that roster is only as trustworthy as where you got it. A malformed transcript is a tool error, not a mismatch.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "transcript": {
+            "type": "object",
+            "description": "The `transcript` object returned by parley_decide, unmodified.",
+            "properties": {
+              "entries": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "result": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "entries",
+              "result"
+            ]
+          },
+          "sha256": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "description": "The transcript_sha256 you were given, hex."
+          },
+          "expected_owners": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional. The owners you know took part; every entry must carry exactly this set for max_min_verified to be true."
+          }
+        },
+        "required": [
+          "transcript",
+          "sha256"
+        ]
+      }
+    },
+    {
+      "name": "parley_check_party",
+      "description": "Replay one party's red lines against a decision: did the outcome cross any of them? Pass the party's spec (the same object you would put in parley_decide's parties) and the decision object returned by parley_decide. Returns JSON: owner and holds (true when every red line of that party holds on the decision). A null decision (deadlock) forces nothing on anyone, so holds is true. Soft preferences are not judged here, only red lines.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "party": {
+            "type": "object",
+            "description": "One party: a distinct owner name, hard red lines, soft utility terms.",
+            "properties": {
+              "owner": {
+                "type": "string"
+              },
+              "hard": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "A red line: option[attr] <op> value must hold or the option is rejected for this party. A missing attr fails closed.",
+                  "properties": {
+                    "attr": {
+                      "type": "string"
+                    },
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "==",
+                        "!=",
+                        "<",
+                        "<=",
+                        ">",
+                        ">=",
+                        "in",
+                        "not_in"
+                      ]
+                    },
+                    "value": {
+                      "description": "Compared against option[attr]; a list for in/not_in.",
+                      "maxItems": 1000
+                    }
+                  },
+                  "required": [
+                    "attr",
+                    "op",
+                    "value"
+                  ]
+                },
+                "default": []
+              },
+              "utility": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One soft-preference term. Categorical: set `prefer`. Numeric: set `direction` (higher|lower) with `lo` and `hi` to normalise on. A party's score is the weighted average of its terms.",
+                  "properties": {
+                    "attr": {
+                      "type": "string"
+                    },
+                    "weight": {
+                      "type": "number",
+                      "default": 1
+                    },
+                    "prefer": {
+                      "description": "Full weight when option[attr] equals this value."
+                    },
+                    "direction": {
+                      "type": "string",
+                      "enum": [
+                        "higher",
+                        "lower"
+                      ]
+                    },
+                    "lo": {
+                      "type": "number"
+                    },
+                    "hi": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "attr"
+                  ]
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "owner"
+            ]
+          },
+          "decision": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The decision from parley_decide, or null for a deadlock."
+          }
+        },
+        "required": [
+          "party",
+          "decision"
+        ]
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "parley",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 2465,
+  "stderr": "parley-mcp INFO parley MCP server 0.2.0 ready (protocol 2025-06-18)\nparley-mcp INFO stdin closed, exiting\n"
+}

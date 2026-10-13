@@ -1,0 +1,1198 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "pypi",
+  "name": "iflow-mcp-acryldata-mcp-server-datahub",
+  "version": "0.4.1.dev13",
+  "integrity": {
+    "dist": "sha256:0db2cccd05619ceb5de9d8a04fd82339d1c1fa69b2323b8f0ca42522f5ae51e5",
+    "installed": "sha256:0db2cccd05619ceb5de9d8a04fd82339d1c1fa69b2323b8f0ca42522f5ae51e5"
+  },
+  "bin": "mcp-server-datahub = mcp_server_datahub.__main__:main",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/python:3.12-slim-bookworm",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T10:33:47.782Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search across DataHub entities using structured full-text search.\n    Results are ordered by relevance and importance - examine top results first.\n\n    SEARCH SYNTAX:\n    - Structured full-text search - **always start queries with /q**\n    - **Recommended: Use + operator for AND** (handles punctuation better than quotes)\n    - Supports full boolean logic: AND (default), OR, NOT, parentheses, field searches\n    - Examples:\n      • /q user+transaction → requires both terms (better for field names with _ or punctuation)\n      • /q point+sale+app → requires all terms (works with point_of_sale_app_usage)\n      • /q wizard OR pet → entities containing either term\n      • /q revenue* → wildcard matching (revenue_2023, revenue_2024, revenue_monthly, etc.)\n      • /q tag:PII → search by tag name\n      • /q \"exact table name\" → exact phrase matching (use sparingly)\n      • /q (sales OR revenue) AND quarterly → complex boolean combinations\n    - Fast and precise for exact matching, technical terms, and complex queries\n    - Best for: entity names, identifiers, column names, or any search needing boolean logic\n\n    PAGINATION:\n    - num_results: Number of results to return per page (max: 50)\n    - offset: Starting position in results (default: 0)\n    - Examples:\n      • First page: offset=0, num_results=10\n      • Second page: offset=10, num_results=10\n      • Third page: offset=20, num_results=10\n\n    FACET EXPLORATION - Discover metadata without returning results:\n    - Set num_results=0 to get ONLY facets (no search results)\n    - Facets show ALL tags, glossaryTerms, platforms, domains used in the catalog\n    - Example: search(query=\"*\", filters={\"entity_type\": [\"DATASET\"]}, num_results=0)\n      → Returns facets showing all tags/glossaryTerms applied to datasets\n    - Use this to discover what metadata exists before doing filtered searches\n\n    TYPICAL WORKFLOW:\n    1. Facet exploration: search(query=\"*\", filters={\"entity_type\": [\"DATASET\"]}, num_results=0)\n       → Examine tags/glossaryTerms facets to see what metadata exists\n    2. Filtered search: search(query=\"*\", filters={\"tag\": [\"urn:li:tag:pii\"]}, num_results=30)\n       → Get entities with specific tag using URN from step 1\n    3. Get details: Use get_entities() on specific results\n\n    Here are some example filters:\n    - All Looker assets\n    ```\n    {\"platform\": [\"looker\"]}\n    ```\n    - Production environment warehouse assets\n    ```\n    {\n      \"and\": [\n        {\"env\": [\"PROD\"]},\n        {\"platform\": [\"snowflake\", \"bigquery\", \"redshift\"]}\n      ]\n    }\n    ```\n    - Filter by domain (MUST use full URN format)\n    ```\n    {\"domain\": [\"urn:li:domain:marketing\"]}\n    {\"domain\": [\"urn:li:domain:9f8e7d6c-5b4a-3928-1765-432109876543\", \"urn:li:domain:7c6b5a49-3827-1654-9032-8f7e6d5c4b3a\"]}\n    ```\n    IMPORTANT: Domain filters require full URN format starting with \"urn:li:domain:\",\n    NOT short names like \"marketing\" or \"customer\". Domain URNs can be readable names\n    or GUIDs. Always search with {\"entity_type\": [\"domain\"]}\n    to find valid domain URNs first, then use the exact URN from the results.\n\n    SUPPORTED FILTER TYPES (only these will work):\n    - entity_type: [\"dataset\"], [\"dashboard\", \"chart\"], [\"corp_user\"], [\"corp_group\"]\n    - entity_subtype: [\"Table\"], [\"View\", \"Model\"]\n    - platform: [\"snowflake\"], [\"looker\", \"tableau\"]\n    - domain: [\"urn:li:domain:marketing\"] (full URN required)\n    - container: [\"urn:li:container:...\"] (full URN required)\n    - tag: [\"urn:li:tag:PII\"] (full tag URN required)\n    - glossary_term: [\"urn:li:glossaryTerm:uuid\"] (full term URN required)\n    - owner: [\"urn:li:corpuser:alice\", \"urn:li:corpGroup:marketing\"] (full user or group URN required)\n    - custom: {\"field\": \"fieldName\", \"condition\": \"EQUAL\", \"values\": [...]}\n    - status: [\"NOT_SOFT_DELETED\"] (for non-deleted entities)\n    - env: [\"PROD\"], [\"DEV\", \"STAGING\"] (Should not use unless explicitly requested)\n    - and: [filter1, filter2] (combines multiple filters)\n    - or: [filter1, filter2] (matches any filter)\n    - not: {\"entity_type\": [\"dataset\"]} (excludes matches)\n\n    CRITICAL: Use only ONE discriminator key per filter object. Never mix\n    entity_type with custom, domain, etc. at the same level. Use \"and\" or \"or\" to combine.\n\n    SEARCH STRATEGY EXAMPLES:\n    - /q customer+behavior → finds tables with both terms (works with customer_behavior fields)\n    - /q customer OR user → finds tables with either term\n    - /q (financial OR revenue) AND metrics → complex boolean logic\n\n    SORTING - Order results by specific fields:\n    - sort_by: Field name to sort by (optional)\n    - sort_order: \"desc\" (default) or \"asc\"\n\n    Available sort fields:\n    - lastOperationTime: Last modified timestamp in source system\n\n    Sorting examples:\n    - Most recently updated:\n      search(query=\"*\", filters={\"entity_type\": [\"DATASET\"]}, sort_by=\"lastOperationTime\", sort_order=\"desc\", num_results=10)\n\n    Note: If sort_by is not provided, search results use default ranking by relevance and\n    importance. When using sort_by, results are strictly ordered by that field.\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "default": "*",
+            "type": "string"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/_And"
+              },
+              {
+                "$ref": "#/$defs/_Or"
+              },
+              {
+                "$ref": "#/$defs/_Not"
+              },
+              {
+                "$ref": "#/$defs/_EntityTypeFilter"
+              },
+              {
+                "$ref": "#/$defs/_EntitySubtypeFilter"
+              },
+              {
+                "$ref": "#/$defs/_StatusFilter"
+              },
+              {
+                "$ref": "#/$defs/_PlatformFilter"
+              },
+              {
+                "$ref": "#/$defs/_DomainFilter"
+              },
+              {
+                "$ref": "#/$defs/_ContainerFilter"
+              },
+              {
+                "$ref": "#/$defs/_EnvFilter"
+              },
+              {
+                "$ref": "#/$defs/_OwnerFilter"
+              },
+              {
+                "$ref": "#/$defs/_GlossaryTermFilter"
+              },
+              {
+                "$ref": "#/$defs/_TagFilter"
+              },
+              {
+                "$ref": "#/$defs/_CustomCondition"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "num_results": {
+            "default": 10,
+            "type": "integer"
+          },
+          "sort_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "enum": [
+                  "asc",
+                  "desc"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "desc"
+          },
+          "offset": {
+            "default": 0,
+            "type": "integer"
+          }
+        },
+        "$defs": {
+          "RemovedStatusFilter": {
+            "description": "Filter for the status of entities during search.",
+            "enum": [
+              "NOT_SOFT_DELETED",
+              "ALL",
+              "ONLY_SOFT_DELETED"
+            ],
+            "type": "string"
+          },
+          "_And": {
+            "additionalProperties": false,
+            "description": "Represents an AND conjunction of filters.",
+            "properties": {
+              "and": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/_And"
+                    },
+                    {
+                      "$ref": "#/$defs/_Or"
+                    },
+                    {
+                      "$ref": "#/$defs/_Not"
+                    },
+                    {
+                      "$ref": "#/$defs/_EntityTypeFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_EntitySubtypeFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_StatusFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_PlatformFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_DomainFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_ContainerFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_EnvFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_OwnerFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_GlossaryTermFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_TagFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_CustomCondition"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "and"
+            ],
+            "type": "object"
+          },
+          "_ContainerFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "container": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "direct_descendants_only": {
+                "default": false,
+                "description": "If true, only entities that are direct descendants of the container will be returned.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "container"
+            ],
+            "type": "object"
+          },
+          "_CustomCondition": {
+            "additionalProperties": false,
+            "description": "Represents a single field condition.",
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "condition": {
+                "enum": [
+                  "CONTAIN",
+                  "EQUAL",
+                  "IEQUAL",
+                  "IN",
+                  "EXISTS",
+                  "GREATER_THAN",
+                  "GREATER_THAN_OR_EQUAL_TO",
+                  "LESS_THAN",
+                  "LESS_THAN_OR_EQUAL_TO",
+                  "START_WITH",
+                  "END_WITH",
+                  "DESCENDANTS_INCL",
+                  "ANCESTORS_INCL",
+                  "RELATED_INCL"
+                ],
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "field",
+              "condition",
+              "values"
+            ],
+            "type": "object"
+          },
+          "_DomainFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "domain": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "domain"
+            ],
+            "type": "object"
+          },
+          "_EntitySubtypeFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "entity_subtype": {
+                "description": "The entity subtype to filter on. Can be 'Table', 'View', 'Source', etc. depending on the native platform's concepts.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "entity_subtype"
+            ],
+            "type": "object"
+          },
+          "_EntityTypeFilter": {
+            "additionalProperties": false,
+            "description": "Filter for specific entity types.\n\nIf no entity type filter is specified, we will search all entity types in the\ndefault search set, mirroring the behavior of the DataHub UI.",
+            "properties": {
+              "entity_type": {
+                "description": "The entity type to filter on. Can be 'dataset', 'chart', 'dashboard', 'corpuser', 'dataProduct', etc.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "entity_type"
+            ],
+            "type": "object"
+          },
+          "_EnvFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "env": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "env"
+            ],
+            "type": "object"
+          },
+          "_GlossaryTermFilter": {
+            "additionalProperties": false,
+            "description": "Filter for entities associated with specific glossary terms.",
+            "properties": {
+              "glossary_term": {
+                "description": "The glossary term to filter on. Should be glossary term URNs.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "glossary_term"
+            ],
+            "type": "object"
+          },
+          "_Not": {
+            "additionalProperties": false,
+            "description": "Represents a NOT filter.",
+            "properties": {
+              "not": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/_And"
+                  },
+                  {
+                    "$ref": "#/$defs/_Or"
+                  },
+                  {
+                    "$ref": "#/$defs/_Not"
+                  },
+                  {
+                    "$ref": "#/$defs/_EntityTypeFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_EntitySubtypeFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_StatusFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_PlatformFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_DomainFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_ContainerFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_EnvFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_OwnerFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_GlossaryTermFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_TagFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_CustomCondition"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "not"
+            ],
+            "type": "object"
+          },
+          "_Or": {
+            "additionalProperties": false,
+            "description": "Represents an OR conjunction of filters.",
+            "properties": {
+              "or": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/_And"
+                    },
+                    {
+                      "$ref": "#/$defs/_Or"
+                    },
+                    {
+                      "$ref": "#/$defs/_Not"
+                    },
+                    {
+                      "$ref": "#/$defs/_EntityTypeFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_EntitySubtypeFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_StatusFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_PlatformFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_DomainFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_ContainerFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_EnvFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_OwnerFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_GlossaryTermFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_TagFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_CustomCondition"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "or"
+            ],
+            "type": "object"
+          },
+          "_OwnerFilter": {
+            "additionalProperties": false,
+            "description": "Filter for entities owned by specific users or groups.",
+            "properties": {
+              "owner": {
+                "description": "The owner to filter on. Should be user or group URNs.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "owner"
+            ],
+            "type": "object"
+          },
+          "_PlatformFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "platform": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "platform"
+            ],
+            "type": "object"
+          },
+          "_StatusFilter": {
+            "additionalProperties": false,
+            "description": "Filter for the status of entities during search.\n\nIf not explicitly specified, the NOT_SOFT_DELETED status filter will be applied.",
+            "properties": {
+              "status": {
+                "$ref": "#/$defs/RemovedStatusFilter"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
+          "_TagFilter": {
+            "additionalProperties": false,
+            "description": "Filter for entities associated with specific tags.",
+            "properties": {
+              "tag": {
+                "description": "The tag to filter on. Should be tag URNs.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "tag"
+            ],
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_lineage",
+      "description": "Get upstream or downstream lineage for any entity, including datasets, schemaFields, dashboards, charts, etc.\n\n    Set upstream to True for upstream lineage, False for downstream lineage.\n    Set `column: null` to get lineage for entire dataset or for entity type other than dataset.\n    Setting max_hops to 3 is equivalent to unlimited hops.\n    Usage and format of filters is same as that in search tool.\n\n    PAGINATION:\n    Use offset to paginate through large lineage graphs:\n    - offset=0, max_results=30 → first 30 entities\n    - offset=30, max_results=30 → next 30 entities\n\n    Note: Token budget constraints may return fewer entities than max_results.\n    Check the returned metadata (hasMore, returned, etc.) to understand truncation.\n\n    QUERY PARAMETER - Search within lineage results:\n    You can filter lineage results using the `query` parameter with same /q syntax as search tool:\n    - /q workspace.growthgestaofin → find tables in specific schema\n    - /q customer+transactions → find entities with both terms\n    - /q looker OR tableau → find dashboards on either platform\n    - /q * → get all lineage results (default)\n\n    Examples:\n    - Find specific table in 643 downstreams: query=\"workspace.growthgestaofin.qs_retention\"\n    - Find Looker dashboards in lineage: query=\"/q tag:looker\"\n    - Get all results: query=\"*\" or omit parameter\n\n    COUNT PARAMETER - Control result size:\n    - Default: 30 results\n    - For aggregation: count=30 is sufficient (facets computed on ALL items server-side)\n    - For finding specific item: Increase count or use query to filter\n    - Example: count=100 for larger result sets\n\n    WHEN TO USE QUERY vs COUNT:\n    - User asks \"is X affected?\" → Use query to filter for X specifically\n    - Large lineage (>30 items) → Keep count=30, use facets for aggregation\n    - Need complete list → Increase count only if total ≤100\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urn": {
+            "type": "string"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/_And"
+              },
+              {
+                "$ref": "#/$defs/_Or"
+              },
+              {
+                "$ref": "#/$defs/_Not"
+              },
+              {
+                "$ref": "#/$defs/_EntityTypeFilter"
+              },
+              {
+                "$ref": "#/$defs/_EntitySubtypeFilter"
+              },
+              {
+                "$ref": "#/$defs/_StatusFilter"
+              },
+              {
+                "$ref": "#/$defs/_PlatformFilter"
+              },
+              {
+                "$ref": "#/$defs/_DomainFilter"
+              },
+              {
+                "$ref": "#/$defs/_ContainerFilter"
+              },
+              {
+                "$ref": "#/$defs/_EnvFilter"
+              },
+              {
+                "$ref": "#/$defs/_OwnerFilter"
+              },
+              {
+                "$ref": "#/$defs/_GlossaryTermFilter"
+              },
+              {
+                "$ref": "#/$defs/_TagFilter"
+              },
+              {
+                "$ref": "#/$defs/_CustomCondition"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "upstream": {
+            "default": true,
+            "type": "boolean"
+          },
+          "max_hops": {
+            "default": 1,
+            "type": "integer"
+          },
+          "max_results": {
+            "default": 30,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "urn"
+        ],
+        "$defs": {
+          "RemovedStatusFilter": {
+            "description": "Filter for the status of entities during search.",
+            "enum": [
+              "NOT_SOFT_DELETED",
+              "ALL",
+              "ONLY_SOFT_DELETED"
+            ],
+            "type": "string"
+          },
+          "_And": {
+            "additionalProperties": false,
+            "description": "Represents an AND conjunction of filters.",
+            "properties": {
+              "and": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/_And"
+                    },
+                    {
+                      "$ref": "#/$defs/_Or"
+                    },
+                    {
+                      "$ref": "#/$defs/_Not"
+                    },
+                    {
+                      "$ref": "#/$defs/_EntityTypeFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_EntitySubtypeFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_StatusFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_PlatformFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_DomainFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_ContainerFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_EnvFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_OwnerFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_GlossaryTermFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_TagFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_CustomCondition"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "and"
+            ],
+            "type": "object"
+          },
+          "_ContainerFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "container": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "direct_descendants_only": {
+                "default": false,
+                "description": "If true, only entities that are direct descendants of the container will be returned.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "container"
+            ],
+            "type": "object"
+          },
+          "_CustomCondition": {
+            "additionalProperties": false,
+            "description": "Represents a single field condition.",
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "condition": {
+                "enum": [
+                  "CONTAIN",
+                  "EQUAL",
+                  "IEQUAL",
+                  "IN",
+                  "EXISTS",
+                  "GREATER_THAN",
+                  "GREATER_THAN_OR_EQUAL_TO",
+                  "LESS_THAN",
+                  "LESS_THAN_OR_EQUAL_TO",
+                  "START_WITH",
+                  "END_WITH",
+                  "DESCENDANTS_INCL",
+                  "ANCESTORS_INCL",
+                  "RELATED_INCL"
+                ],
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "field",
+              "condition",
+              "values"
+            ],
+            "type": "object"
+          },
+          "_DomainFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "domain": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "domain"
+            ],
+            "type": "object"
+          },
+          "_EntitySubtypeFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "entity_subtype": {
+                "description": "The entity subtype to filter on. Can be 'Table', 'View', 'Source', etc. depending on the native platform's concepts.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "entity_subtype"
+            ],
+            "type": "object"
+          },
+          "_EntityTypeFilter": {
+            "additionalProperties": false,
+            "description": "Filter for specific entity types.\n\nIf no entity type filter is specified, we will search all entity types in the\ndefault search set, mirroring the behavior of the DataHub UI.",
+            "properties": {
+              "entity_type": {
+                "description": "The entity type to filter on. Can be 'dataset', 'chart', 'dashboard', 'corpuser', 'dataProduct', etc.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "entity_type"
+            ],
+            "type": "object"
+          },
+          "_EnvFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "env": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "env"
+            ],
+            "type": "object"
+          },
+          "_GlossaryTermFilter": {
+            "additionalProperties": false,
+            "description": "Filter for entities associated with specific glossary terms.",
+            "properties": {
+              "glossary_term": {
+                "description": "The glossary term to filter on. Should be glossary term URNs.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "glossary_term"
+            ],
+            "type": "object"
+          },
+          "_Not": {
+            "additionalProperties": false,
+            "description": "Represents a NOT filter.",
+            "properties": {
+              "not": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/_And"
+                  },
+                  {
+                    "$ref": "#/$defs/_Or"
+                  },
+                  {
+                    "$ref": "#/$defs/_Not"
+                  },
+                  {
+                    "$ref": "#/$defs/_EntityTypeFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_EntitySubtypeFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_StatusFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_PlatformFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_DomainFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_ContainerFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_EnvFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_OwnerFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_GlossaryTermFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_TagFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/_CustomCondition"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "not"
+            ],
+            "type": "object"
+          },
+          "_Or": {
+            "additionalProperties": false,
+            "description": "Represents an OR conjunction of filters.",
+            "properties": {
+              "or": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/_And"
+                    },
+                    {
+                      "$ref": "#/$defs/_Or"
+                    },
+                    {
+                      "$ref": "#/$defs/_Not"
+                    },
+                    {
+                      "$ref": "#/$defs/_EntityTypeFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_EntitySubtypeFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_StatusFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_PlatformFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_DomainFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_ContainerFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_EnvFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_OwnerFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_GlossaryTermFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_TagFilter"
+                    },
+                    {
+                      "$ref": "#/$defs/_CustomCondition"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "or"
+            ],
+            "type": "object"
+          },
+          "_OwnerFilter": {
+            "additionalProperties": false,
+            "description": "Filter for entities owned by specific users or groups.",
+            "properties": {
+              "owner": {
+                "description": "The owner to filter on. Should be user or group URNs.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "owner"
+            ],
+            "type": "object"
+          },
+          "_PlatformFilter": {
+            "additionalProperties": false,
+            "properties": {
+              "platform": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "platform"
+            ],
+            "type": "object"
+          },
+          "_StatusFilter": {
+            "additionalProperties": false,
+            "description": "Filter for the status of entities during search.\n\nIf not explicitly specified, the NOT_SOFT_DELETED status filter will be applied.",
+            "properties": {
+              "status": {
+                "$ref": "#/$defs/RemovedStatusFilter"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
+          "_TagFilter": {
+            "additionalProperties": false,
+            "description": "Filter for entities associated with specific tags.",
+            "properties": {
+              "tag": {
+                "description": "The tag to filter on. Should be tag URNs.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "tag"
+            ],
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_dataset_queries",
+      "description": "Get SQL queries associated with a dataset or column to understand usage patterns.\n\n    This tool retrieves actual SQL queries that reference a specific dataset or column.\n    Useful for understanding how data is used, common JOIN patterns, typical filters,\n    and aggregation logic.\n\n    PARAMETERS:\n\n    source - Filter by query origin:\n    - \"MANUAL\": Queries written by users in query editors (real SQL patterns)\n    - \"SYSTEM\": Queries extracted from BI tools/dashboards (production usage)\n    - null: Return both types (default)\n\n    COMMON USE CASES:\n\n    1. SQL Generation - Learn real query patterns:\n       get_dataset_queries(urn, source=\"MANUAL\", count=5-10)\n       → See how users actually write SQL against this table\n       → Discover common JOINs, aggregations, filters\n       → Match organizational SQL conventions and patterns\n\n    2. Production usage analysis:\n       get_dataset_queries(urn, source=\"SYSTEM\", count=20)\n       → See how dashboards and reports query this data\n       → Understand which queries run in production\n       → Identify critical query patterns\n\n    3. Column usage patterns:\n       get_dataset_queries(urn, column=\"customer_id\", source=\"MANUAL\", count=5)\n       → See how a specific column is used in queries\n       → Learn filtering and grouping patterns for that column\n       → Discover relationships via JOIN patterns\n\n    4. General usage exploration:\n       get_dataset_queries(urn, count=10)\n       → Get mix of manual and system queries\n       → Understand overall table usage\n\n    EXAMPLES:\n\n    - Get manual queries for SQL generation:\n      get_dataset_queries(\n          urn=\"urn:li:dataset:(urn:li:dataPlatform:snowflake,prod.sales.orders,PROD)\",\n          source=\"MANUAL\",\n          count=10\n      )\n\n    - Get dashboard queries (production usage):\n      get_dataset_queries(\n          urn=\"urn:li:dataset:(...)\",\n          source=\"SYSTEM\",\n          count=20\n      )\n\n    - Column-specific query patterns:\n      get_dataset_queries(\n          urn=\"urn:li:dataset:(...)\",\n          column=\"created_at\",\n          source=\"MANUAL\",\n          count=5\n      )\n\n    RESPONSE STRUCTURE:\n    - total: Total number of queries matching criteria\n    - start: Starting offset\n    - count: Number of results returned\n    - queries: Array of query objects with:\n      - urn: Query identifier\n      - properties.statement.value: The actual SQL text\n      - properties.statement.language: Query language (SQL, etc.)\n      - properties.source: MANUAL or SYSTEM\n      - properties.name: Optional query name\n      - platform: Source platform\n      - subjects: Referenced datasets/columns (deduplicated to dataset URNs)\n\n    ANALYZING RETRIEVED QUERIES:\n    Once you retrieve queries, examine the SQL statements to identify:\n    - JOIN patterns: Which tables are joined? On what keys?\n    - Aggregations: Common SUM, COUNT, AVG, GROUP BY patterns\n    - Filters: Typical WHERE clauses, date range logic\n    - Column usage: Which columns appear frequently vs rarely\n    - CTEs and subqueries: Complex query structures\n\n    BEST PRACTICES:\n    - For SQL generation: Use source=\"MANUAL\" (count=5-10) to see real user patterns\n    - For production analysis: Use source=\"SYSTEM\" to see dashboard/report queries\n    - Start with moderate count (5-10) to avoid overwhelming context\n    - If no queries found (total=0), proceed without query examples - not all tables have queries\n    - Parse the SQL statements yourself to find patterns - they are not full-text searchable\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urn": {
+            "type": "string"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "MANUAL",
+                  "SYSTEM"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start": {
+            "default": 0,
+            "type": "integer"
+          },
+          "count": {
+            "default": 10,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "urn"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_entities",
+      "description": "Get detailed information about one or more entities by their DataHub URNs.\n\n    IMPORTANT: Pass an array of URNs to retrieve multiple entities in a single call - this is much\n    more efficient than calling this tool multiple times. When examining search results, always pass\n    an array with the top 3-10 result URNs to compare and find the best match.\n\n    Accepts an array of URNs or a single URN. Supports all entity types including datasets,\n    assertions, incidents, dashboards, charts, users, groups, and more. The response fields vary\n    based on the entity type.\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "urns"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_schema_fields",
+      "description": "List schema fields for a dataset, with optional keyword filtering and pagination.\n\n    Useful when schema fields were truncated in search results (schemaFieldsTruncated present)\n    and you need to explore specific columns. Supports pagination for large schemas.\n\n    Args:\n        urn: Dataset URN\n        keywords: Optional keywords to filter schema fields (OR matching).\n                 - Single string: Treated as one keyword (NOT split on whitespace). Use for field names or exact phrases.\n                 - List of strings: Multiple keywords, matches any (OR logic).\n                 - None or empty list: Returns all fields in priority order (same as get_entities).\n                 Matches against fieldPath, description, label, tags, and glossary terms.\n                 Matching fields are returned first, sorted by match count.\n        limit: Maximum number of fields to return (default: 100)\n        offset: Number of fields to skip for pagination (default: 0)\n\n    Returns:\n        Dictionary with:\n        - urn: The dataset URN\n        - fields: List of schema fields (paginated)\n        - totalFields: Total number of fields in the schema\n        - returned: Number of fields actually returned\n        - remainingCount: Number of fields not included after offset (accounts for limit and token budget)\n        - matchingCount: Number of fields that matched keywords (if keywords provided, None otherwise)\n        - offset: The offset used\n\n    Examples:\n        # Single keyword (string) - search for exact field name or phrase\n        list_schema_fields(urn=\"urn:li:dataset:(...)\", keywords=\"user_email\")\n        # Returns fields matching \"user_email\" (like user_email_address, primary_user_email)\n\n        # Multiple keywords (list) - OR matching\n        list_schema_fields(urn=\"urn:li:dataset:(...)\", keywords=[\"email\", \"user\"])\n        # Returns fields containing \"email\" OR \"user\" (user_email, contact_email, user_id, etc.)\n\n        # Pagination through all fields\n        list_schema_fields(urn=\"urn:li:dataset:(...)\", limit=100, offset=0)   # First 100\n        list_schema_fields(urn=\"urn:li:dataset:(...)\", limit=100, offset=100) # Next 100\n\n        # Combine filtering + pagination\n        list_schema_fields(urn=\"urn:li:dataset:(...)\", keywords=[\"user\"], limit=50, offset=0)\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urn": {
+            "type": "string",
+            "description": "Dataset URN"
+          },
+          "keywords": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional keywords to filter schema fields (OR matching).\n     - Single string: Treated as one keyword (NOT split on whitespace). Use for field names or exact phrases.\n     - List of strings: Multiple keywords, matches any (OR logic).\n     - None or empty list: Returns all fields in priority order (same as get_entities).\n     Matches against fieldPath, description, label, tags, and glossary terms.\n     Matching fields are returned first, sorted by match count."
+          },
+          "limit": {
+            "default": 100,
+            "type": "integer",
+            "description": "Maximum number of fields to return (default: 100)"
+          },
+          "offset": {
+            "default": 0,
+            "type": "integer",
+            "description": "Number of fields to skip for pagination (default: 0)"
+          }
+        },
+        "required": [
+          "urn"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_lineage_paths_between",
+      "description": "Get detailed lineage path(s) between two specific entities or columns.\n\n    Returns the paths array from searchAcrossLineage, showing the exact transformation\n    chain(s) including intermediate entities, columns, and transformation query URNs.\n\n    Unlike get_lineage() which returns all lineage targets with compact lineageColumns,\n    this tool focuses on ONE specific target and returns detailed path information.\n\n    Args:\n        source_urn: URN of the source dataset\n        target_urn: URN of the target dataset\n        source_column: Optional column name in source dataset\n        target_column: Optional column name in target dataset (required if source_column provided)\n        direction: Optional direction to search. If None (default), automatically discovers\n                  the path by trying downstream first, then upstream. Specify \"downstream\" or\n                  \"upstream\" explicitly for better performance if you know the direction.\n\n    Returns:\n        Dictionary with:\n        - source: Source entity/column info\n        - target: Target entity/column info\n        - paths: Array of path objects from GraphQL (with QUERY URNs)\n        - pathCount: Number of paths found\n\n    Examples:\n        # Column-level paths\n        paths_result = get_lineage_paths_between(\n            source_urn=\"urn:li:dataset:(urn:li:dataPlatform:snowflake,db.schema.base_table,PROD)\",\n            target_urn=\"urn:li:dataset:(urn:li:dataPlatform:snowflake,db.schema.final_table,PROD)\",\n            source_column=\"user_id\",\n            target_column=\"customer_id\"\n        )\n        # Returns paths with QUERY URNs showing transformation chain\n\n        # Fetch SQL for specific query of interest\n        query_details = get_entities(paths_result[\"paths\"][0][\"path\"][1][\"urn\"])\n\n        # Dataset-level paths (auto-discover direction)\n        get_lineage_paths_between(\n            source_urn=\"urn:li:dataset:(...):base_table\",\n            target_urn=\"urn:li:dataset:(...):final_table\"\n        )\n\n        # Explicit direction for better performance\n        get_lineage_paths_between(\n            source_urn=\"urn:li:dataset:(...):base_table\",\n            target_urn=\"urn:li:dataset:(...):final_table\",\n            direction=\"downstream\"\n        )\n    ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source_urn": {
+            "type": "string",
+            "description": "URN of the source dataset"
+          },
+          "target_urn": {
+            "type": "string",
+            "description": "URN of the target dataset"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional column name in source dataset"
+          },
+          "target_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional column name in target dataset (required if source_column provided)"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "enum": [
+                  "upstream",
+                  "downstream"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional direction to search. If None (default), automatically discovers\n      the path by trying downstream first, then upstream. Specify \"downstream\" or\n      \"upstream\" explicitly for better performance if you know the direction."
+          }
+        },
+        "required": [
+          "source_urn",
+          "target_urn"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "datahub",
+    "version": "3.4.8"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 34987,
+  "stderr": "/pkg/mcp_server_datahub/tools/save_document.py:23: ExperimentalWarning: The new datahub SDK (e.g. datahub.sdk.*) is experimental. Our typical backwards-compatibility and stability guarantees do not apply to this code. When it's promoted to stable, the import path will change from `from datahub.sdk import ...` to `from datahub import ...`.\n  from datahub.sdk import Document\n2026-10-12 10:34:22.118 | INFO     | mcp_server_datahub.mcp_server:<module>:609 - Default view application ENABLED (cache TTL: 5 minutes)\n2026-10-12 10:34:22.121 | INFO     | mcp_server_datahub.mcp_server:register_all_tools:2807 - Registering MCP tools (is_oss=True)\n2026-10-12 10:34:22.161 | INFO     | mcp_server_datahub.mcp_server:register_mutation_tools:2572 - Mutation Tools DISABLED MCP Server.\n2026-10-12 10:34:22.161 | INFO     | mcp_server_datahub.mcp_server:register_user_tools:2672 - User Tools DISABLED MCP Server.\nWARNING:root:Could not connect to DataHub: No ~/.datahubenv file found, and no configuration was found in environment variables. Run `datahub init` to create a ~/.datahubenv file.\n[10/12/26 10:34:22] INFO     Starting MCP server 'datahub' with transport.py:241\n                             transport 'stdio'                                  \nINFO:mcp.server.lowlevel.server:Processing request of type ListToolsRequest\n2026-10-12 10:34:22.271 | DEBUG    | mcp_server_datahub.document_tools_middleware:_query_documents_exist_cached:92 - Document check cache miss, querying DataHub\n2026-10-12 10:34:22.272 | INFO     | mcp_server_datahub.document_tools_middleware:filter_document_tools:175 - Failed to check if documents exist (treating as no documents), filtering out tools: frozenset({'search_documents', 'grep_documents'}). Error: <ContextVar name='_mcp_dh_client' at 0x7fa3fe696610>\n2026-10-12 10:34:22.272 | INFO     | mcp_server_datahub.document_tools_middleware:filter_document_tools:186 - No documents in catalog, filtering out tools: frozenset({'search_documents', 'grep_documents'})\n"
+}

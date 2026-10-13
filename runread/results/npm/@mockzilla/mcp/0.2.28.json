@@ -1,0 +1,1036 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@mockzilla/mcp",
+  "version": "0.2.28",
+  "integrity": {
+    "dist": "sha512-nKaxXQUNdlBwd02/3zLG9FUngs8vifaUthe26rYI+KYOFh1Iae2iM2QvAfJUjyOWBma5EVVXU2nq+ah0Ggv2zQ==",
+    "installed": "sha512-nKaxXQUNdlBwd02/3zLG9FUngs8vifaUthe26rYI+KYOFh1Iae2iM2QvAfJUjyOWBma5EVVXU2nq+ah0Ggv2zQ=="
+  },
+  "bin": "node_modules/@mockzilla/mcp/./bin/cli.js",
+  "installScriptsRan": false,
+  "envNames": [
+    "MOCKZILLA_TOKEN",
+    "MOCKZILLA_MCP_URL",
+    "MOCKZILLA_MANAGED_PORT"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-12T12:08:33.720Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "check_cli",
+      "description": "Check whether the mockzilla CLI is available — either on the system PATH, in the bridge's own cache (~/.cache/mockzilla-mcp/), or via a `go run` invocation. Call FIRST when the user wants to try mockzilla locally. If nothing resolves, the response carries `install_options`; suggest `install_cli` to the user and ask them which method (download / go-install / go-run) they prefer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "install_cli",
+      "description": "Install the mockzilla CLI for this user. Three methods — ASK the user which one they want before calling:\n  • download (recommended): fetch the prebuilt binary for this OS/arch from github.com/mockzilla/mockzilla releases (~38MB). Fast, no toolchain needed.\n  • go-install: run `go install <module>@v<version>` to compile from source. Needs Go on PATH.\n  • go-run: don't install at all — the bridge stores a `go run <module>@v<version>` invocation. First serve_locally compiles into Go's module cache; later runs are instant. Needs Go.\nFiles land in the bridge's own cache, never on system PATH; blow it away with `rm -rf ~/.cache/mockzilla-mcp`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "download",
+              "go-install",
+              "go-run"
+            ],
+            "default": "download"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "serve_locally",
+      "description": "Start ONE mockzilla portable mock server on this machine that serves any number of APIs together — no mockzilla account needed. Pass `input` as a single spec path / directory / public https URL, OR an array of them to combine multiple APIs into the same server (each becomes a service mounted at /<service>/...). Returns {url, port, pid, services} plus `example_endpoints`, callable URLs for a single spec. Use one of those rather than guessing a path: each service answers under its mount prefix, not at the spec's bare path. Pair with `stop_locally(pid)` to clean up. Prefer this over `deploy_mock_from_*` whenever the user says 'try locally', 'experiment', or 'play with' — those tools create persistent hosted bundles, this one is ephemeral. The bridge only runs ONE local server at a time on purpose: if the user wants more APIs, stop the current server and restart with all of them in `input`.\n\nTo test how a client handles a slow or failing API, pass `latency` and/or `errors`. These and `mount`/`context` work only when `input` is a single spec or single-service folder.\n\nIf the user names a well-known API (stripe, twilio, github, openai, slack, etc.) WITHOUT providing a URL, recall the public OpenAPI spec URL from your training knowledge and pass that. Do NOT pass a catalog ID or slug from `list_catalog_products` — that catalog is for the HOSTED `deploy_mock_from_catalog` flow, its ids are not URLs. Examples of public OpenAPI URLs:\n  • Stripe: https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json\n  • Twilio: https://raw.githubusercontent.com/twilio/twilio-oai/main/spec/json/twilio_api_v2010.json\n  • GitHub: https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json\n  • Petstore: https://petstore3.swagger.io/api/v3/openapi.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              }
+            ],
+            "description": "Spec file path(s), directory, or public OpenAPI URL(s). Pass an array to combine multiple APIs into one server."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Port to bind on. Omit or pass 0 to let the OS pick a free port."
+          },
+          "latency": {
+            "type": "string",
+            "description": "Delay added to every response, as a Go duration: \"100ms\", \"1.5s\"."
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            "description": "Error injection by cumulative percentile, keys p1 to p100. {\"p5\": 500, \"p10\": 503} returns 500 for 5% of requests and 503 for the next 5%."
+          },
+          "mount": {
+            "type": "string",
+            "description": "URL path to mount the service at, e.g. \"pets/v2\"."
+          },
+          "context": {
+            "type": "string",
+            "description": "Path to a flat context YAML of replacement values for generated data."
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "call_endpoint",
+      "description": "Make an HTTP request to a URL and return {status, headers, body}. Use this to demonstrate a mock by hitting it after `serve_locally` (e.g. `http://localhost:PORT/openapi/pet/findByStatus`), to inspect the admin API (`/.services` returns the registered services, `/healthz` for liveness), or to verify a freshly-mocked endpoint works. Default scope is localhost only; pass `allow_remote: true` for arbitrary URLs (rare — the bridge isn't a general-purpose HTTP client).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "HEAD",
+              "OPTIONS"
+            ],
+            "default": "GET"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "body": {},
+          "allow_remote": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "mock_endpoint",
+      "description": "Quickly mock a single HTTP endpoint without writing an OpenAPI spec. Pass `method` (default GET), `path` (the EXACT HTTP path the user described, including all segments), and the `response` body (object → JSON, string → text). The bridge writes the response into a managed static dir at ~/.cache/mockzilla-mcp/mocks/ and (re)starts a single shared mockzilla server pointing at it.\n\nPass `path` AS IS. Do NOT prepend or duplicate any segment. The bridge derives the service name from the first segment for internal grouping, but it does not change the URL the user hits. Examples:\n  • User says `GET /pets/{id}` → call mock_endpoint with path=`/pets/{id}` → URL is http://HOST:PORT/pets/{id}\n  • User says `POST /orders` → path=`/orders` → URL is http://HOST:PORT/orders\n  • User says `GET /v1/users/me` → path=`/v1/users/me` → URL is http://HOST:PORT/v1/users/me\n\nPass `status` and/or `headers` to mock a failure or a redirect with a real body: `status: 404` with an error payload, `201` with a `Location`, `429` with `Retry-After`. Omit `response` to send no body at all, which 204 and 304 require. These need mockzilla 2.8.20 or newer; the tool says so if the installed CLI is older. To fail a share of requests instead of every one, use `serve_locally` with `errors`.\n\nPath placeholders like `{id}` are stored as literal directory names — by default ALL placeholder values share the same response. To return different responses for specific values, call mock_endpoint again with a literal value (e.g. /pets/123).\n\nCalling this multiple times accumulates endpoints in the same server — adding `POST /pets` after `GET /pets/{id}` keeps both. Mutually exclusive with `serve_locally`: stop any ad-hoc server first. See `mockzilla_docs_search('static directory')` for the underlying convention.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "HEAD",
+              "OPTIONS"
+            ],
+            "default": "GET"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path beginning with /. First segment is the service name."
+          },
+          "response": {
+            "description": "Response body. Object → JSON. String → text. Default {}."
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 200,
+            "maximum": 599,
+            "default": 200,
+            "description": "Response status. Omit `response` alongside it for a body-less response, which is what 204 and 304 need."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Extra response headers, e.g. {\"Location\": \"/orders/42\"}. A Content-Type here wins over `content_type`."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "Override content type. Inferred from response type if omitted (object → application/json, string → text/plain)."
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_mock_endpoints",
+      "description": "List all endpoints currently mocked via `mock_endpoint`. Returns {endpoints: [{method, service, path, status, headers?, file}], server_url, ui_url}. An endpoint with `body: null` answers with no body. If a managed server is running, `ui_url` is the mockzilla UI (opens in a browser, shows endpoints grouped by service plus request inspection). Suggest the UI to the user when they want to explore beyond what the agent can show in chat.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "clear_mock_endpoints",
+      "description": "Wipe ALL mocks created via `mock_endpoint` and stop the managed server. Equivalent to `rm -rf ~/.cache/mockzilla-mcp/mocks` plus `stop_locally`. Use when the user wants to start fresh. Does not touch the mockzilla CLI binary or other bridge state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "request_history",
+      "description": "List the requests the running local server has answered, newest first: method, URL, status, content type, how long it took, and where the response came from (generated, upstream, replay or cache). Use it to show the user what their code actually sent, to confirm a call arrived, or to find the request to look at next. Pass `id` together with `service` for one request's full headers and body. Reads the server's own history API, so it needs no account and works entirely on localhost. To ask what is WRONG with the traffic rather than list it, call `diagnose_requests`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "description": "Limit to one service. Omit to read every service the server has."
+          },
+          "id": {
+            "type": "string",
+            "description": "One entry's id, from a previous listing. Needs `service` too. Returns full request and response headers and bodies."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "method": {
+            "type": "string",
+            "description": "Only this HTTP method, e.g. \"POST\"."
+          },
+          "status": {
+            "type": "integer",
+            "description": "Only this exact status code."
+          },
+          "failed_only": {
+            "type": "boolean",
+            "description": "Only responses with status 400 or above.",
+            "default": false
+          },
+          "path_contains": {
+            "type": "string",
+            "description": "Only requests whose URL contains this substring."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "diagnose_requests",
+      "description": "Explain what is going wrong with the traffic the local server has served, and where each response's data came from. Returns a breakdown by source (generated / upstream / replay / cache), by status and by content type, latency p50/p95/max, and a list of concrete findings: upstream failures that silently fell back to a generated mock, 404s from a wrong mount prefix, a body that is JSON under a non-JSON content type, and unusually slow requests. Prefer this over `request_history` when the user asks why a response looks wrong, whether data is real or mocked, or why something is slow. Note that a replayed or cached response never reaches the history log, so a call the user made and cannot find here was most likely served from a recording or the cache rather than not happening. Read-only, localhost only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "description": "Limit to one service. Omit to look at every service."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "How many of the newest requests to examine."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "setup_replay",
+      "description": "Configure replay for a service: record a real response once, then serve it back for every matching request (VCR). Writes a `replay:` block into the service's config.yml.\n\nASK THE USER TWO THINGS BEFORE CALLING:\n1. Record from a real backend, or pin the mock's own output? With `upstream_url` the recording is the real backend's response. Without it, replay pins the generated response so repeat calls stop returning fresh random data, which is often what 'make it stable' means.\n2. One recording for the whole endpoint, or one per input? With no `match` fields the key is method and path only, so EVERY call to POST /foo replays the first response no matter what it sends. Look at what the endpoint actually takes, then ask which fields distinguish one case from another and pass those as `match`.\n\nMatch fields come from three sources: `path` (path variables, ignored unless listed), `body` (dotted paths like `data.items[0].name`, or `\"[0].name\"` for a top-level array, or flat keys for form bodies), and `query`. Returns `recording_scope` spelling out what each endpoint is keyed by. Only writes inside the bridge's own mocks dir; for a folder served from the user's project it returns the YAML and the path for them to apply. Config is read at startup, so restart after.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "description": "Service to record, as named in serve_locally's output."
+          },
+          "endpoints": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Endpoints to record.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Service-relative path, e.g. \"/orders/{id}\". Not the mount prefix."
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "HEAD",
+                    "OPTIONS"
+                  ],
+                  "description": "Omit to match any method."
+                },
+                "match": {
+                  "type": "object",
+                  "description": "Which request values form the recording key. Omit to key on method and path alone (one recording for the endpoint).",
+                  "properties": {
+                    "path": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "body": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "query": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "upstream_url": {
+            "type": "string",
+            "description": "Real backend to record from, e.g. \"https://api.example.com\". Omit to record the mock's own generated responses."
+          },
+          "auto_replay": {
+            "type": "boolean",
+            "default": false,
+            "description": "Record and replay without the X-Mockzilla-Replay header."
+          },
+          "upstream_only": {
+            "type": "boolean",
+            "default": false,
+            "description": "Refuse to record anything that did not come from the upstream. Needs `upstream_url`, or every request answers 502."
+          },
+          "duration": {
+            "type": "string",
+            "description": "How long recordings live, e.g. \"24h\"."
+          },
+          "dir": {
+            "type": "string",
+            "description": "Directory holding the service, when it is not one of the bridge's own mocks."
+          }
+        },
+        "required": [
+          "service",
+          "endpoints"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_replays",
+      "description": "List the replay recordings a service currently holds, so you can tell the user what is pinned and what a matching request will return. Use it after `setup_replay` to confirm a recording was captured, or when a response looks stale and you suspect it is being replayed rather than produced fresh. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "description": "One recording's key, for its full detail."
+          }
+        },
+        "required": [
+          "service"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "check_github_deployable",
+      "description": "Say whether a GitHub repository (or a local folder) would deploy a mock, and what is missing if not. Use it when the user has a repo and asks whether it can serve mocks, or before adding the action to one. Detects which of the two kinds it is: a portable repo of service folders, or a codegen repo that builds a Go server. Returns `problems` (these stop it deploying), `warnings` (it deploys but something costs later, such as no teardown trigger, or specs large enough to exhaust a free simulation's 128MB), and `workflow_to_add` when there is no Mockzilla workflow at all. Read-only: it never changes the repository.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "\"owner/name\" of a repo to inspect."
+          },
+          "dir": {
+            "type": "string",
+            "description": "A local folder to inspect instead."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_github_repos",
+      "description": "List the user's GitHub repositories so you can ASK which one to publish mocks to. Never pick one yourself. `publishes_mocks: true` means that repo already has the Mockzilla workflow, so publishing there updates its existing mock instead of creating another. Useful in clients with no shell, where you cannot run `gh repo list`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "Limit to a user or org."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 30
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "publish_to_github",
+      "description": "Publish mocks to one of the USER'S OWN GitHub repositories and let the Mockzilla action deploy them at a shareable host of their own, https://<label>.api.mockz.io. The label is the repository name, with -2, -3 if it is taken. No Mockzilla account is needed: the first push registers the repository. This is the free path for a user who is not logged in, and a valid choice for one who is when they want the mocks living in a repo and reviewed like code. If they are logged in and just want a quick hosted mock, prefer `deploy_mock_from_*` instead, which also gives history and replays in the app.\n\nASK THE USER FIRST, do not guess:\n1. WHICH REPOSITORY. It is theirs, not one you invent. It can be an existing repo, including an app repo they already have, since this only adds a services folder and a workflow. `list_github_repos` shows the candidates.\n2. PRIVATE OR PUBLIC, if it has to be created. `visibility` is required and has no default. The deployed mock URL is public either way, so say so: whatever is in these responses is readable by anyone with the link.\n\nSIDE EFFECTS: uses the user's own `gh` login, may create a repository, commits and pushes, and triggers a public deploy. An existing services folder is merged into, not replaced, unless `replace` is true; an existing workflow is never overwritten.\n\nMocks here are static: spec-generated or fixed responses. If the user wants real logic or state, this is the wrong tool; that needs the codegen action and a Go server, and this refuses to publish into such a repository. Keep specs small too, since a free simulation has 128MB and a big spec costs far more in memory than on disk: `simplify` first if needed. Then call `wait_for_github_deploy`. The host is picked when the deploy runs, so this tool returns no URL and that one does.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "\"owner/name\" of the user's repo. Created if absent."
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "description": "Required when creating. Ask the user; there is no default."
+          },
+          "source": {
+            "type": "string",
+            "description": "Folder to publish. Defaults to the mocks built by mock_endpoint."
+          },
+          "services_dir": {
+            "type": "string",
+            "description": "Where service folders go in the repo. Defaults to \"services\"; use another path when adding mocks to an existing project.",
+            "default": "services"
+          },
+          "replace": {
+            "type": "boolean",
+            "default": false,
+            "description": "Delete the repo's existing service folder first. Default merges."
+          },
+          "message": {
+            "type": "string",
+            "description": "Commit message."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description for a new repo."
+          }
+        },
+        "required": [
+          "repo",
+          "visibility"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "wait_for_github_deploy",
+      "description": "Wait for the Mockzilla workflow run to finish and return the live mock URL, as the action printed it in the run's log. Mockzilla picks the host when the deploy runs, so this is the one place to get it. Call after `publish_to_github`, or after the user pushes. A first deploy takes a minute or two. If it returns with no conclusion it ran out of time: call again.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 900,
+            "default": 300
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unpublish_from_github",
+      "description": "Take down the mocks a repository serves, freeing its simulation slot. Runs the workflow with `delete: true`, which needs the workflow_dispatch trigger this bridge writes; a repo whose own workflow lacks it cannot be torn down this way, and the result says so. Pass `delete_repo: true` to also delete the repository itself, which is permanent and needs the `delete_repo` scope, so confirm with the user before using it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string"
+          },
+          "delete_repo": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also delete the repository. Permanent. Ask first."
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "stop_locally",
+      "description": "Stop the mockzilla server started by `serve_locally`. Takes no arguments — there's only ever one local server running. Returns {stopped: bool, pid?, reason?}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "mockzilla_docs_topics",
+      "description": "List the Mockzilla docs that ship with this bridge: the product docs from mockzilla.org (what a simulation is, deploying, resilient backends, billing, settings, the CLI and this MCP server) and the open-source engine docs under `engine/` (configuration, contexts, middleware, replay) and the docs of mockzilla-codegen, the Go code generator behind `mockzilla generate`, under `codegen/` (config, types, server, client, MCP, migrating from other generators). Returns each category with its topics' `id`, `title` and one-line `summary`. The docs are files inside the bridge, so this needs no network and no login. Call it before answering a question about Mockzilla, then read the topics that fit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "mockzilla_docs_read",
+      "description": "Return the full markdown of Mockzilla doc topics. Pass `topics` with one or more ids from `mockzilla_docs_topics`, or `category` to read a whole category in one call. A large request returns what fits and lists the rest in `remaining`: read those in a second call. A link to another topic reads as (topic `id`). Each topic carries `url`, its public page, to give the user; don't fetch it, the markdown is the same page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Topic ids from `mockzilla_docs_topics`, e.g. ['getting-started/terminology', 'engine/contexts']."
+          },
+          "category": {
+            "type": "string",
+            "description": "A category slug from `mockzilla_docs_topics`, e.g. 'simulations'."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "mockzilla_docs_search",
+      "description": "Search the Mockzilla docs by keyword. Returns the best matching sections {topic, title, heading, snippet} so you know which topics to read. Use it when no topic title from `mockzilla_docs_topics` clearly fits. Answer from the docs rather than from memory: they describe the product as it is now.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Free-text query, e.g. 'static directory layout'."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bridge_status",
+      "description": "Report the bridge's own version and check whether a newer one is on npm. Returns {bridge_version, bridge_latest, update_available, upgrade_steps}. Call this when the user asks 'is mockzilla-mcp up to date?', or proactively if a tool starts failing in a way that could be a stale-bridge issue.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "login",
+      "description": "Log in to Mockzilla cloud so the hosted tools (deploying mocks, listing simulations, the catalog) become available. Opens the Mockzilla login in the user's browser, where they pick an organization and read-only or read-and-write access. Returns right away with the login `url`. Call it when a hosted tool says it needs a login, then call that tool again once the user approves. Local tools never need it. Side effects: starts a short-lived listener on 127.0.0.1 for the login callback, and saves the login under ~/.config/mockzilla-mcp/.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "logout",
+      "description": "Log out of Mockzilla cloud on this machine. Revokes the connection and deletes the saved login; hosted tools disappear until the next login. Call it when the user asks to log out or to switch organization or access level.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "discover_specs",
+      "description": "Scan a directory and report what mockzilla can do with it: top-level OpenAPI spec files (with title and endpoint count) plus any folders of static endpoint files mockzilla can serve. Returns a `suggested_input` the agent can hand directly to `serve_locally`. Use this when the user says 'I have a folder of specs/files, what's in it?' or 'mock this directory'. Scans one level only: on a tree of spec folders it names the subdirectories to recurse into. A big folder is summarised up to a cap, with `truncated: true` and the full `spec_file_count`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "dir"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "info",
+      "description": "Summarise an OpenAPI spec or .mockz package without serving it. For a spec, returns {title, version, openapi_version, endpoint_count, paths} with operation IDs. For a package, returns its manifest. Pass `input` as a local file or a public https URL. Use this when the user wants to know what's in a spec or package before deciding whether to serve or deploy it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Spec file path, public https URL, or .mockz package."
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "lint",
+      "description": "Check an OpenAPI spec for schemas no value can satisfy, such as an array with a scalar enum or additionalProperties: false next to oneOf properties. Mockzilla can't generate valid responses for these, so requests to affected endpoints fail validation. Returns {clean, defect_count, defects: [{rule, path, detail}], truncated}; at most 50 defects are listed. Pass `input` as a local spec file or a public https URL. Use it before serving or deploying a spec, or when a mock returns unexpected validation errors. OpenAPI 3.x only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Spec file path or public https URL."
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "simplify",
+      "description": "Simplify an OpenAPI spec: drop or reduce union types (anyOf/oneOf), strip x-* extensions, and optionally limit the number of optional properties per schema. Writes the simplified spec to disk and returns its path. Use this when a spec is too large or too complex to mock cleanly (deeply nested unions, hundreds of optional fields) — the output is a faithful subset the agent can hand to `serve_locally`.\n\nOptional-property handling:\n  • omit `optional` to keep every optional property\n  • `optional: N` keeps exactly N per schema (0 drops them all)\n  • `optional_min`/`optional_max` (must come together) picks a random count in that range per schema\n\nPass `config` for a mockzilla-codegen config (codegen.yaml) when the user wants its spec.filter, spec.overlays and spec.prune applied before simplification.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Spec file path or public https URL."
+          },
+          "output": {
+            "type": "string",
+            "description": "Where to write the simplified spec. Omit to write into ~/.cache/mockzilla-mcp/simplified/ and let the bridge pick a name."
+          },
+          "optional": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Keep exactly N optional properties per schema. Mutually exclusive with optional_min/optional_max."
+          },
+          "optional_min": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Range mode lower bound (use with optional_max)."
+          },
+          "optional_max": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Range mode upper bound (use with optional_min)."
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to a mockzilla-codegen config (codegen.yaml). Its spec.filter, spec.overlays and spec.prune apply before simplification."
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "generate",
+      "description": "Generate Go code from an OpenAPI spec with `mockzilla generate`, which is mockzilla-codegen built into the CLI: models by default, and a server, a client or MCP tools when asked. Use it when the user wants typed Go code for an API in their own project: models for a spec, a server to implement, or a client to call it. It is not for mocking: to serve a mock use `serve_locally`, and a mockzilla codegen-mode project is built by its own action.\n\nRuns in `dir`, where relative paths resolve and where `codegen.yaml` is read when it exists. Without a config and without flags it writes models only, to `./gen.go`. Flags win over the config. For anything past the flags (output files per part, naming, validation, templates) write a codegen.yaml first: read the `codegen/` docs, `codegen/config` lists every key.\n\nModes: `write` (default) writes the files; `dry_run` lists the files and parts it would write and writes nothing; `check` writes nothing and reports generated files that are missing or out of date. Reports errors and warnings found in the spec. A part that cannot be generated is left out with a warning, the rest is written. Writes Go files into the user's project in write mode, overwriting generated files from an earlier run; scaffold files are written once and then left alone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dir": {
+            "type": "string",
+            "description": "Absolute path of the folder to run in, usually the Go module or package the code belongs to."
+          },
+          "spec": {
+            "type": "string",
+            "description": "Spec file (relative to dir) or URL. Replaces spec.path of the config. Needed when there is no codegen.yaml."
+          },
+          "config": {
+            "type": "string",
+            "description": "Config file, relative to dir. Defaults to codegen.yaml in dir when it exists. Paths inside it are relative to the config file."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "write",
+              "dry_run",
+              "check"
+            ],
+            "default": "write"
+          },
+          "server": {
+            "type": [
+              "string",
+              "boolean"
+            ],
+            "description": "Router framework for a server: beego, chi, echo, echo-v5, fasthttp, fiber, gin, go-zero, goframe, gorilla-mux, hertz, iris, kratos or std-http (net/http's ServeMux). false leaves out a server the config asks for."
+          },
+          "client": {
+            "type": "boolean",
+            "description": "true generates a client, false leaves out one the config asks for."
+          },
+          "mcp": {
+            "type": "boolean",
+            "description": "true generates MCP tools over the client (so it needs a client too), false leaves them out."
+          },
+          "output": {
+            "type": "string",
+            "description": "Output file, relative to dir. Replaces output.file."
+          },
+          "package": {
+            "type": "string",
+            "description": "Go package name. Defaults to the output folder's name."
+          },
+          "strict": {
+            "type": "boolean",
+            "description": "Fail on a warning too, not only on an error."
+          }
+        },
+        "required": [
+          "dir"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "pack",
+      "description": "Pack a directory of mockzilla services into a `.mockz` archive for easier distribution or sharing. The archive carries a manifest (name, description, mounts, modes, git source) so the runtime can register every service without re-walking the tree. Hand the resulting .mockz to anyone — they can serve it with `serve_locally`, even from a URL. Use this when the user wants to share a working mock setup, snapshot one for a teammate, or publish it.\n\nDefaults: output is `<basename>.mockz` next to `dir`. Git metadata (remote, ref, commit) is auto-embedded when `dir` is inside a git tree — pass `skip_git: true` to suppress.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dir": {
+            "type": "string",
+            "description": "Directory containing services / specs to pack."
+          },
+          "output": {
+            "type": "string",
+            "description": "Output .mockz path. Defaults to <basename>.mockz next to dir."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name embedded in the archive manifest."
+          },
+          "description": {
+            "type": "string",
+            "description": "Free-text description embedded in the manifest."
+          },
+          "min_version": {
+            "type": "string",
+            "description": "Minimum mockzilla version required to load this archive (e.g. '2.5.3'). Useful when the archive relies on newer features."
+          },
+          "skip_git": {
+            "type": "boolean",
+            "description": "Don't auto-embed git remote/ref/commit in the manifest.",
+            "default": false
+          }
+        },
+        "required": [
+          "dir"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_context",
+      "description": "Return the org, role and access (`read` or `write`) the current MCP credential is scoped to. Use this once at the start of a session to know which org you are acting in. A `read` connection cannot deploy; the user has to log in again with write access.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_catalog_products",
+      "description": "List the catalog specs (Stripe, Adyen, etc.) available to attach to a HOSTED sim on mockzilla.org. Returns recommended runtime settings the agent should compare against the org's tier before suggesting a deploy. Pass `search` to substring-match by slug or name. The returned ids/slugs are ONLY usable with `deploy_mock_from_catalog` — they are NOT URLs and NOT valid input for `serve_locally`. If the user wants to try a catalog product locally instead, skip this tool and call `serve_locally` with the public OpenAPI URL for the service (recall it from your training knowledge — Stripe, Twilio, etc. all publish OpenAPI specs on GitHub).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "default": 20
+          },
+          "search": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "deploy_mock_from_catalog",
+      "description": "Create a HOSTED, SHAREABLE mock from a catalog spec (Stripe, Adyen, etc.) on mockzilla.org. The mock persists in the user's account and gets a stable URL anyone with the link can hit. Use this when the user wants something durable, team-visible, or reachable from outside their machine — NOT for ephemeral local exploration (use `serve_locally` for that). Pass `catalog_spec_id` from `list_catalog_products`; `mount_path` defaults to the spec slug. The returned sim is in `deploying` state -- follow up with `wait_for_deploy` to receive the live URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "catalog_spec_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mount_path": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "domain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "catalog_spec_id"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "deploy_mock_from_spec",
+      "description": "Create a HOSTED, SHAREABLE mock on mockzilla.org from an inline OpenAPI 3.0+ spec (YAML or JSON in the `spec` field, 4MB cap). The mock persists in the user's account and gets a stable URL anyone with the link can hit. Use this when the user pastes spec content AND wants a durable, team-visible result — NOT for ephemeral local exploration (use `serve_locally` for that). The returned sim is in `deploying` state — follow up with `wait_for_deploy` to receive the live URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "mount_path": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "domain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "spec"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "deploy_mock_from_url",
+      "description": "Create a HOSTED, SHAREABLE mock on mockzilla.org from an OpenAPI 3.0+ spec at a public https URL. The server fetches the spec (SSRF-protected) and parses it. Use this when the user gives you a spec URL AND wants a durable, team-visible result — NOT for ephemeral local exploration (use `serve_locally` for that, it accepts the same URL form). The returned sim is in `deploying` state -- follow up with `wait_for_deploy` to receive the live URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "spec_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "mount_path": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "domain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "spec_url"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "wait_for_deploy",
+      "description": "Block until a sim's deploy reaches a terminal status (`active` or `failed`) or until `timeout_s` seconds elapse (default 25, max 30). Returns `{sim_id, status, urls: {live, dashboard}}` — `urls.live` is set once the deploy is ACTIVE. On timeout the response carries the current non-terminal status (typically `deploying`); the agent can call `wait_for_deploy` again with the same `sim_id`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sim_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timeout_s": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 25
+          }
+        },
+        "required": [
+          "sim_id"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_sims",
+      "description": "List the sims (deployed mocks) accessible to the current org. Returns a page of sim entries with their refs, statuses, and live URLs. Pass `search` to substring-filter by name or sim_pk, or `sim` to look up exactly one sim_pk.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10
+          },
+          "search": {
+            "type": "string"
+          },
+          "sim": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "mockzilla-bridge",
+    "version": "0.2.28"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 1789,
+  "stderr": "mockzilla-mcp: hosted tools/list failed: Failed to parse URL from smallprint-placeholder\n"
+}

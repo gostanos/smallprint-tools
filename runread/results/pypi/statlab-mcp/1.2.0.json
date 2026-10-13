@@ -1,0 +1,1951 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "pypi",
+  "name": "statlab-mcp",
+  "version": "1.2.0",
+  "integrity": {
+    "dist": "sha256:67033dea456b7aa334ac689a2992fe7417f274101108c539f4dd44dd3bd0ac12",
+    "installed": "sha256:67033dea456b7aa334ac689a2992fe7417f274101108c539f4dd44dd3bd0ac12"
+  },
+  "bin": "statlab-mcp = statlab_mcp.server:main",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/python:3.12-slim-bookworm",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T00:48:17.899Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "describe_statistics",
+      "description": "describe_statistics —— 数据探查组 · 描述性统计（工具 1，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/01_data_exploration_batch1.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json），仅接受本地路径（拒绝 UNC）\n\n返回:\n    成功 {\"status\":\"ok\",\"result\":{...},\"summary\":\"一句话中文结论\"}\n    失败 {\"status\":\"error\",\"message\":\"中文原因\"}（error 时无 result 字段）\n    result 结构见设计文档「工具 1」JSON Schema：\n    {n_rows, n_columns, numeric_columns, non_numeric_columns, fully_missing_columns,\n     columns: {<列名>: {n, mean, median, std, min, q1, q3, max, skew, kurtosis, n_missing}}}\n\n统计定义（SPEC 裁决，测试断言口径）:\n    - 分位数 q1/q3 = linear 插值（=Excel QUARTILE.INC），Series.quantile 默认即 linear；\n    - std 用 ddof=1（=Excel STDEV.S）；\n    - skew = scipy.stats.skew(x, bias=False)（Fisher 样本偏度）；\n    - kurtosis = scipy.stats.kurtosis(x, fisher=True, bias=False)（超额峰度，正态=0）。\n\n边界语义（使用者已裁决）:\n    - 全缺失列：n=0、n_missing=总行数、其余统计键全 null，不中断整表；\n    - 常数列（std=0）：skew/kurtosis=null（方差为 0 无法定义）；\n    - n<2：std/q1/q3=null；n<3：skew/kurtosis=null；\n    - 非数值列忽略统计并列入 non_numeric_columns。\n\n示例:\n    describe_statistics(\"samples/clean.csv\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "describe_statisticsArguments"
+      }
+    },
+    {
+      "name": "data_type_check",
+      "description": "data_type_check —— 数据探查组 · 列类型识别（工具 2，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/01_data_exploration_batch1.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json），仅接受本地路径（拒绝 UNC）\n\n返回:\n    成功 {\"status\":\"ok\",\"result\":{...},\"summary\":\"一句话中文结论\"}\n    失败 {\"status\":\"error\",\"message\":\"中文原因\"}\n    result: {n_rows, n_columns,\n             columns: {<列名>: {detected_type, n_valid, n_missing, dirty_count, note}},\n             issue_summary: {mixed_columns, fully_missing_columns, invalid_date_columns}}\n\n判定树（确定性代码；实现期修订 vs 设计文档：数值先于日期，防 \"123\" 被 to_datetime\n误认成日期；mixed 定义 = 数值或日期转换成功数在 (0, 95%) 区间，全部失败则按\ncategory/text 处理）:\n    1. 全缺失列 → missing（不参与任何转换）\n    2. pandas 数值 dtype → numeric；值全为整数 → integer\n    3. object 列先试 to_numeric(errors=\"coerce\")：成功 ≥95% → numeric\n       （有失配时 dirty_count=失败数，note 给脏值示例；全成功且全整数 → integer）\n    4. 未过数值，再试 to_datetime(errors=\"coerce\")：成功 ≥95% → date\n       （失配 = 非法日期，如 2024-02-30，记 dirty_count 并在 note 列示例）\n    5. 部分可转（成功数在 (0, 95%)）→ mixed（两种转换都失败的值 = 脏值）\n    6. 完全不可转：唯一值 ≤ min(50, 行数×20%) → category（note 给 top3）\n       否则 → text\n\n示例:\n    data_type_check(\"samples/dirty.csv\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "data_type_checkArguments"
+      }
+    },
+    {
+      "name": "missing_report",
+      "description": "missing_report —— 数据探查组 · 缺失报告（工具 3，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/01_data_exploration_batch1.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json），仅接受本地路径（拒绝 UNC）\n\n返回:\n    成功 {\"status\":\"ok\",\"result\":{...},\"summary\":\"一句话中文结论\"}\n    失败 {\"status\":\"error\",\"message\":\"中文原因\"}\n    result: {n_rows, n_columns, total_missing, overall_missing_rate,\n             columns: {<列名>: {n_missing, missing_rate}},\n             complete_rows, rows_with_missing,\n             patterns: [{columns, rows, note}]}\n\n缺失定义: 空单元格与空串在读表层统一为 NaN（read_csv 默认），一律计入缺失；\n全缺失列 rate=1.0 并注记；成对模式 = 两列同时缺失的行数（同源故障信号）；\npatterns 最多 10 条，按缺失行数降序；无缺失时 patterns=[]。\n\n示例:\n    missing_report(\"samples/dirty.csv\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "missing_reportArguments"
+      }
+    },
+    {
+      "name": "correlation_matrix",
+      "description": "correlation_matrix —— 数据探查组 · 相关矩阵（工具 4，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/02_data_exploration_batch2.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json），仅接受本地路径\n    method (str, \"pearson\"): pearson / spearman / kendall / kendalltau（逐对取 scipy，\n        返回对象取 .statistic/.pvalue；pandas corr 无 p 值故不用；kendall 为\n        kendalltau 的官方别名 v1.1.0 起，两者结果完全相同）\n    p_adjust (str, \"fdr_bh\"): none / bonferroni / fdr_bh；默认 BH-FDR 并标注；\n        校正单元 = 实际可计算的上三角对数（常量列对 r/p=null 不参与校正）\n        （statsmodels.multipletests）\n\n返回: 成功 {\"status\":\"ok\",\"result\":{...},\"summary\":\"...\"}；失败 {\"status\":\"error\",...}\nresult: {method, n_pairs, p_adjust_method, excluded_columns,\n         correlation, p_value, n_pairwise}（嵌套全矩阵；对角 r=1.0、p=null；\n         常量列对 r/p=null；n_pairwise 为成对完整样本量）\n\n口径（红队裁决 11）：每对成对完整样本；常量列 r/p=null 不参与校正；\n数值列 >20 拒绝；排除非数值/全缺失列后 <2 列拒绝；p<0.001 只出现在 summary 文案。\n\n示例:\n    correlation_matrix(\"samples/clean.csv\")\n    correlation_matrix(\"samples/clean.csv\", method=\"spearman\", p_adjust=\"none\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          },
+          "method": {
+            "default": "pearson",
+            "title": "Method",
+            "type": "string"
+          },
+          "p_adjust": {
+            "default": "fdr_bh",
+            "title": "P Adjust",
+            "type": "string"
+          }
+        },
+        "title": "correlation_matrixArguments"
+      }
+    },
+    {
+      "name": "outlier_detect",
+      "description": "outlier_detect —— 数据探查组 · 异常值检测（工具 5，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/02_data_exploration_batch2.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json），仅接受本地路径\n    method (str, \"iqr\"): 仅支持 iqr（规格 4 唯一定义；zscore 场景在时序组 rolling_zscore）\n\n口径:\n    IQR 法：lower = Q1 - 1.5*IQR，upper = Q3 + 1.5*IQR（分位数 linear 插值，同 describe）；\n    异常值 = 有效值中 <lower 或 >upper 的值；绝不自动剔除，只报告；\n    数值列有效值 n<4 → IQR 无定义，bounds=null、n_outliers=0；常量列 bounds 相等无异常；\n    非数值列跳过并列入 skipped_columns；单列异常值超 100 个时截断显示并注明。\n\n图（附录 D）: 并列箱线图（异常值红色 scatter）；文件名 outlier_detect_all_YYYYmmdd_HHMMSS.png\n存 reports/plots/；返回 JSON 顶层附加 __image__（绝对路径，禁 base64，与 result 平级）。\n\n示例:\n    outlier_detect(\"samples/dirty.csv\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          },
+          "method": {
+            "default": "iqr",
+            "title": "Method",
+            "type": "string"
+          }
+        },
+        "title": "outlier_detectArguments"
+      }
+    },
+    {
+      "name": "hypothesis_test",
+      "description": "hypothesis_test —— 统计推断组 · 假设检验（工具 6，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/03_inference_batch1.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    column (str): 分析列（须为数值列）\n    test (str, \"one_sample\"): one_sample / independent / paired\n    group_col (str|None): test=independent 时必填，须恰好 2 组且每组 n>=2\n    sample2_col (str|None): test=paired 时必填（与 column 成对对齐）\n    mu0 (float, 0.0): one_sample 的 H0 假设均值\n    alternative (str, \"two_sided\"): two_sided / less / greater\n    alpha (float, 0.05): 显著性水平 ∈ (0,1)\n\n方法（设计文档口径）:\n    one_sample -> scipy.stats.ttest_1samp；independent -> ttest_ind(equal_var=False)\n    （Welch's t，规格硬性规定，df 用 Welch-Satterthwaite 公式手算，跨版本稳定）；\n    paired -> ttest_rel（差值 = column - sample2_col，成正态预检对象）。\n    检验前 Shapiro 预检（3<=n<=5000）：违反只警示不阻断，可转用 nonparametric_test\n    （Wilcoxon/Mann-Whitney）。\n    CI 一律双侧（1-alpha，t 分布）；效应量 Cohen's d（单样本|mean-mu0|/sd、\n    独立 pooled sd、配对差值 sd）。结论文案固定模板 p<alpha 拒绝 H0 / p>=alpha 不能拒绝。\n\n示例:\n    hypothesis_test(\"samples/clean.csv\", column=\"score\", test=\"one_sample\", mu0=70.0)\n    hypothesis_test(\"samples/clean.csv\", column=\"score\", test=\"independent\", group_col=\"category\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Column"
+          },
+          "test": {
+            "default": "one_sample",
+            "title": "Test",
+            "type": "string"
+          },
+          "group_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Group Col"
+          },
+          "sample2_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sample2 Col"
+          },
+          "mu0": {
+            "default": 0,
+            "title": "Mu0",
+            "type": "number"
+          },
+          "alternative": {
+            "default": "two_sided",
+            "title": "Alternative",
+            "type": "string"
+          },
+          "alpha": {
+            "default": 0.05,
+            "title": "Alpha",
+            "type": "number"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "hypothesis_testArguments"
+      }
+    },
+    {
+      "name": "normality_test",
+      "description": "normality_test —— 统计推断组 · 正态性检验（工具 9，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/03_inference_batch1.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    column (str): 分析列（须为数值列）\n    method (str, \"auto\"): auto / shapiro / dagostino\n        auto: n<=5000 -> Shapiro-Wilk（scipy 官方建议 3~5000）；5000<n<=100000 ->\n        D'Agostino-Pearson（scipy.stats.normaltest）；n>100000 -> 中文报错提示抽样\n\n输出: method_used, n, statistic, p_value, skew（Fisher 样本偏度，同 describe）,\n      kurtosis（超额峰度，正态=0）, normal（判定 = p_value > 0.05）,\n      threshold_alpha（固定 0.05 并在输出注明）\n\n边界: n<3 / 常数列（方差 0）/ 显式 shapiro 但 n>5000（scipy 限制）/\n      dagostino 且 n<8（scipy 要求）/ 非数值或缺失列 —— 全部中文报错。\n\n示例:\n    normality_test(\"samples/clean.csv\", column=\"score\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Column"
+          },
+          "method": {
+            "default": "auto",
+            "title": "Method",
+            "type": "string"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "normality_testArguments"
+      }
+    },
+    {
+      "name": "confidence_interval",
+      "description": "confidence_interval —— 统计推断组 · 置信区间（工具 10，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/03_inference_batch1.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    column (str): 分析列（须为数值列）\n    confidence (float, 0.95): 置信水平 ∈ (0,1)\n    method (str, \"mean_t\"): mean_t / bootstrap_median\n        mean_t: mean ± t_{1-α/2, n-1} * sd/√n（sd 用 ddof=1，与 describe 同口径）\n        bootstrap_median: 局部 default_rng(42) 重采样 1000 次取中位数，2.5%/97.5%\n        分位数（percentile 法）——每次调用独立可复现（不依赖全局 rng 状态）\n\n边界: n<3 / confidence 越界 / method 非法 / 非数值或缺列 —— 中文报错；\n      常数列（sd=0）区间退化为点并注明。\n\n示例:\n    confidence_interval(\"samples/clean.csv\", column=\"income\")\n    confidence_interval(\"samples/clean.csv\", column=\"income\", confidence=0.90,\n                        method=\"bootstrap_median\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Column"
+          },
+          "confidence": {
+            "default": 0.95,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "method": {
+            "default": "mean_t",
+            "title": "Method",
+            "type": "string"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "confidence_intervalArguments"
+      }
+    },
+    {
+      "name": "anova_test",
+      "description": "anova_test —— 统计推断组 · 方差分析（工具 7，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/04_inference_batch2.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    group_col (str): 分组列（类别或数值均可，按唯一值分组；2~20 组）\n    value_col (str): 数值列（检验对象）\n    alpha (float, 0.05): 显著性水平 ∈ (0,1)\n\n流程（确定性）:\n    1. 前置：Levene 方差齐性（scipy.stats.levene，稳健中位数版）+ 各组 Shapiro\n       （3<=n<=5000 时执行，违反警示不阻断）\n    2. 方差齐 -> scipy.stats.f_oneway；方差不齐（Levene p<alpha）-> Welch ANOVA\n       （statsmodels.stats.oneway.anova_oneway(use_var=\"unequal\")，避免手写公式出错）\n    3. 事后：齐 -> Tukey HSD（statsmodels pairwise_tukeyhsd，含 p 值与族校正）；\n       不齐 -> Games-Howell（手写：libqsturng.qsturng 学生化极差临界值，\n       se=sqrt(si2/ni+sj2/nj)，显著判定 = |diff| > q*se/sqrt(2)；\n       p 值省略并以\"CI 是否含 0\"判定，输出注明——statsmodels 无现成实现，诚实披露）\n\n示例:\n    anova_test(\"samples/clean.csv\", group_col=\"category\", value_col=\"score\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "group_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Group Col"
+          },
+          "value_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value Col"
+          },
+          "alpha": {
+            "default": 0.05,
+            "title": "Alpha",
+            "type": "number"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "anova_testArguments"
+      }
+    },
+    {
+      "name": "chi_square_test",
+      "description": "chi_square_test —— 统计推断组 · 卡方独立性检验（工具 8，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/04_inference_batch2.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    col_a / col_b (str): 两列类别变量（均须存在；数值列自动等宽分箱 ≤8 箱并注明）\n\n流程（确定性）:\n    1. 分类化：数值列 pd.cut 等宽分箱（箱数=min(8, max(2, 唯一值数))）并注明；\n       类别唯一值 =1 -> error；>50 -> error（防列联表爆炸）\n    2. pd.crosstab 列联表；scipy.stats.chi2_contingency（含期望频数表）\n    3. >20% 单元格期望频数 <5：2x2 -> scipy.stats.fisher_exact（statistic=OR、df=null）；\n       非 2x2 -> 中文报错引导合并类别\n    4. 效应量 Cramér's V = sqrt(chi2/(n*(min(rows,cols)-1)))（chi2 来自 chi2_contingency，\n       fisher 路径同样给出并注明基于卡方近似）\n    5. 结论固定模板；summary 注明\"关联≠因果\"\n\n示例:\n    chi_square_test(\"samples/clean.csv\", col_a=\"category\", col_b=\"category\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "col_a": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Col A"
+          },
+          "col_b": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Col B"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "chi_square_testArguments"
+      }
+    },
+    {
+      "name": "effect_size",
+      "description": "effect_size —— 统计推断组 · 效应量（工具 11，简化实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/04_inference_batch2.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    group_col (str): 分组列（须恰好 2 组）\n    value_col (str): 数值列\n    method (str, \"cohens_d\"): cohens_d / hedges_g / cliff_delta\n    paired (bool, False): True 时两组样本数必须相等，按\"各自有效值序列的\n        第 i 个\"配对（简化语义：无 ID 列时的确定性约定，见设计文档）\n\n口径:\n    cohens_d: |m1-m2|/pooled_sd（pooled_sd 同 hypothesis_test）\n    hedges_g: d * (1 - 3/(4(n1+n2)-9))（小样本修正）\n    cliff_delta: delta = (gt-lt)/(n1*n2)，gt/lt 为所有跨组值对比较计数（numpy 向量化，\n        不依赖 mannwhitneyu 的 U 定义，避免方向歧义）\n    CI: 正态近似 se（d/g: sqrt(1/n1+1/n2+d^2/(2(n1+n2)))；cliff: sqrt((1-delta^2)/(n1*n2))），\n        mean ± 1.96*se；输出注明\"正态近似\"\n    阈值（标注为经验惯例）：d/g 0.2/0.5/0.8（Cohen）；cliff 0.147/0.33/0.474（Romano）\n\n【简化】略过声明: 无 bootstrap CI、无分布假设检验、cliff_delta 无配对版本。\n\n示例:\n    effect_size(\"samples/clean.csv\", group_col=\"category\", value_col=\"score\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "group_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Group Col"
+          },
+          "value_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value Col"
+          },
+          "method": {
+            "default": "cohens_d",
+            "title": "Method",
+            "type": "string"
+          },
+          "paired": {
+            "default": false,
+            "title": "Paired",
+            "type": "boolean"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "effect_sizeArguments"
+      }
+    },
+    {
+      "name": "linear_regression",
+      "description": "linear_regression —— 建模组 · 线性回归（工具 12，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/05_modeling.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    target (str): 连续因变量（数值列）\n    features (list[str]): 自变量（数值列直用；类别列自动 one-hot 并输出映射）\n    add_constant (bool, True): 是否加截距（False 时 GOF 指标参考意义受限，注明）\n    alpha (float, 0.05): 显著性阈值（报告用，∈(0,1)）\n\n口径:\n    statsmodels OLS 矩阵接口（禁 formula）；类别列 get_dummies(drop_first=False) + 映射；\n    零方差列自动剔除并报告；缺失 listwise dropna 并注明\"已剔除 N 行\"；\n    n <= 设计矩阵列数+2 拒绝（无法稳定估计）；VIF>10 标注强共线性；\n    残差 Shapiro + Durbin-Watson；残差诊断图（残差vs拟合 + 直方图，__image__ 顶层）。\n\n示例:\n    linear_regression(\"samples/clean.csv\", target=\"income\", features=[\"age\"])\n    linear_regression(\"samples/clean.csv\", target=\"score\", features=[\"age\", \"category\"])\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
+          },
+          "features": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Features"
+          },
+          "add_constant": {
+            "default": true,
+            "title": "Add Constant",
+            "type": "boolean"
+          },
+          "alpha": {
+            "default": 0.05,
+            "title": "Alpha",
+            "type": "number"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "linear_regressionArguments"
+      }
+    },
+    {
+      "name": "logistic_regression",
+      "description": "logistic_regression —— 建模组 · 逻辑回归（工具 13，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/05_modeling.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    target (str): 二分类目标列（恰好 2 类；类名映射为 0/1 输出 label_mapping）\n    features (list[str]): 数值特征（本工具不做 one-hot，规格未要求；非数值报错）\n    test_size (float, 0.3): train/test 分层划分比例 ∈(0,1)\n    random_state (int, 42): 划分与复制的固定随机种子\n    class_weight (str, \"balanced\"): balanced 用少数类确定性复制实现（statsmodels\n        Logit 无内置类权重，如实披露；复制样本 w=n/(2*n_class) 于训练集内，seed 固定）\n\n固定五项输出（规格硬性）:\n    类别分布 / accuracy（仅对照，受类别不平衡影响）/ 混淆矩阵 / ROC-AUC+95%CI\n    （Hanley-McNeil 正态近似）/ 特征 OR 与 p 值（statsmodels Logit 矩阵接口，\n    OR=exp(beta)）。ConvergenceWarning（完美可分）-> convergence_warning 注明系数不稳定。\n\n示例:\n    logistic_regression(\"tests/fixtures/binary_noisy.csv\", target=\"label\", features=[\"score\"])\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
+          },
+          "features": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Features"
+          },
+          "test_size": {
+            "default": 0.3,
+            "title": "Test Size",
+            "type": "number"
+          },
+          "random_state": {
+            "default": 42,
+            "title": "Random State",
+            "type": "integer"
+          },
+          "class_weight": {
+            "default": "balanced",
+            "title": "Class Weight",
+            "type": "string"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "logistic_regressionArguments"
+      }
+    },
+    {
+      "name": "cluster_analysis",
+      "description": "cluster_analysis —— 建模组 · KMeans 聚类（工具 14，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/05_modeling.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    k (int): 簇数，2 <= k <= 样本数-1（非法中文报错）\n\n口径:\n    仅数值列（非数值列自动排除并列出）；StandardScaler z-score 标准化后\n    KMeans(n_clusters=k, random_state=42, n_init=\"auto\")；质心反标准化回原始单位\n    （标准化空间质心即簇内均值，反标准化后 = 原空间簇均值，可手算核对）；\n    质心解读强制附簇内样本量；轮廓系数（标准化空间）+ k-1/k+1 同 seed 对照。\n\n示例:\n    cluster_analysis(\"samples/clean.csv\", k=3)\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "k": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "K"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "cluster_analysisArguments"
+      }
+    },
+    {
+      "name": "pca_analysis",
+      "description": "pca_analysis —— 建模组 · 主成分分析（工具 15，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/05_modeling.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    n_components (int): 主成分数，1 <= n <= min(样本数, 特征数)（超界中文报错）\n\n口径:\n    仅数值列（自动排除列出）；StandardScaler 标准化后 sklearn PCA（random_state=42，\n    PCA 本身无随机性，仅为接口一致）；输出方差解释率+累积；\n    载荷反标准化 = 成分向量 × 特征标准差（原单位近似权重，规格要求）；\n    载荷图（方差解释条形 + 前两主成分载荷向量，__image__ 顶层）；\n    结论注明\"主成分是特征的线性组合，不等于业务因子\"。\n\n示例:\n    pca_analysis(\"samples/clean.csv\", n_components=2)\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "n_components": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "N Components"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "pca_analysisArguments"
+      }
+    },
+    {
+      "name": "feature_importance",
+      "description": "feature_importance —— 建模组 · 特征重要性（工具 16，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/05_modeling.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    target (str): 目标列（<=20 类 -> 分类随机森林 class_weight=balanced；连续 -> 回归森林）\n    method (str, \"permutation\"): permutation（打乱验证集特征，验证集思想）/\n        impurity（训练集内基尼/方差减少；两者都输出，默认 permutation）\n    n_estimators (int, 200): 森林树数 >=10\n    random_state (int, 42): 森林与划分固定种子\n    n_repeats (int, 10): permutation 专用，打乱次数 >=1\n\n硬性门槛: n < 50 拒绝（规格）；特征重要性排序 + \"重要性≠因果\"尾注。\n\n第 4.1 条实现（确定性）:\n    train_test_split(0.25, random_state) 划分；模型在训练集拟合；impurity 取\n    feature_importances_；permutation 在测试集上打乱（sklearn.inspection.permutation_importance）。\n\n示例:\n    feature_importance(\"samples/clean.csv\", target=\"income\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
+          },
+          "method": {
+            "default": "permutation",
+            "title": "Method",
+            "type": "string"
+          },
+          "n_estimators": {
+            "default": 200,
+            "title": "N Estimators",
+            "type": "integer"
+          },
+          "random_state": {
+            "default": 42,
+            "title": "Random State",
+            "type": "integer"
+          },
+          "n_repeats": {
+            "default": 10,
+            "title": "N Repeats",
+            "type": "integer"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "feature_importanceArguments"
+      }
+    },
+    {
+      "name": "time_series_forecast",
+      "description": "time_series_forecast —— 时序组 · 时间序列预测（工具 17，简化实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/06_timeseries.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    date_col / value_col (str): 日期列与数值列\n    horizon (int): 预测步数，1 <= horizon <= 样本量*50%（超限中文报错）\n\n口径:\n    auto_arima（pmdarima，stepwise=True, random_state=42, max_order=8）自动定阶；\n    季节可估判定（FFT 主频 period 且 n>=2*period）-> SARIMA 否则 ARIMA 并注明；\n    五项统一前置由 _common._prepare_series 完成（插值/聚合/时区等均入 metadata）；\n    输出预测值 + 95% CI（predict(return_conf_int=True)）+ 历史/预测图（__image__ 顶层）；\n    常数列退化为均值预测并注明。\n\n示例:\n    time_series_forecast(\"samples/timeseries.csv\", date_col=\"date\", value_col=\"value\",\n                         horizon=14)\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "date_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Date Col"
+          },
+          "value_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value Col"
+          },
+          "horizon": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Horizon"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "time_series_forecastArguments"
+      }
+    },
+    {
+      "name": "seasonal_decompose",
+      "description": "seasonal_decompose —— 时序组 · 季节分解（工具 18，简化实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/06_timeseries.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    date_col / value_col (str): 日期列与数值列\n    period (int|None, None): 周期；默认 FFT 主频自动估计（_common._estimate_period）\n    model (str, \"auto\"): additive / multiplicative / auto\n        auto: 全正值 -> multiplicative，否则 additive（注明选择依据）\n\n口径:\n    statsmodels.seasonal_decompose(extrapolate_trend=\"freq\")；\n    multiplicative 要求全正值（显式指定且含非正值 -> 中文报错）。\n    输出分量统计 + 最后完整周期季节因子 + 4 子图（__image__ 顶层）。\n\n示例:\n    seasonal_decompose(\"samples/timeseries.csv\", date_col=\"date\", value_col=\"value\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "date_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Date Col"
+          },
+          "value_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value Col"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Period"
+          },
+          "model": {
+            "default": "auto",
+            "title": "Model",
+            "type": "string"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "seasonal_decomposeArguments"
+      }
+    },
+    {
+      "name": "trend_analysis",
+      "description": "trend_analysis —— 时序组 · 趋势分析（工具 19，简化实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/06_timeseries.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    date_col / value_col (str): 日期列与数值列\n    method (str, \"mann_kendall\"): mann_kendall / theil_sen\n\n口径:\n    Mann-Kendall：scipy.stats.kendalltau(y, 时间序号) 的 tau 与 p（MK 检验的\n    tau 统计量 + 正态近似双侧 p，scipy 官方实现，输出注明该口径）；\n    Theil-Sen 斜率：点对斜率中位数（n<=2000 全枚举；n>2000 固定 seed 抽样\n    50000 对并注明）；两种方法都输出 tau/p/slope，method 决定 slope 的计算主口径\n    （theil_sen 时 slope 为点对中位数；mann_kendall 时 slope 同样用 Theil-Sen 斜率，\n    tau 为主统计量）。\n    含季节成分时输出\"趋势结论需谨慎\"警示（设计文档：不校正）。\n\n示例:\n    trend_analysis(\"samples/timeseries.csv\", date_col=\"date\", value_col=\"value\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "date_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Date Col"
+          },
+          "value_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value Col"
+          },
+          "method": {
+            "default": "mann_kendall",
+            "title": "Method",
+            "type": "string"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "trend_analysisArguments"
+      }
+    },
+    {
+      "name": "anomaly_detect",
+      "description": "anomaly_detect —— 时序组 · 时序异常检测（工具 20，简化实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/06_timeseries.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    date_col / value_col (str): 日期列与数值列\n    method (str, \"stl\"): stl / iqr / rolling_zscore\n        stl: statsmodels STL(robust=True) 残差 |resid| > threshold*残差标准差\n             （std(ddof=1) 判据；MAD_std=1.4826*median|resid-median| 对\"主体集中+\n             稀疏厚尾\"残差低估尺度，实现期修订弃用，见 statlab_mcp/docs/design/06）\n        iqr: 一阶差分上 IQR 规则（Q1-1.5IQR / Q3+1.5IQR，同探查组口径），\n             threshold 参数不参与 iqr 判据，索引映射回原行\n        rolling_zscore: 窗口 7 滚动 mean/std（min_periods=3），|z| > threshold\n    threshold (float, 3.0): >0；仅 stl 与 rolling_zscore 使用\n\n保证: 异常点仅报告不剔除；常数序列（尺度 0）无异常并注明。\n\n示例:\n    anomaly_detect(\"samples/timeseries.csv\", date_col=\"date\", value_col=\"value\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "date_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Date Col"
+          },
+          "value_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value Col"
+          },
+          "method": {
+            "default": "stl",
+            "title": "Method",
+            "type": "string"
+          },
+          "threshold": {
+            "default": 3,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "anomaly_detectArguments"
+      }
+    },
+    {
+      "name": "plot_scatter",
+      "description": "plot_scatter —— 可视化组 · 散点图（工具 21，核心实现）。\n\n生成 x-y 散点图，图上标注 Pearson r 与样本量；缺失按成对剔除并报数。\n图协议走 _common.save_plot（附录 D）；返回顶层 __image__ 绝对路径。\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "x_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "X Col"
+          },
+          "y_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Y Col"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "plot_scatterArguments"
+      }
+    },
+    {
+      "name": "plot_histogram",
+      "description": "plot_histogram —— 可视化组 · 直方图（工具 22，核心实现）。\n\n单列分布直方图，图上标 n/mean/std；分箱 = min(40, max(8, ceil(sqrt(n))))。\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Column"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "plot_histogramArguments"
+      }
+    },
+    {
+      "name": "plot_heatmap",
+      "description": "plot_heatmap —— 可视化组 · 相关热力图（工具 23，核心实现）。\n\n全部数值列两两 Pearson 相关热力图（格内标 r；常量列对应 r=null）。\n矩阵用 pandas .corr()（与 correlation_matrix 的 scipy pearsonr 同公式），\n本工具不做 p 值与校正（与工具 4 明确分工）。\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "plot_heatmapArguments"
+      }
+    },
+    {
+      "name": "plot_forecast",
+      "description": "plot_forecast —— 可视化组 · 时序折线图（工具 24，核心实现）。\n\n原值折线 + 7 日移动平均线；**仅作图不预测**（预测见工具 17）。\n五项统一前置由 _common._prepare_series 承载（插值/聚合/时区均报告）。\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "date_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Date Col"
+          },
+          "value_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value Col"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "plot_forecastArguments"
+      }
+    },
+    {
+      "name": "plot_box",
+      "description": "plot_box —— 可视化组 · 箱线图（工具 25，核心实现）。\n\n单列箱线图：图上标五数概括（min/q1/中位/q3/max）与 IQR 异常数（同 outlier_detect 口径，\n但仅单列、无异常点导出表——异常定位请用工具 5）。\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Column"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "plot_boxArguments"
+      }
+    },
+    {
+      "name": "nonparametric_test",
+      "description": "nonparametric_test —— 统计推断组 · 非参数检验（工具 26，核心实现）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/09_inference_batch3.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json）\n    test (str, \"wilcoxon\"): wilcoxon（配对）/ mann_whitney（两组独立）/ kruskal_wallis（多组）\n    column (str): test=wilcoxon 时必填（配对的第一组测量）\n    sample2_col (str): test=wilcoxon 时必填（配对第二组测量）\n    group_col (str): test=mann_whitney / kruskal_wallis 时必填（分组列）\n    value_col (str): test=mann_whitney / kruskal_wallis 时必填（数值列）\n    alpha (float, 0.05): 显著性水平 ∈ (0,1)\n    alternative (str, \"two_sided\"): two_sided / less / greater（仅 wilcoxon 与\n        mann_whitney 生效；kruskal_wallis 恒为双侧）\n\n口径（设计文档 09 钉死）:\n    wilcoxon: scipy.stats.wilcoxon(zero_method=\"wilcox\", correction=False,\n        method=\"auto\")——0 差剔除（zero_method=wilcox 语义）；method=\"auto\"：\n        小样本无 ties 用精确分布，否则正态近似；效应量 matched rank-biserial\n        r = 2×(正秩和)/n(n+1) − 1，等价式 1 − 4W/(n(n+1))（W=scipy 返回的较小秩和），\n        方向以 mean(column − sample2_col) 符号定（column 高为正侧），n=剔除 0 差后的对数。\n    mann_whitney: scipy.stats.mannwhitneyu(use_continuity=True, method=\"auto\")\n        ——注明 ties 时用正态近似含连续性校正；效应量 rank-biserial\n        r = 2U/(n1·n2) − 1（U=scipy 对 group1 的统计量），方向 group1 高为正侧。\n    kruskal_wallis: scipy.stats.kruskal——统计量 H（未做 ties 校正，注明）；\n        效应量 epsilon² = H/(N−1)（= (ΣᵢRᵢ²/nᵢ − 3(N+1))/(N−1)，N 为总样本量），\n        近似解释为\"组间秩差异占总秩变异的比例\"。\n    结论固定模板：p<α 拒绝 H0 / p≥α 不能拒绝；局限声明（非参检验功效通常低于\n    参数检验、ties 处理、样本量）。\n\n边界: 样本不足（wilcoxon 有效对数 n<5；mann_whitney 每组 n<2；kruskal 组数\n    2~20 且每组 n>=2）、差值无变异/常量组、alpha/alternative 非法、NaN/Inf 防御——\n    一律中文报错；无图。\n\n示例:\n    nonparametric_test(\"samples/clean.csv\", test=\"mann_whitney\",\n                       group_col=\"category\", value_col=\"score\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "test": {
+            "default": "wilcoxon",
+            "title": "Test",
+            "type": "string"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Column"
+          },
+          "sample2_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sample2 Col"
+          },
+          "group_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Group Col"
+          },
+          "value_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value Col"
+          },
+          "alpha": {
+            "default": 0.05,
+            "title": "Alpha",
+            "type": "number"
+          },
+          "alternative": {
+            "default": "two_sided",
+            "title": "Alternative",
+            "type": "string"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "nonparametric_testArguments"
+      }
+    },
+    {
+      "name": "power_analysis",
+      "description": "power_analysis —— 统计推断组 · 功效分析/样本量计算（工具 27，v1.1.0 新增）。\n\n回答两类问题：「要检出效应量，需要多少样本」与「给定样本量能检出多大效应 / 实际功效多少」。\n纯封闭公式计算（statsmodels.stats.power 精确非中心 t / 正态近似），零 LLM、确定性输出。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/10_power_analysis.md 同步维护。\n\n参数:\n    scenario (str): one_sample_t（单样本/配对 t，n=总样本）/ two_sample_t（独立两样本\n        t，n=每组样本量）/ two_proportions（两独立比例，n=每组样本量）\n    effect_size (float|None): Cohen's d（仅 t 系场景）；与 n 至少提供一个；必须 >0 的有限数\n    n (int|None): 样本量；与 effect_size 至少提供一个；必须是 >=2 的整数\n    p1 (float|None), p2 (float|None): 两个总体比例 ∈(0,1)，仅 two_proportions 场景且须成对；\n        工具内部换算 Cohen's h = 2·arcsin√p₁ − 2·arcsin√p₂ 并随 result/summary 报告\n    alpha (float, 0.05): 显著性水平 ∈(0,1)\n    power_target (float, 0.80): 目标功效（求 n 时使用）∈(0,1)\n    alternative (str, \"two_sided\"): two_sided / less / greater\n\n模式决策表（任务书钉死）:\n    只给效应侧 → mode=\"solve_n\"（求 n_required_exact 与 n_recommended=向上取整）\n    只给 n    → mode=\"detect_effect\"（可检出标准化效应）\n    都给      → mode=\"verify\"（返回实际 power 验算结果）\n    都不给    → E1001 中文报错\n\n返回: 成功 {\"status\":\"ok\",\"result\":{...},\"summary\":\"...\"}；\n    result 含 scenario/n_each/n_total 及各模式专属字段；两比例场景另报 cohens_h。\n局限声明（固定附在 summary 末尾）：功效计算依赖效应量假设，实际效应量未知时结论仅供参考。\n\n示例:\n    power_analysis(\"two_sample_t\", effect_size=0.5)                 # 经典配置 → 64/组\n    power_analysis(\"one_sample_t\", n=34)                            # 反查可检出的 d\n    power_analysis(\"two_proportions\", p1=0.50, p2=0.80, n=100)      # verify 实际功效\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scenario": {
+            "title": "Scenario",
+            "type": "string"
+          },
+          "effect_size": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Effect Size"
+          },
+          "n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "N"
+          },
+          "p1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "P1"
+          },
+          "p2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "P2"
+          },
+          "alpha": {
+            "default": 0.05,
+            "title": "Alpha",
+            "type": "number"
+          },
+          "power_target": {
+            "default": 0.8,
+            "title": "Power Target",
+            "type": "number"
+          },
+          "alternative": {
+            "default": "two_sided",
+            "title": "Alternative",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scenario"
+        ],
+        "title": "power_analysisArguments"
+      }
+    },
+    {
+      "name": "impute_missing",
+      "description": "impute_missing —— 数据探查组 · 缺失值插补（工具 28，v1.2.0 新增）。\n\n与 missing_report 互补的确定性整治工具：只做规则插补（mean/median/ffill/bfill/constant），\n不做任何\"智能推断\"；绝不修改输入文件，插补结果写入 reports/imputed/ 新 CSV 并以\n__output__ 返回绝对路径（SPEC 第 11 节文件输出协议）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/01_data_exploration_batch1.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json），仅接受本地路径\n    columns (list[str]|None): 待插补的数值列清单；缺省 = 全部含缺失的数值列\n        （显式传入时逐列校验：不存在 → E1008；非数值列含 object 伪数值列 → E1009）\n    strategy (str, \"mean\"): mean / median / ffill / bfill / constant；\n        mean/median 仅基于有限观测计算（±Inf 不算缺失也不计入均值——排除数进 result）\n    value (float|None): 仅 strategy=\"constant\" 时必填的填充值（有限数，\n        拒绝 NaN/Inf/bool）；其它策略携带本参数 → E1001\n\n边界（钉死）:\n    - 无任何可插补对象 → E1012 中文报错，三种情形 message 独立：\n      全表无缺失 / 指定列均无缺失 / 缺失仅位于非数值列；\n    - 列全缺失且策略为 mean/median/ffill/bfill 时无来源可用 → 该列跳过原样保留，\n      在 result.skipped_columns 与 summary 如实注明（不报错）；constant 对全缺失列生效；\n    - 输出文件 = reports/imputed/YYYYmmdd/impute_missing_<干名>_<策略>_YYYYmmdd_HHMMSS_fff.csv\n      （utf-8-sig；Excel 公式注入转义与控制字符清洗见 SPEC 第 11 节第 5 条）。\n\n返回: 成功 result 含 {columns_processed:[{column,strategy,filled,value_or_direction,\n    excluded_nonfinite,residual_missing}], skipped_columns:[...], output_dir} +\n    顶层 __output__ = 插补文件绝对路径。\n局限声明（固定附于 summary 末尾）：插补值为确定性规则估计，会低估方差、可能引入偏差，\n后续分析请注明使用了插补数据。\n\n示例:\n    impute_missing(\"samples/dirty.csv\")                     # 默认全部数值缺失列、均值\n    impute_missing(\"samples/dirty.csv\", columns=[\"score\"], strategy=\"median\")\n    impute_missing(\"samples/dirty.csv\", columns=[\"note\"], strategy=\"constant\", value=0)\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          },
+          "columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Columns"
+          },
+          "strategy": {
+            "default": "mean",
+            "title": "Strategy",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "title": "impute_missingArguments"
+      }
+    },
+    {
+      "name": "backtest_forecast",
+      "description": "backtest_forecast —— 时序组 · 滚动回测（工具 29，v1.2.0 新增）。\n\ntime_series_forecast 的可信度自评：滚动窗口回测输出 MAE/RMSE/MAPE，\n让预测结论自带\"历史表现\"背书。前置处理与 forecast 完全同口径\n（_prepare_series 五项统一前置），**逐窗独立重放以杜绝真值泄漏**\n（验证窗不含任何由未来观测构造的插值点——design/06 防泄漏节）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/06_timeseries.md 同步维护。\n\n参数:\n    file_path (str): 本地数据文件（csv/tsv/xlsx/json），仅接受本地路径\n    date_col (str): 日期列；value_col (str): 数值值列（语义与 time_series_forecast 一致）\n    horizon (int): 每窗验证段长度，1 <= horizon <= 有效样本×50%（E1001）\n    windows (int, 3): 回测窗口数，1..10（auto_arima 每窗一次拟合，防耗时爆炸；E1001）\n    method (str, \"auto_arima\"): auto_arima / naive / seasonal_naive\n        （两个 naive 基线为封闭公式，用于对照；seasonal_naive 的周期逐窗取\n        _estimate_period，不可估或 > 训练段长时退化为 naive 并记 period_used_fallback）\n\n门槛链（校验顺序红线 D9）:\n    参数合法 → n>=30（低于报错 E1010）→ n >= horizon*(windows+1) 且\n    train_min = n - windows*horizon >= max(15, 2*period_full_est)（E1010 带调参建议）\n    → n<=100000（E1005 防大表卡顿）→ 逐窗计算。\n\n指标: 每窗口逐点 pred/actual/abs_err + 汇总 MAE/RMSE/MAPE；\n真实值含 |actual|<=1e-12 时该窗口 MAPE=null 并注明 zero_note（禁止除零假值）。\n明细总量上限 10000 点，超出截断最旧窗并记 truncated=true（汇总永不截断）。\n\n局限声明（固定附于 summary 末尾）：回测表现不代表未来；未做外部验证。\n\n示例:\n    backtest_forecast(\"samples/clean.csv\", \"date\", \"score\", horizon=3)\n    backtest_forecast(\"samples/clean.csv\", \"date\", \"score\",\n                      horizon=2, windows=2, method=\"naive\")\ninline 数据:\n    本工具支持可选 inline_data 参数（v1.2.0 起）：与 file_path 二选一，\n    支持 records 数组或 {\"header\": [...], \"rows\": [[...], ...]} 对象两种形态；\n    规模上限/类型域/data_source 来源标注见 statlab_mcp/docs/SPEC.md 第 12 节。\n\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "date_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Date Col"
+          },
+          "value_col": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value Col"
+          },
+          "horizon": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Horizon"
+          },
+          "windows": {
+            "default": 3,
+            "title": "Windows",
+            "type": "integer"
+          },
+          "method": {
+            "default": "auto_arima",
+            "title": "Method",
+            "type": "string"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          }
+        },
+        "title": "backtest_forecastArguments"
+      }
+    },
+    {
+      "name": "analysis_plan",
+      "description": "analysis_plan —— 编排层 · 分析计划生成（工具 30，v1.2.0 方案 B 落地）。\n\n把 design/08 决策树变成 100% 确定性规则工具：显式关键词表 + 列类型规则 + 表序优先级，\n零 LLM、零模糊匹配；只出计划不执行（执行由外层 agent 逐步调用第一层工具）。\n\ndocstring = agent 使用说明书，与 statlab_mcp/docs/design/11_analysis_plan.md 同步维护。\n\n参数:\n    question (str): 必填，非空自然语言问题（空白/控制字符 → E1001）\n    file_path (str|None): 可选数据源（与 inline_data 二选一，用于结构感知；\n        双缺合法 → data_aware=false、data_source=null；双给 → E1001）\n    inline_data (list|dict|None): 内联小数据（同 file_path 二选一规则）\n    column_hints (dict[str,str]|None): {\"列名\": \"数值|类别|日期\"} 显式类型覆盖；\n        值域非法 → E1001；引用不存在列 → 忽略并在 summary 注明\n\n意图表（12 个，忠实转录 design/08 表格 11 行+头部功效路由；完整词表见 design/11）:\n    概览/相关/类别关联/单组均值/两组比较/多组比较/预测连续/预测是否/分群/\n    趋势预测/异常检测/样本量功效。多意图命中 → 按 08 表格行序取先者；\n    全部未命中 → fallback 计划（数据概览三件套+如实告知），不猜测任何方法。\n\n返回: result = {intent, data_aware, data_source, chosen_methods:[{tool, reason_code,\n    matched_keywords}], tool_calls_plan:[{step, tool, params, depends_on, needs?}],\n    report_template:[五章], limitations:[四条]}。\nsummary 模板：\"已生成分析计划：N 步，首选方法 X；计划由确定性规则生成，\n执行请逐步调用对应工具\"。\n\n示例:\n    analysis_plan(\"这两个门店的销量差多少是真实的\", file_path=\"sales.csv\")\n    analysis_plan(\"帮我看看这堆数据长什么样\", inline_data={\"header\":[\"v\"],\"rows\":[[1]]})\n",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Path"
+          },
+          "inline_data": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inline Data"
+          },
+          "column_hints": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Column Hints"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "analysis_planArguments"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "statlab-mcp",
+    "version": "1.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 29543,
+  "stderr": ""
+}
