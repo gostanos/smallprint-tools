@@ -1,0 +1,616 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "pgautopilot",
+  "version": "2.4.0",
+  "integrity": {
+    "dist": "sha512-1ppOyNL+hEUSR6zhIODsRvHtPXLqsLgM4N3PKrRGiXm0UGfUT4RE6q9sWCb0iYBFMvmEdIeYxIkVcLhQmcLhRg==",
+    "installed": "sha512-1ppOyNL+hEUSR6zhIODsRvHtPXLqsLgM4N3PKrRGiXm0UGfUT4RE6q9sWCb0iYBFMvmEdIeYxIkVcLhQmcLhRg=="
+  },
+  "bin": "node_modules/pgautopilot/dist/pgautopilot.bundle.cjs",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T19:09:18.587Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "mcp_status",
+      "description": "Reports whether the MCP server is ready to run database tools and which database it is connected to. Use this tool first if you suspect a configuration problem. When the server is not configured (e.g. DATABASE_URL is missing or invalid), this tool returns a detailed explanation of exactly what to fix, including the expected .env file location and connection string format. In multi-database mode, it lists every configured database with its connection status. This tool never modifies anything — it is purely informational.\n\nWhen to use:\n- At the start of a session to verify the server is connected and healthy.\n- When any other tool returns a connection error, to diagnose the root cause.\n- When the user asks about the current server configuration or connected database.\n\nReturns: a JSON object with 'status' (ready|not_configured), 'database' (connection summary), 'mode' (read-only or read-write), and 'readonly' flag. Errors include actionable guidance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_list_databases",
+      "description": "Lists all databases configured in pgautopilot.json for multi-database mode, including each database's connection status (connected, not connected, or error), host, port, schema, and read-only setting. This tool is only meaningful in multi-database mode — in single-database mode it returns a message indicating only one database is configured.\n\nWhen to use:\n- As the first call when the user wants to work with a specific named database.\n- To discover which databases are available before calling db_use_database.\n- To verify that all configured databases are reachable.\n\nReturns: an array of database entries with name, connection summary, status (connected | not connected | error), and readonly flag. Databases that failed to connect at startup will show 'not connected' and will be lazily connected on first use.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_use_database",
+      "description": "Switches the default database for subsequent tool calls. After switching, all tools that accept an optional 'database' parameter will use this database when the parameter is omitted. The target database must be listed in pgautopilot.json. This is an idempotent operation — calling it with the same database name has no effect.\n\nWhen to use:\n- After calling db_list_databases, when the user wants to work with a specific database.\n- When switching between production and analytics databases mid-session.\n\nBehavioral notes:\n- The target database is lazily connected on first use if not already connected.\n- If the target database is unreachable, the switch succeeds but subsequent tools will return a connection error with guidance.\n- This does NOT affect other MCP sessions or connections — only the current session.\n\nReturns: confirmation with the new default database name and its connection details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "type": "string",
+            "description": "Name of the database to switch to as the default"
+          }
+        },
+        "required": [
+          "database"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_overview",
+      "description": "Provides a high-level overview of the connected PostgreSQL database: all tables with approximate row counts, foreign key relationships between tables, the server mode (read-only or read-write), and active safety rules (blocked tables, high-risk tables, sensitive columns). Use this as your first call when exploring an unfamiliar database to understand its structure before querying specific tables.\n\nWhen to use:\n- At the start of a session to understand what tables exist and how they relate.\n- When the user asks \"What's in this database?\" or \"Show me the tables.\"\n- Before writing queries, to confirm table names and relationships.\n\nBehavioral notes:\n- Row counts are estimates from pg_stat (not exact COUNT(*)) for performance.\n- Only tables in the configured schemas are shown (default: public).\n- The overview includes safety metadata so the agent knows what operations are allowed.\n\nReturns: JSON with tables array (name, estimated rows, column count), foreign keys, server mode, and safety configuration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_schema",
+      "description": "Returns the full database schema with column-level detail: every table's columns with their data types, nullability, defaults, constraints (primary key, unique, check), indexes, and foreign key relationships presented as a relationship diagram. This is introspected live from PostgreSQL's information_schema, so it always reflects the current state of the database.\n\nWhen to use:\n- When you need column-level detail beyond what db_overview provides.\n- Before constructing queries with specific columns, to verify column names and types.\n- When the user asks about table structure, constraints, or relationships.\n- When debugging query errors related to column types or constraints.\n\nBehavioral notes:\n- Schema is fetched fresh on every call (not cached) to catch DDL changes.\n- Only schemas listed in PG_SCHEMAS are included (default: public).\n- The relationship diagram shows foreign keys between tables, useful for JOIN queries.\n\nReturns: JSON with tables (each containing columns with type, nullable, default, constraints), indexes, and a relationships array.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_health",
+      "description": "Checks database connectivity, connection pool statistics, server uptime, and total request count. In multi-database mode, omit the database parameter to see health status for all configured databases simultaneously. Also runs PostgreSQL system checks: vacuum health (TXID wraparound risk), replication lag, index usage, sequence exhaustion, buffer cache hit rate, and invalid constraints.\n\nWhen to use:\n- At the start of a session to verify the database is responsive.\n- When the user asks about connection health or pool utilization.\n- When troubleshooting slow responses or connection errors.\n- Periodically during long sessions to check pool exhaustion.\n- To check vacuum/replication/sequence health in production.\n\nBehavioral notes:\n- In single-database mode, returns stats for the one connected database.\n- In multi-database mode, returns an array of health entries for all databases.\n- 'idle' connections are available; 'active' connections are in use.\n- If pool utilization is high (>80%), consider increasing PGPOOL_MAX.\n- Vacuum checks query pg_stat_user_tables — no extensions required.\n- Replication checks query pg_stat_replication — returns empty on standalone instances.\n- Buffer cache checks pg_stat_database for hit rate below 90%.\n- Constraint checks pg_constraint for invalid (unvalidated) constraints.\n\nReturns: JSON with connected (boolean), pool stats (total, idle, active), uptime seconds, total requests served, database connection summary, and health checks (vacuum, replication, indexes, sequences, bufferCache, constraints).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_table_info",
+      "description": "Returns detailed information about a single table: exact row count (via COUNT(*)), all columns with their types and nullability, all indexes with their columns and uniqueness, foreign key relationships, and approximate table size on disk. Use this when you need specifics about one table that go beyond the overview.\n\nWhen to use:\n- After db_overview, to drill into a specific table's details.\n- When the user asks \"Tell me about the orders table\" or \"What indexes does users have?\"\n- Before writing performance-sensitive queries, to understand available indexes.\n- When debugging issues related to a specific table.\n\nBehavioral notes:\n- Row count is exact (uses COUNT(*)), which may be slow on very large tables.\n- The table name must exist in the database — a typo returns a clear error with suggestions from the schema.\n- Table size is approximate, based on pg_table_size().\n\nReturns: JSON with row_count, columns array, indexes array, foreign_keys, and size_bytes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Name of the table to query"
+          },
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_find_many",
+      "description": "Queries rows from a table with flexible filtering, column selection, sorting, and pagination. This is the primary tool for reading data. All parameters are optional except 'table' — omitting filters returns all rows (up to the limit). The default limit is 50 rows; the maximum is 500. Sensitive columns (passwords, tokens, keys) are automatically redacted in the output.\n\nWhen to use:\n- \"Show me recent orders\", \"Find users with email containing gmail\"\n- \"List products sorted by price\", \"Get page 2 of customers\"\n- Any read query that needs filtering, sorting, or pagination\n\nParameter guidance:\n- where: JSON filter object. Supports operators: eq, neq, gt, gte, lt, lte, contains, startsWith, endsWith, in, notIn. Example: {\"status\": \"active\", \"age\": {\"gt\": 18}}\n- select: JSON array of column names to return. Example: [\"id\", \"name\", \"email\"]\n- orderBy: JSON object with column name and direction. Example: {\"created_at\": \"desc\"}\n- take: max rows to return (default 50, max 500)\n- skip: rows to skip for offset pagination\n\nBehavioral notes:\n- All queries run in a read-only transaction with a configurable timeout (default 10s).\n- The table name is validated against the live schema before query execution.\n- Results include pagination metadata (total count when available).\n- On error, returns a clear message explaining what went wrong.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Name of the table to query"
+          },
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "where": {
+            "description": "JSON filter object, e.g. '{\"email\":{\"contains\":\"@gmail\"}}'",
+            "type": "string"
+          },
+          "select": {
+            "description": "JSON array of column names, e.g. '[\"id\",\"email\"]'",
+            "type": "string"
+          },
+          "orderBy": {
+            "description": "JSON object, e.g. '{\"createdAt\":\"desc\"}'",
+            "type": "string"
+          },
+          "take": {
+            "description": "Max rows to return (default 50, max 500)",
+            "type": "number"
+          },
+          "skip": {
+            "description": "Rows to skip for pagination",
+            "type": "number"
+          }
+        },
+        "required": [
+          "table"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_find_first",
+      "description": "Finds a single row matching the given filter. Returns the first matching row or null if no rows match. Use this instead of db_find_many when you expect exactly one result and want a single object rather than an array. Sensitive columns are automatically redacted.\n\nWhen to use:\n- \"Get user with ID 42\", \"Find the order with this tracking number\"\n- Lookups by unique identifier (primary key or unique constraint)\n- When you need exactly one row, not a list\n\nParameter guidance:\n- where: JSON filter object (required). Must be specific enough to target one row. Example: {\"id\": 42} or {\"email\": \"user@example.com\"}\n- select: optional JSON array of column names to return\n\nBehavioral notes:\n- Returns a single JSON object, not an array.\n- Returns null (not an error) when no row matches the filter.\n- For queries that should return multiple rows, use db_find_many instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Name of the table to query"
+          },
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "where": {
+            "type": "string",
+            "description": "JSON filter object to find a single row"
+          },
+          "select": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "where"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_count",
+      "description": "Returns the exact number of rows in a table, optionally filtered. This runs an exact COUNT(*) query — not an estimate. Use this when you need a precise count for reporting, validation, or before performing bulk operations.\n\nWhen to use:\n- \"How many users signed up this week?\"\n- \"Count all orders with status pending\"\n- Before bulk deletes, to confirm the scope of the operation\n\nParameter guidance:\n- table: the table name (required)\n- where: optional JSON filter object (same syntax as db_find_many)\n\nBehavioral notes:\n- Exact COUNT(*) on large tables (millions of rows) may be slow.\n- On large tables, consider using db_aggregate with a group-by for approximate breakdowns.\n- Returns an integer count, not a row object.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Name of the table to query"
+          },
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "where": {
+            "description": "Optional JSON filter object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_aggregate",
+      "description": "Groups rows by one or more columns and computes aggregate functions (count, sum, avg, min, max) on each group. This is the tool for analytical queries like \"total sales by category\", \"average order value by month\", or \"count of users per country\". Results are sorted by the aggregate by default.\n\nWhen to use:\n- \"How many products in each category?\" (by=category, _count=\"*\")\n- \"Total revenue by region\" (by=region, _sum=\"amount\")\n- \"Average order value by status\" (by=status, _avg=\"total\")\n- \"Min and max prices per category\" (by=category, _min=\"price\", _max=\"price\")\n\nParameter guidance:\n- by: comma-separated column names to group by (required). Example: \"category, region\"\n- where: optional JSON filter applied before grouping\n- orderBy: JSON object for sorting results. Use \"_count\", \"_sum\", \"_avg\", \"_min\", \"_max\" as the key. Example: {\"_count\": \"desc\"}\n- sum/avg/min/max: comma-separated numeric columns to aggregate\n- take: max groups to return (default 50)\n\nBehavioral notes:\n- All aggregations run in a read-only transaction with a configurable timeout.\n- Results are returned as an array of group objects with the computed aggregates.\n- Groups with zero rows are excluded from the results.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Name of the table to query"
+          },
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "by": {
+            "type": "string",
+            "description": "Comma-separated column names to group by"
+          },
+          "where": {
+            "description": "Optional JSON filter applied before grouping",
+            "type": "string"
+          },
+          "orderBy": {
+            "description": "JSON order object, e.g. '{\"_count\":\"desc\"}'",
+            "type": "string"
+          },
+          "take": {
+            "description": "Max groups to return (default 50)",
+            "type": "number"
+          },
+          "sum": {
+            "description": "Comma-separated numeric columns to sum",
+            "type": "string"
+          },
+          "avg": {
+            "description": "Comma-separated numeric columns to average",
+            "type": "string"
+          },
+          "min": {
+            "description": "Comma-separated columns to find minimum",
+            "type": "string"
+          },
+          "max": {
+            "description": "Comma-separated columns to find maximum",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "by"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_explain",
+      "description": "Runs EXPLAIN ANALYZE on a SQL SELECT query to analyze its execution plan, performance characteristics, and bottlenecks. Returns the full execution plan with timing, buffer usage, row estimates, and actionable analysis. This tool helps you understand how PostgreSQL processes a query and identifies optimization opportunities like missing indexes, sequential scans, or high-cost operations.\n\nWhen to use:\n- \"Why is this query slow?\"\n- \"Help me optimize this query\"\n- \"What indexes would improve this query?\"\n- Before creating indexes, to understand current plan\n\nParameter guidance:\n- query: the SQL SELECT query to analyze (required). Example: \"SELECT u.name, COUNT(o.id) FROM users u JOIN orders o ON o.user_id = u.id WHERE o.created_at > '2025-01-01' GROUP BY u.name ORDER BY COUNT(o.id) DESC LIMIT 10\"\n- analyze: set to true for actual timing (default: true)\n- buffers: set to true to include buffer usage stats (default: true)\n\nBehavioral notes:\n- Only SELECT queries are accepted — EXPLAIN on writes is not supported.\n- The query is NOT executed — only the plan is analyzed.\n- Results include: execution plan (JSON), total cost, actual time, rows, buffers, and analysis text.\n- Analysis highlights: sequential scans on large tables, low selectivity filters, missing index opportunities, high-cost joins.\n- No extensions required — uses built-in PostgreSQL EXPLAIN.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "query": {
+            "type": "string",
+            "description": "The SQL SELECT query to analyze. Must be a SELECT statement. The query is wrapped in EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) automatically."
+          },
+          "analyze": {
+            "default": true,
+            "description": "Run EXPLAIN ANALYZE for actual timing (default: true).",
+            "type": "boolean"
+          },
+          "buffers": {
+            "default": true,
+            "description": "Include buffer usage statistics (default: true).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_raw_query",
+      "description": "Executes a raw SQL SELECT statement with a mandatory LIMIT clause. This is the escape hatch for queries that cannot be expressed with the structured tools (complex JOINs, CTEs, window functions, subqueries, etc.). All queries run inside a read-only, single-statement transaction with a configurable timeout (default 10 seconds).\n\nWhen to use:\n- Complex JOINs across multiple tables\n- CTEs, window functions, or subqueries\n- Custom aggregations not supported by db_aggregate\n- Exploratory queries during development\n\nParameter guidance:\n- sql: the raw SQL statement (required). Must be a SELECT and MUST include a LIMIT clause. Example: \"SELECT u.name, COUNT(o.id) FROM users u JOIN orders o ON o.user_id = u.id GROUP BY u.name ORDER BY COUNT(o.id) DESC LIMIT 10\"\n- confirmed: set to true to acknowledge the raw query (currently informational)\n\nBehavioral notes:\n- ONLY SELECT statements are allowed. INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, GRANT, and other DDL/DML are rejected.\n- The LIMIT clause is mandatory — queries without LIMIT are rejected.\n- Only single-statement queries are allowed (no semicolons separating multiple statements).\n- Dangerous functions (pg_read_file, COPY, pg_sleep, etc.) are blocked.\n- Results are capped at 5000 rows to prevent memory exhaustion.\n- Sensitive columns are automatically redacted in the output.\n- For write operations, use the structured tools (db_create, db_update_many, etc.).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "sql": {
+            "type": "string",
+            "description": "Raw SQL statement. SELECT (must end with LIMIT) by default; non-SELECT requires confirmed: true, ALLOW_RAW_WRITES on the server, and a server that is not read-only"
+          },
+          "confirmed": {
+            "default": false,
+            "description": "Explicit user confirmation to allow a single non-SELECT (write/DDL) statement",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sql"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_backup",
+      "description": "Creates a full SQL dump of the database using pg_dump and saves it to the configured backup directory (default: ./backups). The backup includes the full schema and data. When the local pg_dump binary is not available and DOCKER_CONTAINER is set, this tool falls back to running pg_dump inside the specified Docker container.\n\nWhen to use:\n- Before running risky migrations or bulk operations\n- Periodic backups as part of maintenance routines\n- When the user asks to back up or export the database\n\nParameter guidance:\n- label: optional label for the backup filename (e.g., \"pre-migration\"). The final filename includes a timestamp: backups/db_backup_pre-migration_2026-09-01T120000.sql\n- confirmed: set to true to confirm the backup operation\n\nBehavioral notes:\n- Requires pg_dump to be available either locally or via Docker.\n- The backup file is a plain SQL dump, not a binary format.\n- Large databases may take significant time and disk space.\n- This tool is idempotent — running it multiple times creates separate backup files.\n- The backup directory is created automatically if it does not exist.\n\nReturns: path to the created backup file and its size.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "label": {
+            "description": "Optional label for the backup filename",
+            "type": "string"
+          },
+          "confirmed": {
+            "default": false,
+            "description": "Explicit user confirmation required to run a backup",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_create",
+      "description": "Inserts a new row into the specified table. All columns are validated against the live schema before execution — typos in column names or type mismatches are caught early. Sensitive columns (passwords, tokens, API keys, etc.) are automatically stripped from the input to prevent accidental credential storage. Use dry_run=true to preview the insert without actually writing to the database.\n\nWhen to use:\n- \"Add a new user named Jane with email jane@example.com\"\n- \"Create an order for customer 42 with total $99.99\"\n- Any single-row INSERT operation\n\nParameter guidance:\n- table: the target table name (required)\n- data: JSON object of column-value pairs to insert (required). Example: {\"name\": \"Jane Doe\", \"email\": \"jane@example.com\", \"role\": \"admin\"}\n- dry_run: set to true to validate without writing (default: false)\n\nBehavioral notes:\n- The table name and all column names are validated against the live schema.\n- The INSERT runs in a transaction — if any constraint is violated, the entire operation rolls back with a clear error message.\n- On success, returns the inserted row including any auto-generated values (e.g., id).\n- Sensitive columns in the input are silently stripped before execution.\n- For multiple inserts, call this tool once per row or use db_raw_query with an INSERT ... VALUES statement (requires confirmed=true and ALLOW_RAW_WRITES).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Name of the table to query"
+          },
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "data": {
+            "type": "string",
+            "description": "JSON object of column values to insert"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "If true, simulates without writing",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "table",
+          "data"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_upsert",
+      "description": "Inserts a new row or updates an existing one using PostgreSQL's ON CONFLICT mechanism. The 'where' filter's columns must match a unique constraint or primary key on the table — this is how PostgreSQL determines whether to insert or update. If a matching row exists, only the columns specified in 'update' are changed. If no match exists, a new row is created with the values from 'create'. Use dry_run=true to preview.\n\nWhen to use:\n- \"Create this user if they don't exist, otherwise update their last_login\"\n- \"Upsert product SKU-123 with price $29.99\"\n- Idempotent insert-or-update operations\n\nParameter guidance:\n- table: the target table name (required)\n- where: JSON filter identifying the conflict target (required). Columns must match a unique constraint or primary key. Example: {\"email\": \"jane@example.com\"}\n- create: JSON object of column-value pairs for the INSERT case (required)\n- update: JSON object of column-value pairs for the UPDATE case (optional). If omitted, no update occurs on conflict — the existing row is returned unchanged.\n- dry_run: set to true to validate without writing (default: false)\n\nBehavioral notes:\n- The where columns MUST match a unique constraint or primary key — the tool validates this against the schema and returns an error if no matching constraint exists.\n- Returns the final row (either newly inserted or updated).\n- This is idempotent — calling it multiple times with the same data has the same effect as calling it once.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Name of the table to query"
+          },
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "where": {
+            "type": "string",
+            "description": "JSON filter identifying the row, must match a unique constraint"
+          },
+          "create": {
+            "type": "string",
+            "description": "JSON object of column-value pairs to insert if not found"
+          },
+          "update": {
+            "description": "JSON object of column-value pairs to set if found",
+            "type": "string"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "If true, simulates without writing",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "table",
+          "where",
+          "create"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_update_many",
+      "description": "Updates all rows matching the given filter. Every column and value is validated against the live schema before execution. When the filter is empty ('{}'), ALL rows in the table would be updated — this requires confirmAll=true as a safety gate. A warning is issued when more than 10 rows are affected. Use dry_run=true to preview the update without actually writing.\n\nWhen to use:\n- \"Mark all pending orders as shipped\"\n- \"Update user 42's email to new@example.com\"\n- \"Set all products in category X as discontinued\"\n\nParameter guidance:\n- table: the target table name (required)\n- where: JSON filter selecting rows to update (required). Example: {\"status\": \"pending\"} Use '{}' with confirmAll=true to update ALL rows (dangerous!).\n- data: JSON object of column-value pairs to set (required). Example: {\"status\": \"shipped\", \"shipped_at\": \"2026-09-01\"}\n- dry_run: set to true to preview without writing (default: false)\n- confirmAll: REQUIRED when where='{}' to confirm updating all rows\n\nBehavioral notes:\n- A warning is emitted when more than 10 rows would be affected.\n- Empty filter with confirmAll=false returns an error requiring explicit confirmation.\n- The update runs in a transaction — all rows are updated atomically.\n- Returns the count of affected rows.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Name of the table to query"
+          },
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "where": {
+            "type": "string",
+            "description": "JSON filter selecting rows to update"
+          },
+          "data": {
+            "type": "string",
+            "description": "JSON object of column-value pairs to set"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "If true, simulates without writing",
+            "type": "boolean"
+          },
+          "confirmAll": {
+            "default": false,
+            "description": "Required to update all rows when where is '{}'",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "table",
+          "where",
+          "data"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "db_delete_many",
+      "description": "Deletes all rows matching the given filter. This is a destructive operation — deleted data cannot be recovered unless a backup exists. When the filter is empty ('{}'), ALL rows in the table would be deleted — this requires confirmAll=true as a safety gate. A warning is issued when more than 10 rows are affected. Use dry_run=true to preview the deletion scope before committing.\n\nWhen to use:\n- \"Delete all logs older than 2025\"\n- \"Remove user with email test@test.com\"\n- \"Purge expired sessions\"\n\nParameter guidance:\n- table: the target table name (required)\n- where: JSON filter selecting rows to delete (required). Example: {\"expired\": true} Use '{}' with confirmAll=true to delete ALL rows (dangerous!).\n- dry_run: set to true to preview without deleting (default: false). STRONGLY recommended — always dry-run first to see how many rows would be affected.\n- confirmAll: REQUIRED when where='{}' to confirm deleting all rows\n\nBehavioral notes:\n- A warning is emitted when more than 10 rows would be affected.\n- Empty filter with confirmAll=false returns an error requiring explicit confirmation.\n- The delete runs in a transaction — all rows are deleted atomically.\n- Returns the count of deleted rows.\n- ALWAYS use dry_run=true first to verify the scope before committing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Name of the table to query"
+          },
+          "database": {
+            "description": "Name of the database to query (from pgautopilot.json). Omit to use the current default database.",
+            "type": "string"
+          },
+          "where": {
+            "type": "string",
+            "description": "JSON filter selecting rows to delete"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "If true, simulates without deleting",
+            "type": "boolean"
+          },
+          "confirmAll": {
+            "default": false,
+            "description": "Required to delete all rows when where is '{}'",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "table",
+          "where"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "pgautopilot",
+    "version": "2.4.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 9346,
+  "stderr": "2026-10-13T19:09:27.237Z [pgautopilot] ERROR Configuration error: DATABASE_URL is not set.\n\n  Looking for a \".env\" file in the current working directory:\n    /pkg/.env\n\n  Create a .env file there with:\n\n    DATABASE_URL=postgresql://user:password@localhost:5432/yourdb\n\n  Or create a pgautopilot.json with a \"databases\" section for multi-database support.\n\n  DATABASE_URL was not found in any source.\n2026-10-13T19:09:27.241Z [pgautopilot] WARN PGAutoPilot started in not-configured mode. Fix DATABASE_URL in the .env and restart.\n2026-10-13T19:09:27.242Z [pgautopilot] INFO PGAutoPilot v2.4.0 ready\n"
+}

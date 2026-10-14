@@ -1,0 +1,195 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "pay-per-call-mcp",
+  "version": "0.5.2",
+  "integrity": {
+    "dist": "sha512-gm7Af88IA438Wp8Wh4DZEL21mQg6ujX5szF7zZgSn6cyaADjNpPhTYw1ySOYLkoaNetdVPP/latyeoywkyo4Zw==",
+    "installed": "sha512-gm7Af88IA438Wp8Wh4DZEL21mQg6ujX5szF7zZgSn6cyaADjNpPhTYw1ySOYLkoaNetdVPP/latyeoywkyo4Zw=="
+  },
+  "bin": "node_modules/pay-per-call-mcp/./dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T18:50:03.002Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "setup",
+      "description": "Show the LemonCake MCP first-run setup guide. No authentication required.\nCall this tool FIRST to learn what credentials are missing and how to obtain them.\n\nIf no auth env vars are set, the server is in DEMO MODE: list_services returns\nthree demo services (demo_search / demo_echo / demo_fx) and call_service / check_balance\nrespond with mock data so you can verify integration before signing up.\n\nReturns the current credential status (Pay Token / Buyer JWT), demo-mode flag, and\nstep-by-step instructions to obtain anything that is missing, including a sample MCP\nclient config snippet ready to paste.\n\nReturns: { version, apiUrl, mode, credentials, availableTools, setupSteps, register, dashboard, docs }\nErrors: none — this tool always succeeds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Setup guide",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_services",
+      "description": "List approved API services available on the LemonCake marketplace. No authentication required.\n\nUse this BEFORE call_service to discover serviceId values and per-call USDC pricing.\n\nWhen LEMON_CAKE_PAY_TOKEN is missing, three demo services are prepended\n(demo_search → Wikipedia, demo_echo → httpbin, demo_fx → open.er-api) so you\ncan try call_service without signing up. Live users (PAY_TOKEN set) see only\nreal marketplace entries; demo_* IDs remain callable directly.\n\nEach item: { id, name, provider, type ('API' | 'MCP'), pricePerCall, [usage], [mode] }.\nErrors: HTTP-level errors are returned as `Error: API <status>: <body>`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "Maximum number of services to return (default 50, max 100)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "List marketplace services",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "call_service",
+      "description": "Invoke an upstream API service through LemonCake's pay-per-call proxy.\nEach successful call automatically charges USDC against your configured Pay Token.\n\nPRECONDITIONS:\n  • LEMON_CAKE_PAY_TOKEN env var must be set for real services. If missing, the tool\n    returns a structured CREDENTIAL_MISSING error with how-to-fix steps.\n  • DEMO MODE: serviceId values starting with `demo_` (demo_search / demo_echo / demo_fx)\n    work WITHOUT any auth and return canned responses — useful for Glama Inspector\n    or new-user trial. They are clearly marked with `mode: \"demo\"` and incur no charge.\n  • serviceId must come from list_services.\n\nBEHAVIOR:\n  • Returns the upstream response body verbatim (JSON or text), plus the X-Charge-Id\n    and X-Amount-Usdc headers reported by the proxy.\n  • HTTP 402 Payment Required is returned as a normal result (NOT thrown) so the\n    agent can autonomously stop spending when the Pay Token's limitUsdc is exhausted.\n  • Pass the same idempotencyKey to retry safely without double-charging.\n  • This tool spends real money and contacts an external service — it is\n    non-idempotent by default and has external side effects.\n\nx402-COMPATIBLE INTERFACE (since v0.5.1):\n  • Successful calls include an `x402Receipt` field with { scheme, chain, asset, amount,\n    recipient, paymentIntentId, settledAt }. Same shape as on-chain x402 receipts so the\n    agent's payment-handling logic is portable.\n  • If upstream returns an x402 challenge (WWW-Authenticate: x402, X-402-* headers, or\n    body.x402), it's parsed into `x402Challenge` for the agent to reason about. On-chain\n    auto-pay from Pay Token is gated (see issue #4); for now the agent should escalate.\n  • If upstream returns 202 + Retry-After + X-Payment-Status: pending, the result is\n    `{ status: \"PAYMENT_PENDING\", paymentIntentId, retryAfterMs, retryContract }`.\n    Re-call with the same idempotencyKey to resume — no double-charge.\n\nReturns: { status, chargeId, amountUsdc, response, x402Receipt?, x402Challenge?, hint? }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "serviceId": {
+            "type": "string",
+            "description": "ID of the service to call (obtain from list_services).",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "description": "Sub-path on the service (e.g. \"/search\", \"/v1/completions\"). Defaults to \"/\".",
+            "default": "/",
+            "pattern": "^/.*"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ],
+            "description": "HTTP method to use against the service. Defaults to GET.",
+            "default": "GET"
+          },
+          "body": {
+            "type": "object",
+            "description": "JSON request body (only used for POST/PUT/PATCH).",
+            "additionalProperties": true
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Optional idempotency key (UUID recommended). Identical keys within the proxy's retention window return the cached result without re-charging.",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "serviceId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Call a paid service (charges USDC)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "check_balance",
+      "description": "Check the current USDC balance, KYC tier, and account info of the configured buyer.\n\nPRECONDITIONS:\n  • LEMON_CAKE_BUYER_JWT env var must be set. If missing AND no PAY_TOKEN is set,\n    DEMO MODE returns a canned $1.00 demo balance with kycTier=\"DEMO\" so trial users\n    see something instead of an error. With PAY_TOKEN set but no BUYER_JWT, returns\n    a structured CREDENTIAL_MISSING error.\n\nUse BEFORE call_service to confirm sufficient funds, especially before a long batch.\n\nReturns: { balanceUsdc, kycTier, email, name, [mode], [note] }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Check USDC balance",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "check_tax",
+      "description": "Run a Japanese tax compliance check on a single transaction. No authentication required.\n\nPerforms three checks in one call:\n  1. Validates the qualified-invoice registration number (T-number) against the NTA registry.\n  2. Determines whether source-withholding (源泉徴収) applies based on the service description.\n  3. If withholding applies, computes the withholding amount and net payable.\n\nIntended for Japanese corporations that pay AI / API services and need to file\nwithholding correctly under the qualified-invoice (インボイス制度) regime.\n\nReturns: { invoice: { valid, name, ... }, withholding: { required, rate, amount, net } }\nErrors: invalid registrationNumber returns invoice.valid = false (not an exception).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "registrationNumber": {
+            "type": "string",
+            "description": "Qualified-invoice registration number issued by the Japanese NTA (e.g. \"T1234567890123\").",
+            "pattern": "^T?\\d{13}$"
+          },
+          "serviceDescription": {
+            "type": "string",
+            "description": "Plain-text description of what was purchased. Used to classify whether source-withholding applies.",
+            "minLength": 1
+          },
+          "grossAmountJpy": {
+            "type": "number",
+            "description": "Gross transaction amount in JPY, tax inclusive.",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "registrationNumber",
+          "serviceDescription",
+          "grossAmountJpy"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Japanese tax compliance check",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_service_stats",
+      "description": "Return public usage statistics for every approved service on the marketplace. No authentication required.\n\nUse this AFTER list_services and BEFORE call_service to pick a service based on\nreal-world traction (call counts, USDC revenue, last-used timestamp).\n\nReturns: an array of { serviceId, callCount, totalRevenueUsdc, lastCalledAt }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Marketplace usage stats",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "lemon-cake-mcp",
+    "version": "0.6.0"
+  },
+  "protocolVersion": null,
+  "instructions": "🎮 DEMO MODE ACTIVE — no signup, no API key, no card required.\n\nYou are connected with no credentials, so this server is in Demo Mode:\n  • list_services      → marketplace listing + 3 free demo services\n  • call_service(demo_search)  → real Wikipedia search\n  • call_service(demo_fx)      → real live FX rates (open.er-api.com)\n  • call_service(demo_echo)    → httpbin.org echo\n  • check_balance      → mock $1.00 balance\n  • check_tax / get_service_stats → real (no auth)\n\n👉 Quick start: try the `explore-demo` prompt above, or call `setup` for the full guide.\n\nTo unlock paid services (Serper, Hunter.io, gBizINFO, NTA invoice check, etc.),\nset LEMON_CAKE_PAY_TOKEN. Free signup at https://lemoncake.xyz/register.",
+  "durationMs": 8049,
+  "stderr": "[LemonCake MCP] Starting...\n[LemonCake MCP]   API URL     : https://api.lemoncake.xyz\n[LemonCake MCP]   PAY_TOKEN   : ✗ NOT SET — call_service will be unavailable\n[LemonCake MCP]   BUYER_JWT   : ✗ NOT SET — check_balance will be unavailable\n[LemonCake MCP]   MODE        : 🎮 DEMO (try-without-signup; demo_* services + mock balance)\n[LemonCake MCP]\n[LemonCake MCP]   🎮 Demo mode active — you can try these without any signup:\n[LemonCake MCP]     • list_services      → see real marketplace + 3 demo services\n[LemonCake MCP]     • call_service       → demo_search (DuckDuckGo) / demo_echo (httpbin) / demo_fx (open.er-api) — real upstreams, no auth\n[LemonCake MCP]     • check_balance      → returns a mock $1.00 demo balance\n[LemonCake MCP]     • check_tax / get_service_stats → real (no auth needed)\n[LemonCake MCP]\n[LemonCake MCP]   For real calls, create a free account → https://lemoncake.xyz/register?utm_source=mcp-server&utm_medium=cli&utm_campaign=credential-missing\n[LemonCake MCP] Ready.\n"
+}

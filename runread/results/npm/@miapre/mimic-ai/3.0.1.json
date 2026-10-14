@@ -1,0 +1,1662 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@miapre/mimic-ai",
+  "version": "3.0.1",
+  "integrity": {
+    "dist": "sha512-JVIvmQsa3F1/x7d/rjZOM2PaTaPivjd/w23wCUUmBbRDEqdxXYW5p9B1qkJ5ZopLHKtHmIJGosDt8MK3W5VH+A==",
+    "installed": "sha512-JVIvmQsa3F1/x7d/rjZOM2PaTaPivjd/w23wCUUmBbRDEqdxXYW5p9B1qkJ5ZopLHKtHmIJGosDt8MK3W5VH+A=="
+  },
+  "bin": "node_modules/@miapre/mimic-ai/mcp.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T08:52:43.931Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "mimic_status",
+      "description": "START EVERY SESSION HERE. Returns Figma plugin connection status, the current build phase (0=idle through 5=report), enforcement profile, cached DS counts, knowledge store summary (learned components/patterns/gaps/rules), and a contextual `hint` telling you exactly what to call next. Also clears build-interrupt state after a plugin reconnect and warns if a completed build is missing its mandatory report. No params — call with no arguments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": {
+        "title": "Get build status (start here)",
+        "readOnlyHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "mimic_discover_ds",
+      "description": "Complete DS discovery in two steps. Step 1: call with fileKey — discovers variables, text styles, components via plugin API, caches everything, stays at Phase 1. Step 2: call again with communitySearchResults (library names from Figma MCP search_design_system) — verifies no community libraries were missed, then advances to Phase 2 (build-ready). Build tools are BLOCKED until Step 2 completes. If a community library's variables are not discoverable via the plugin API (communityVariablesRequired response), fetch them via Figma MCP search_design_system and pass as externalVariables.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fileKey": {
+            "type": "string",
+            "description": "Figma file key to discover DS from."
+          },
+          "libraryKey": {
+            "type": "string",
+            "description": "Library key to use when multiple DS libraries are available. Returned from a previous call that detected multiple libraries."
+          },
+          "communitySearchResults": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Unique library names found via Figma MCP search_design_system (query \"color\", includeVariables: true). Required after initial discovery to verify no community libraries were missed. Pass only non-null libraryName values."
+          },
+          "communitySearchVariableKeys": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Map of libraryName → one sample variable key from search results. Used to validate which libraries are actually enabled in the file. Extract one key per library from the color search results."
+          },
+          "libraryFileKey": {
+            "type": "string",
+            "description": "Library file key (alphanumeric string from the Figma URL of the library file). Prompted once per library, cached permanently."
+          },
+          "skipRestApi": {
+            "type": "boolean",
+            "description": "Skip REST API component discovery (e.g. for community libraries where the file key is unavailable). Discovery proceeds with plugin-only data; use Figma MCP search_design_system + mimic_map_components to find components."
+          },
+          "externalVariables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Variable name/path (e.g. \"colors/content/content1\")."
+                },
+                "key": {
+                  "type": "string",
+                  "description": "Variable key from Figma MCP search results."
+                },
+                "resolvedType": {
+                  "type": "string",
+                  "description": "Variable type: COLOR, FLOAT, STRING, BOOLEAN."
+                },
+                "collection": {
+                  "type": "string",
+                  "description": "Collection name (e.g. \"palette\", \"spacing\")."
+                },
+                "libraryName": {
+                  "type": "string",
+                  "description": "Library name the variable belongs to."
+                }
+              }
+            },
+            "description": "Variables fetched via Figma MCP search_design_system for community libraries whose variables are not discoverable via the plugin API. Pass after receiving a communityVariablesRequired response."
+          },
+          "identityDriftChoice": {
+            "type": "string",
+            "enum": [
+              "same",
+              "different"
+            ],
+            "description": "Answer to a library-identity-drift prompt (name-keyed community library where most previously-known components vanished). \"same\" keeps learning under the existing history; \"different\" starts a fresh bucket for this library."
+          }
+        },
+        "required": [
+          "fileKey"
+        ]
+      },
+      "annotations": {
+        "title": "Discover the design system",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "mimic_ds_assets",
+      "description": "Manual escape hatch for DS discovery/preload/finalize — the low-level building blocks mimic_discover_ds already orchestrates automatically. Use this ONLY when the automatic flow needs a targeted redo: re-discovering one asset kind after a partial load, preloading variables/styles/fill-styles fetched some other way, or manually finalizing the enforcement profile. Params: action (\"discover\"|\"preload\"|\"set_defaults\"), kind (\"styles\"|\"variables\"|\"components\"|\"fill_styles\", required for discover/preload), plus action-specific params (fileKey for discover, styleKeys/variables/libraryFileKey for preload, dsMode for set_defaults). Workflow position: DS Discovery / Style Inventory (Phase 1-2), before building.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "discover",
+              "preload",
+              "set_defaults"
+            ],
+            "description": "\"discover\" fetches DS assets from a library file. \"preload\" caches assets you already have. \"set_defaults\" computes the enforcement profile and advances to Phase 2."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "styles",
+              "variables",
+              "components",
+              "fill_styles"
+            ],
+            "description": "Which DS asset kind. Required for \"discover\" (styles|variables|components) and \"preload\" (styles|variables|fill_styles). Not used by \"set_defaults\"."
+          },
+          "fileKey": {
+            "type": "string",
+            "description": "Library file key. Required for action=\"discover\"."
+          },
+          "styleKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Text style keys to preload. Required for action=\"preload\", kind=\"styles\"."
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Variable path (e.g. \"bg-primary\")."
+                },
+                "key": {
+                  "type": "string",
+                  "description": "Variable key from Figma."
+                },
+                "collection": {
+                  "type": "string",
+                  "description": "Collection name."
+                },
+                "category": {
+                  "type": "string",
+                  "description": "Category: text, background, border, foreground, spacing, radius, etc."
+                }
+              },
+              "required": [
+                "path",
+                "key"
+              ]
+            },
+            "description": "Variables to cache. Required for action=\"preload\", kind=\"variables\"."
+          },
+          "libraryFileKey": {
+            "type": "string",
+            "description": "Library file key to fetch fill styles from. Required for action=\"preload\", kind=\"fill_styles\"."
+          },
+          "expectedCount": {
+            "type": "number",
+            "description": "Total number of styles/variables expected (from Figma MCP search results). Used to detect partial loads. Optional, for action=\"preload\"."
+          },
+          "dsMode": {
+            "type": "string",
+            "enum": [
+              "strict",
+              "permissive"
+            ],
+            "description": "DS enforcement mode for action=\"set_defaults\". Defaults to strict when DS has tokens."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "annotations": {
+        "title": "Manage DS assets (discover/preload/finalize)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "figma_list_ds",
+      "description": "Lists cached DS assets from the local cache — text styles, fill (color) styles, or variables. Use to browse what mimic_discover_ds already cached before binding: find a textStyleId for figma_create_text, a fillStyleId for figma_create_shape, or a variable path for figma_update_node. Params: kind (\"text_styles\"|\"fill_styles\"|\"variables\", required), filter (keyword, fill_styles only), category (text|background|border|foreground|spacing|radius, variables only). Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text_styles",
+              "fill_styles",
+              "variables"
+            ],
+            "description": "Which cache to list."
+          },
+          "filter": {
+            "type": "string",
+            "description": "Optional keyword filter on the style name. Only used with kind=\"fill_styles\" (e.g. \"Blue\", \"Gray\", \"Red\")."
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional category filter. Only used with kind=\"variables\" (text, background, border, foreground, spacing, radius). Omit for all."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "annotations": {
+        "title": "List cached DS assets",
+        "readOnlyHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "mimic_map_components",
+      "description": "Maps HTML element types (button, input, badge, table, tab, avatar, dropdown, textarea, header, footer, sidebar, ...) to DS component keys for the current build. Call once after mimic_discover_ds with all section-level + control element types. With FIGMA_TOKEN configured, one call is enough — all library components are pre-cached and missing types are confirmed gaps. Without a token, call again with librarySearchResults (from Figma MCP search_design_system) to close the loop. Workflow position: Phase 1-2, right after DS discovery, before figma_insert_component.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "elementTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of HTML element types to map (e.g. [\"button\", \"input\", \"badge\", \"table\", \"tab\", \"avatar\", \"dropdown\", \"textarea\"])."
+          },
+          "librarySearchResults": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Component name from search results."
+                },
+                "componentKey": {
+                  "type": "string",
+                  "description": "Component key from search results."
+                },
+                "libraryName": {
+                  "type": "string",
+                  "description": "Library name the component belongs to."
+                },
+                "assetType": {
+                  "type": "string",
+                  "description": "Component type: \"component\" or \"component_set\"."
+                }
+              }
+            },
+            "description": "Component search results from Figma MCP search_design_system. Pass ALL results from your searches (any library — they will be filtered). This completes the search loop: matched components get cached, unmatched types get confirmed as \"no component exists\"."
+          }
+        },
+        "required": [
+          "elementTypes"
+        ]
+      },
+      "annotations": {
+        "title": "Map HTML elements to DS components",
+        "readOnlyHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_create_frame",
+      "description": "Creates an auto-layout container frame (layout primitive) — the fallback when NO DS component exists for a section or layout. Every fill/padding/gap/radius binds to DS variables; component-like names are gated (pass confirmedNoComponent + primitiveOverrideReason for confirmed gaps). Name frames after their HTML role (\"Header Section\", \"Card: Revenue\"). Key params: parentId (omit for page-level artboard), direction, layoutSizing*, *Variable bindings, GRID mode. Check mimic_map_components FIRST. Phase 2+.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Semantic name describing the HTML role (e.g., \"Header Section\", \"Metrics Row\", \"Card: Revenue\"). Never use generic names like \"Frame\"."
+          },
+          "parentId": {
+            "type": "string",
+            "description": "Parent node ID. Omit for page-level."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "HORIZONTAL",
+              "VERTICAL",
+              "NONE"
+            ],
+            "description": "Auto-layout direction. Prefer HORIZONTAL or VERTICAL — NONE breaks portability. Use layoutPositioning ABSOLUTE for overlay children instead."
+          },
+          "layoutMode": {
+            "type": "string",
+            "enum": [
+              "GRID"
+            ],
+            "description": "Set to GRID to use CSS-grid-style layout (Grid automation, May 2026) instead of auto-layout. Requires gridRowCount/gridColumnCount. Errors clearly on Figma versions that do not support GRID layoutMode — fall back to direction HORIZONTAL/VERTICAL in that case."
+          },
+          "gridRowCount": {
+            "type": "number",
+            "description": "Number of grid rows. Only used when layoutMode is GRID."
+          },
+          "gridColumnCount": {
+            "type": "number",
+            "description": "Number of grid columns. Only used when layoutMode is GRID."
+          },
+          "gridRowGap": {
+            "type": "number",
+            "description": "Raw row gap in pixels. Only used when layoutMode is GRID."
+          },
+          "gridColumnGap": {
+            "type": "number",
+            "description": "Raw column gap in pixels. Only used when layoutMode is GRID."
+          },
+          "gridRowGapVariable": {
+            "type": "string",
+            "description": "DS spacing variable path for GRID row gap."
+          },
+          "gridColumnGapVariable": {
+            "type": "string",
+            "description": "DS spacing variable path for GRID column gap."
+          },
+          "gridRowSpan": {
+            "type": "number",
+            "description": "When this frame is a child of a GRID-layoutMode parent, how many rows it should span."
+          },
+          "gridColumnSpan": {
+            "type": "number",
+            "description": "When this frame is a child of a GRID-layoutMode parent, how many columns it should span."
+          },
+          "layoutPositioning": {
+            "type": "string",
+            "enum": [
+              "AUTO",
+              "ABSOLUTE"
+            ],
+            "description": "Set to ABSOLUTE to position this frame as an overlay inside an auto-layout parent (out of flow but still contained). Use for grid lines, positioned labels, etc."
+          },
+          "width": {
+            "type": "number",
+            "description": "Fixed width in pixels."
+          },
+          "height": {
+            "type": "number",
+            "description": "Fixed height in pixels."
+          },
+          "layoutSizingHorizontal": {
+            "type": "string",
+            "enum": [
+              "FIXED",
+              "HUG",
+              "FILL"
+            ],
+            "description": "Horizontal sizing mode."
+          },
+          "layoutSizingVertical": {
+            "type": "string",
+            "enum": [
+              "FIXED",
+              "HUG",
+              "FILL"
+            ],
+            "description": "Vertical sizing mode."
+          },
+          "fillVariable": {
+            "type": "string",
+            "description": "DS variable path for background fill."
+          },
+          "paddingVariable": {
+            "type": "string",
+            "description": "DS variable path for uniform padding."
+          },
+          "paddingTopVariable": {
+            "type": "string",
+            "description": "DS variable path for top padding."
+          },
+          "paddingBottomVariable": {
+            "type": "string",
+            "description": "DS variable path for bottom padding."
+          },
+          "paddingLeftVariable": {
+            "type": "string",
+            "description": "DS variable path for left padding."
+          },
+          "paddingRightVariable": {
+            "type": "string",
+            "description": "DS variable path for right padding."
+          },
+          "gapVariable": {
+            "type": "string",
+            "description": "DS variable path for item spacing."
+          },
+          "cornerRadiusVariable": {
+            "type": "string",
+            "description": "DS variable path for corner radius."
+          },
+          "primaryAxisAlignItems": {
+            "type": "string",
+            "enum": [
+              "MIN",
+              "CENTER",
+              "MAX",
+              "SPACE_BETWEEN"
+            ],
+            "description": "Primary axis alignment."
+          },
+          "counterAxisAlignItems": {
+            "type": "string",
+            "enum": [
+              "MIN",
+              "CENTER",
+              "MAX",
+              "BASELINE"
+            ],
+            "description": "Counter axis alignment."
+          },
+          "clipsContent": {
+            "type": "boolean",
+            "description": "Clip content to frame bounds."
+          },
+          "x": {
+            "type": "number",
+            "description": "X position in pixels. Required for page-level artboards. Use rightmost existing artboard x + width + 80."
+          },
+          "y": {
+            "type": "number",
+            "description": "Y position in pixels. Defaults to 0 for artboards."
+          },
+          "maxWidth": {
+            "type": "number",
+            "description": "Max width constraint."
+          },
+          "fillStyleId": {
+            "type": "string",
+            "description": "DS fill style key for background (from figma_list_ds (kind: \"fill_styles\")). Preferred over fillVariable when DS has fill styles but no variables."
+          },
+          "fill": {
+            "type": "string",
+            "description": "Raw hex color for background fill (e.g. \"#ffffff\"). Fallback when no DS styles/variables."
+          },
+          "stroke": {
+            "type": "string",
+            "description": "Raw hex color for stroke (e.g. \"#e4e6ee\"). Fallback when no DS stroke variables."
+          },
+          "strokeVariable": {
+            "type": "string",
+            "description": "DS variable path for stroke color."
+          },
+          "strokeWeight": {
+            "type": "number",
+            "description": "Stroke weight in pixels."
+          },
+          "cornerRadius": {
+            "type": "number",
+            "description": "Raw corner radius in pixels. Use cornerRadiusVariable when DS has radius variables."
+          },
+          "padding": {
+            "type": "number",
+            "description": "Raw uniform padding in pixels. Use paddingVariable when DS has spacing variables."
+          },
+          "paddingTop": {
+            "type": "number",
+            "description": "Raw top padding in pixels."
+          },
+          "paddingRight": {
+            "type": "number",
+            "description": "Raw right padding in pixels."
+          },
+          "paddingBottom": {
+            "type": "number",
+            "description": "Raw bottom padding in pixels."
+          },
+          "paddingLeft": {
+            "type": "number",
+            "description": "Raw left padding in pixels."
+          },
+          "gap": {
+            "type": "number",
+            "description": "Raw item spacing in pixels. Use gapVariable when DS has spacing variables."
+          },
+          "confirmedNoComponent": {
+            "type": "boolean",
+            "description": "Set true only after DS/library search confirms no component exists for this role."
+          },
+          "primitiveOverrideReason": {
+            "type": "string",
+            "description": "Required with confirmedNoComponent for component-like primitives. Explain why this frame must be custom."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "annotations": {
+        "title": "Create an auto-layout frame",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_create_text",
+      "description": "Creates a standalone text node bound to a DS text style (textStyleId — accepts style name or key) and DS color variable (fillVariable) — both are mandatory when the DS has them. Use for text OUTSIDE components; text inside a component instance uses figma_component_text instead. Strips hardcoded line breaks (container width controls wrapping). Name nodes after their HTML role (\"Page Title\", \"Card: Revenue Label\"). Params: parentId + content required. Phase 2+.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Semantic name describing the HTML element role (e.g., \"Page Title\", \"Card: Revenue Label\", \"Subtitle\"). Never use generic names like \"Text\"."
+          },
+          "parentId": {
+            "type": "string",
+            "description": "Parent node ID."
+          },
+          "content": {
+            "type": "string",
+            "description": "Text content."
+          },
+          "textStyleId": {
+            "type": "string",
+            "description": "DS text style — accepts style name (e.g. \"Text sm/Semibold\") or style key. Names are resolved to keys automatically."
+          },
+          "fillStyleId": {
+            "type": "string",
+            "description": "DS fill style key for text color (from figma_list_ds (kind: \"fill_styles\")). Preferred over fillVariable when DS has fill styles but no variables."
+          },
+          "fillVariable": {
+            "type": "string",
+            "description": "DS variable path for text color."
+          },
+          "fontSizeVariable": {
+            "type": "string",
+            "description": "DS variable path for font size (if no text style)."
+          },
+          "lineHeightVariable": {
+            "type": "string",
+            "description": "DS variable path for line height."
+          },
+          "layoutSizingHorizontal": {
+            "type": "string",
+            "enum": [
+              "FIXED",
+              "HUG",
+              "FILL"
+            ],
+            "description": "Horizontal sizing mode."
+          },
+          "layoutPositioning": {
+            "type": "string",
+            "enum": [
+              "AUTO",
+              "ABSOLUTE"
+            ],
+            "description": "Set to ABSOLUTE to overlay this text inside an auto-layout parent."
+          },
+          "width": {
+            "type": "number",
+            "description": "Fixed width for the text node."
+          },
+          "textAlignHorizontal": {
+            "type": "string",
+            "enum": [
+              "LEFT",
+              "CENTER",
+              "RIGHT",
+              "JUSTIFIED"
+            ],
+            "description": "Text alignment."
+          }
+        },
+        "required": [
+          "parentId",
+          "content"
+        ]
+      },
+      "annotations": {
+        "title": "Create a text node",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_create_shape",
+      "description": "Creates a rectangle or ellipse primitive node bound to DS variables. Use for dividers, backgrounds, chart bars/grid-lines/data-points, avatars-as-circles, or any shape with no DS component. Params: shape (\"rectangle\"|\"ellipse\", required), parentId (required), name, width, height, fillStyleId/fillVariable/fill, and for rectangle: cornerRadius(Variable), stroke(Variable), strokeWeight, layoutPositioning, layoutSizing*; for ellipse: arcData ({startingAngle, endingAngle, innerRadius} — donut/pie segments). Requires Phase 2. Prefer a DS component over a shape when one exists.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "shape": {
+            "type": "string",
+            "enum": [
+              "rectangle",
+              "ellipse"
+            ],
+            "description": "Which primitive to create."
+          },
+          "name": {
+            "type": "string",
+            "description": "Node name."
+          },
+          "parentId": {
+            "type": "string",
+            "description": "Parent node ID."
+          },
+          "width": {
+            "type": "number",
+            "description": "Width in pixels."
+          },
+          "height": {
+            "type": "number",
+            "description": "Height in pixels."
+          },
+          "fillStyleId": {
+            "type": "string",
+            "description": "DS fill style key (from figma_list_ds kind=\"fill_styles\"). Rectangle only."
+          },
+          "fillVariable": {
+            "type": "string",
+            "description": "DS variable path for fill color."
+          },
+          "fill": {
+            "type": "string",
+            "description": "Raw hex color for fill (e.g. \"#e4e6ee\"). Fallback when no DS styles/variables. Rectangle only."
+          },
+          "cornerRadius": {
+            "type": "number",
+            "description": "Raw corner radius in pixels. Rectangle only."
+          },
+          "cornerRadiusVariable": {
+            "type": "string",
+            "description": "DS variable path for corner radius. Rectangle only."
+          },
+          "stroke": {
+            "type": "string",
+            "description": "Raw hex color for stroke. Fallback when no DS stroke variables. Rectangle only."
+          },
+          "strokeVariable": {
+            "type": "string",
+            "description": "DS variable path for stroke color. Rectangle only."
+          },
+          "strokeWeight": {
+            "type": "number",
+            "description": "Stroke weight in pixels. Rectangle only."
+          },
+          "layoutPositioning": {
+            "type": "string",
+            "enum": [
+              "AUTO",
+              "ABSOLUTE"
+            ],
+            "description": "Set to ABSOLUTE to overlay this shape inside an auto-layout parent (e.g., grid lines behind bars). Rectangle only."
+          },
+          "layoutSizingHorizontal": {
+            "type": "string",
+            "enum": [
+              "FIXED",
+              "HUG",
+              "FILL"
+            ],
+            "description": "Horizontal sizing mode. Auto-defaults to FIXED when width is specified. Rectangle only."
+          },
+          "layoutSizingVertical": {
+            "type": "string",
+            "enum": [
+              "FIXED",
+              "HUG",
+              "FILL"
+            ],
+            "description": "Vertical sizing mode. Auto-defaults to FIXED when height is specified. Rectangle only."
+          },
+          "arcData": {
+            "type": "object",
+            "description": "Arc data for donut/pie segments. Ellipse only.",
+            "properties": {
+              "startingAngle": {
+                "type": "number"
+              },
+              "endingAngle": {
+                "type": "number"
+              },
+              "innerRadius": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "required": [
+          "shape",
+          "parentId"
+        ]
+      },
+      "annotations": {
+        "title": "Create a rectangle or ellipse primitive",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_create_svg",
+      "description": "Creates a node from an SVG string in Figma. Useful for icons and custom graphics. Returns unboundChildren — a list of child nodes that need DS variable bindings. You MUST apply figma_update_node (op: \"fill\") to every unbound vector and figma_update_node (op: \"text_style\" then op: \"fill\") to every unbound text. Leaving unbound children breaks DS compliance and light/dark mode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Node name."
+          },
+          "parentId": {
+            "type": "string",
+            "description": "Parent node ID."
+          },
+          "svgString": {
+            "type": "string",
+            "description": "SVG markup string."
+          },
+          "fillVariable": {
+            "type": "string",
+            "description": "DS variable path for fill override (applied to ALL child vectors uniformly)."
+          },
+          "strokeVariable": {
+            "type": "string",
+            "description": "DS variable path for stroke override."
+          },
+          "layoutSizingHorizontal": {
+            "type": "string",
+            "enum": [
+              "FIXED",
+              "HUG",
+              "FILL"
+            ],
+            "description": "Horizontal sizing mode. Use FILL for charts inside auto-layout containers so they stretch to the container width."
+          },
+          "layoutSizingVertical": {
+            "type": "string",
+            "enum": [
+              "FIXED",
+              "HUG",
+              "FILL"
+            ],
+            "description": "Vertical sizing mode."
+          }
+        },
+        "required": [
+          "parentId",
+          "svgString"
+        ]
+      },
+      "annotations": {
+        "title": "Create a node from SVG markup",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_insert_component",
+      "description": "Imports and inserts a DS component instance into the document. Returns componentKey/nodeId, configurationChecklist (booleans to enable, text nodes to override, variants to set), and _autoApplied variant defaults replayed from the knowledge store when a confirmed recipe exists. Params: componentKey (required, from mimic_map_components/discovery), parentId (required), name (instance name override), importMode (\"component\"|\"componentSet\", usually inferred), applyRecipe (false to skip auto-replay). Workflow position: Phase 3 build, after mimic_map_components. Follow up with figma_component_text and figma_set_variant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "componentKey": {
+            "type": "string",
+            "description": "Component key from the DS library."
+          },
+          "name": {
+            "type": "string",
+            "description": "Instance name override."
+          },
+          "parentId": {
+            "type": "string",
+            "description": "Parent node ID to insert into."
+          },
+          "importMode": {
+            "type": "string",
+            "enum": [
+              "component",
+              "componentSet"
+            ],
+            "description": "Optional import hint. Usually inferred from DS discovery cache."
+          },
+          "applyRecipe": {
+            "type": "boolean",
+            "description": "Set to false to skip auto-applying confirmed recipe defaults. Defaults to true."
+          }
+        },
+        "required": [
+          "componentKey",
+          "parentId"
+        ]
+      },
+      "annotations": {
+        "title": "Insert a DS component instance",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_component_text",
+      "description": "Overrides text on a component instance in one call — pass an `overrides` array (a single override is just a one-item array). Each override sets one text node via textNodeName (matches by name — use for most cases) or textNodeId (exact match — use when configurationHints.textNodes gave you IDs, e.g. components with repeated node names). Use after figma_insert_component; configurationHints.textNodes lists every node that needs overriding. Saves N-1 tool calls vs. one call per node. Requires Phase 2.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "Component instance node ID."
+          },
+          "overrides": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "textNodeName": {
+                  "type": "string",
+                  "description": "Name of the text node within the component. Ignored if textNodeId is set."
+                },
+                "textNodeId": {
+                  "type": "string",
+                  "description": "Exact TEXT node ID from configurationHints.textNodes. Takes precedence over textNodeName — use when component text nodes share the same name."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "New text content."
+                },
+                "fillVariable": {
+                  "type": "string",
+                  "description": "Optional DS text color variable path."
+                }
+              },
+              "required": [
+                "content"
+              ]
+            },
+            "description": "Array of text overrides to apply. Each item needs textNodeName or textNodeId, plus content."
+          }
+        },
+        "required": [
+          "nodeId",
+          "overrides"
+        ]
+      },
+      "annotations": {
+        "title": "Override component instance text",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "figma_set_variant",
+      "description": "Sets variant properties (e.g. Size, State, Color) on a component instance. Use figma_inspect (target: \"variants\") first to see available properties/values for the component set. Params: nodeId (required), properties (required, key-value map e.g. { \"Size\": \"Large\" }). Requires Phase 2. Tracks replay success/failure for the knowledge store's recipe learning.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "Component instance node ID."
+          },
+          "properties": {
+            "type": "object",
+            "description": "Variant property key-value pairs (e.g. { \"Size\": \"Large\", \"State\": \"Default\" }).",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "nodeId",
+          "properties"
+        ]
+      },
+      "annotations": {
+        "title": "Set component variant properties",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "figma_swap_main_component",
+      "description": "Swaps or replaces a component instance's underlying component. mode=\"swap\" (default) preserves the instance's overrides (text, variants) — use when switching to a close variant of the same component. mode=\"replace\" removes the instance and creates a fresh one at the same position — use when swapping to an unrelated component where old overrides would be invalid. Params: nodeId (required), newComponentKey (required), mode (\"swap\"|\"replace\", default \"swap\"). Requires Phase 2.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "Instance node ID."
+          },
+          "newComponentKey": {
+            "type": "string",
+            "description": "New component key to swap/replace to."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "swap",
+              "replace"
+            ],
+            "description": "\"swap\" preserves overrides (default). \"replace\" creates a fresh instance at the same position."
+          }
+        },
+        "required": [
+          "nodeId",
+          "newComponentKey"
+        ]
+      },
+      "annotations": {
+        "title": "Swap or replace a component instance",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_manage_slot",
+      "description": "Fills or resets a SLOT-type component property on an existing instance (Figma Slots, GA June 2026). action=\"fill\" inserts a DS component instance into the slot (use configurationHints.slotProperties from figma_insert_component to find slotName). action=\"reset\" restores the slot's default content. Params: nodeId (required), slotName (required), action (\"fill\"|\"reset\", default \"fill\"), componentKey (required for action=\"fill\"). Requires Phase 2. Slot fills are recorded for build-report visibility only — never auto-replayed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "Instance node ID that owns the slot."
+          },
+          "slotName": {
+            "type": "string",
+            "description": "SLOT property name from configurationHints.slotProperties."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "fill",
+              "reset"
+            ],
+            "description": "\"fill\" inserts a component into the slot (default). \"reset\" restores default content."
+          },
+          "componentKey": {
+            "type": "string",
+            "description": "DS component key to insert into the slot. Required for action=\"fill\"."
+          }
+        },
+        "required": [
+          "nodeId",
+          "slotName"
+        ]
+      },
+      "annotations": {
+        "title": "Fill or reset a component slot",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_update_node",
+      "description": "Mutates an existing Figma node or the editor's UI focus, dispatched by `op`. Ops: \"text\" (set text content), \"text_style\" (apply DS text style), \"fill\" (fillStyleId/fillVariable/raw fill), \"layout\" (sizing, padding, gap, alignment), \"visibility\" (show/hide), \"position\" (absolute x/y), \"restyle\" (artboard/frame fill+radius+stroke+padding+gap in one call), \"move\" (reparent via parentId+index), \"select\" (select+scroll into view), \"page\" (switch page by name/id). All ops except \"select\"/\"page\" require Phase 2 (DS discovered) and validate any *Variable path against the cached DS before sending. Use figma_delete_node (separate, destructive tool) to remove a node instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "text",
+              "text_style",
+              "fill",
+              "layout",
+              "visibility",
+              "position",
+              "restyle",
+              "move",
+              "select",
+              "page"
+            ],
+            "description": "Which mutation to perform."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Target node ID. Required for every op except \"page\"."
+          },
+          "content": {
+            "type": "string",
+            "description": "New text content. op=\"text\"."
+          },
+          "textStyleId": {
+            "type": "string",
+            "description": "DS text style key. op=\"text_style\"."
+          },
+          "fillStyleId": {
+            "type": "string",
+            "description": "DS fill style key (from figma_list_ds). op=\"fill\". Priority: fillStyleId → fillVariable → fill."
+          },
+          "fillVariable": {
+            "type": "string",
+            "description": "DS variable path for fill color. op=\"fill\" or \"restyle\"."
+          },
+          "fill": {
+            "description": "Raw color as hex string (\"#3b36f2\") or RGB object. op=\"fill\" fallback when no DS styles/variables available."
+          },
+          "layoutSizingHorizontal": {
+            "type": "string",
+            "enum": [
+              "FIXED",
+              "HUG",
+              "FILL"
+            ],
+            "description": "op=\"layout\"."
+          },
+          "layoutSizingVertical": {
+            "type": "string",
+            "enum": [
+              "FIXED",
+              "HUG",
+              "FILL"
+            ],
+            "description": "op=\"layout\"."
+          },
+          "width": {
+            "type": "number",
+            "description": "Fixed width. op=\"layout\"."
+          },
+          "height": {
+            "type": "number",
+            "description": "Fixed height. op=\"layout\"."
+          },
+          "paddingVariable": {
+            "type": "string",
+            "description": "DS variable for uniform padding. op=\"layout\" or \"restyle\"."
+          },
+          "paddingTopVariable": {
+            "type": "string",
+            "description": "op=\"layout\"."
+          },
+          "paddingBottomVariable": {
+            "type": "string",
+            "description": "op=\"layout\"."
+          },
+          "paddingLeftVariable": {
+            "type": "string",
+            "description": "op=\"layout\"."
+          },
+          "paddingRightVariable": {
+            "type": "string",
+            "description": "op=\"layout\"."
+          },
+          "gapVariable": {
+            "type": "string",
+            "description": "DS variable for item spacing. op=\"layout\" or \"restyle\"."
+          },
+          "maxWidth": {
+            "type": "number",
+            "description": "Max width constraint. op=\"layout\"."
+          },
+          "primaryAxisAlignItems": {
+            "type": "string",
+            "enum": [
+              "MIN",
+              "CENTER",
+              "MAX",
+              "SPACE_BETWEEN"
+            ],
+            "description": "op=\"layout\"."
+          },
+          "counterAxisAlignItems": {
+            "type": "string",
+            "enum": [
+              "MIN",
+              "CENTER",
+              "MAX",
+              "BASELINE"
+            ],
+            "description": "op=\"layout\"."
+          },
+          "visible": {
+            "type": "boolean",
+            "description": "True to show, false to hide. op=\"visibility\"."
+          },
+          "x": {
+            "type": "number",
+            "description": "Absolute x position. op=\"position\"."
+          },
+          "y": {
+            "type": "number",
+            "description": "Absolute y position. op=\"position\"."
+          },
+          "cornerRadiusVariable": {
+            "type": "string",
+            "description": "DS variable for corner radius. op=\"restyle\"."
+          },
+          "strokeVariable": {
+            "type": "string",
+            "description": "DS variable for stroke color. op=\"restyle\"."
+          },
+          "strokeWeight": {
+            "type": "number",
+            "description": "Stroke weight. op=\"restyle\"."
+          },
+          "parentId": {
+            "type": "string",
+            "description": "New parent node ID. op=\"move\"."
+          },
+          "index": {
+            "type": "number",
+            "description": "Insert index within the new parent. op=\"move\". Omit for end."
+          },
+          "pageName": {
+            "type": "string",
+            "description": "Page name to switch to. op=\"page\"."
+          },
+          "pageId": {
+            "type": "string",
+            "description": "Page ID to switch to. op=\"page\". Takes precedence over pageName."
+          }
+        },
+        "required": [
+          "op"
+        ]
+      },
+      "annotations": {
+        "title": "Update a Figma node or editor focus",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_variable_modes",
+      "description": "Sets the variable mode (e.g. light/dark) on a node — required on every new artboard, or DS variables render as black. By default sets the mode on ALL variable collections at once (pass modeIndex only). Pass collectionName to target a single collection instead. Params: nodeId (required, typically the artboard), modeIndex (required, 0=default/light, 1=dark), collectionName (optional). Requires Phase 2.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "Node ID (typically the artboard)."
+          },
+          "modeIndex": {
+            "type": "number",
+            "description": "Mode index. 0 = default/light, 1 = dark (if available)."
+          },
+          "collectionName": {
+            "type": "string",
+            "description": "Optional — variable collection name. Omit to set the mode on ALL collections at once (recommended)."
+          }
+        },
+        "required": [
+          "nodeId",
+          "modeIndex"
+        ]
+      },
+      "annotations": {
+        "title": "Set artboard variable mode(s)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "figma_delete_node",
+      "description": "Deletes a node from the Figma document. NEVER deletes artboards (top-level frames) — only child nodes within an artboard. To rebuild a screen, create a NEW artboard alongside the existing one. Destructive and irreversible via the API — verify the nodeId with figma_inspect first if unsure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "Node ID to delete. Must NOT be a top-level artboard."
+          }
+        },
+        "required": [
+          "nodeId"
+        ]
+      },
+      "annotations": {
+        "title": "Delete a Figma node",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "figma_inspect",
+      "description": "Reads Figma document state — node properties, children, parent, text detail, pages, top-level page nodes, selection, component variants, or a build-manifest section lookup. Read-only, never blocked by phase gates. Use to verify state before/after edits, discover node IDs, or check what a component set supports. Params: target (required: \"node\"|\"children\"|\"parent\"|\"text\"|\"pages\"|\"page\"|\"selection\"|\"variants\"|\"section\") selects the read; nodeId (node/children/parent/text), depth (children, default 1), componentSetKey (variants), sectionName (section — HTML section name from the last build).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "node",
+              "children",
+              "parent",
+              "text",
+              "pages",
+              "page",
+              "selection",
+              "variants",
+              "section"
+            ],
+            "description": "\"node\"=full node props, \"children\"=child nodes, \"parent\"=parent node, \"text\"=text node detail, \"pages\"=all pages in the file, \"page\"=top-level nodes on the current page, \"selection\"=currently selected nodes, \"variants\"=all variants for a component set, \"section\"=find a node by its HTML section name from the last build."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Node ID to inspect. Required for target: node, children, parent, text."
+          },
+          "depth": {
+            "type": "number",
+            "description": "How many levels deep to traverse. Only used with target=\"children\". Default 1."
+          },
+          "componentSetKey": {
+            "type": "string",
+            "description": "Component set key. Required for target=\"variants\"."
+          },
+          "sectionName": {
+            "type": "string",
+            "description": "The HTML section to find (e.g., \"header\", \"metrics row\", \"table\"). Required for target=\"section\"."
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "annotations": {
+        "title": "Inspect Figma document state",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "mimic_ai_knowledge_read",
+      "description": "Loads the knowledge store: learned component recipes, layout/pattern data, DS gaps, user-defined rules, and meta stats (build counts, replay savings). Call at the start of a session to see what Mimic has already learned about this DS. Params: format (\"json\" default — structured data; \"design_md\" — renders the current DS + recipes as a DESIGN.md-style markdown string for documentation/handoff).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "design_md"
+            ],
+            "description": "\"json\" (default) returns structured store contents. \"design_md\" returns a rendered DESIGN.md markdown string instead."
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "title": "Read the knowledge store",
+        "readOnlyHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "mimic_ai_knowledge_write",
+      "description": "Saves a component recipe, layout pattern, DS gap, or user-defined design rule to the persistent knowledge store — the mechanism that lets Mimic learn across builds. Use \"rule\" when the user corrects build behavior in a generalizable way (e.g. \"cards always have a header + content frame\"); other types are usually written automatically by the build pipeline. Params: type (\"component\"|\"pattern\"|\"gap\"|\"rule\", required), id (unique key, required), data (entry payload, required).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "component",
+              "pattern",
+              "gap",
+              "rule"
+            ],
+            "description": "Type of knowledge entry to save. Use \"rule\" for user-defined design rules that should be followed on every build (e.g., color semantics, card structure, component usage patterns)."
+          },
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for the entry."
+          },
+          "data": {
+            "type": "object",
+            "description": "The entry data to store."
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "data"
+        ]
+      },
+      "annotations": {
+        "title": "Write a knowledge store entry",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "mimic_generate_build_report",
+      "description": "Compiles the current build session into a structured report — DS component usage, primitives with justifications, DS changes/staleness, gap recommendations, binding-quality failures, efficiency (tool calls, cache hits, replay savings), and design-rule compliance. MANDATORY at the end of every build, before responding to the user — advances phase to 5 and resets per-build counters. No params.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "screenName": {
+            "type": "string",
+            "description": "Name of the screen that was built."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "html"
+            ],
+            "description": "Report format. Defaults to markdown."
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "instances": {
+                  "type": "number"
+                },
+                "componentKey": {
+                  "type": "string",
+                  "description": "Component key used for insertion. If provided, persisted directly to knowledge store."
+                }
+              }
+            },
+            "description": "DS components used in the build. Include componentKey from figma_insert_component responses for reliable learning."
+          },
+          "primitives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "element": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "searchTerms": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "description": "Primitives used (elements not found in DS)."
+          },
+          "toolCallCount": {
+            "type": "number",
+            "description": "Total tool calls in the build. Falls back to session count."
+          },
+          "cacheHits": {
+            "type": "number",
+            "description": "Number of cache hits during the build."
+          }
+        },
+        "required": [
+          "screenName",
+          "components",
+          "primitives"
+        ]
+      },
+      "annotations": {
+        "title": "Generate the build report",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "mimic_compute_chart",
+      "description": "Computes chart geometry (bar positions, SVG paths, arc angles, grid lines, axis labels) from raw data WITHOUT building anything in Figma — pure math, no bridge/Figma calls, usable at any phase. Use when you need coordinates/paths to hand-build a chart yourself; use mimic_build_chart instead when you just want the finished chart created in one call. Supports chartType: bar, horizontalBar, donut, line, radar, scatter, heatmap. Params: chartType (required), data (required, points), dimensions (chart-type-specific sizing).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chartType": {
+            "type": "string",
+            "enum": [
+              "bar",
+              "horizontalBar",
+              "donut",
+              "line",
+              "radar",
+              "scatter",
+              "heatmap"
+            ],
+            "description": "The type of chart to compute."
+          },
+          "data": {
+            "type": "array",
+            "description": "Chart data points. Shape depends on chartType."
+          },
+          "dimensions": {
+            "type": "object",
+            "description": "Chart dimensions. Keys depend on chartType: chartHeight + optional chartWidth (bar), outerRadius/innerRadius (donut), plotWidth/plotHeight (line/scatter), radius/cx/cy (radar), cellWidth/cellHeight (heatmap). Optional: yPrefix (e.g. \"$\"), ySuffix (e.g. \"%\") for axis label formatting."
+          }
+        },
+        "required": [
+          "chartType",
+          "data",
+          "dimensions"
+        ]
+      },
+      "annotations": {
+        "title": "Compute chart geometry",
+        "readOnlyHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "figma_validate_ds_compliance",
+      "description": "Recursively checks a node (and its children) against the current DS enforcement profile — flags hardcoded colors/fonts instead of variables/styles, missing text style bindings, and other DS violations. Use during Phase 3/4 QA, especially at the 20-op build checkpoint, before generating the report. Params: nodeId (required, typically the artboard root).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "The Figma node ID to validate."
+          }
+        },
+        "required": [
+          "nodeId"
+        ]
+      },
+      "annotations": {
+        "title": "Validate DS compliance",
+        "readOnlyHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "mimic_pipeline_resolve",
+      "description": "Classifies build input as a URL, local file path, or raw HTML string and returns the resolved content ready for building. Use FIRST when the user gives you a link, a file path, or ambiguous input instead of raw HTML — it tells you what you actually received. Params: input (string, required). Workflow position: before mimic_discover_ds, at the very start of a build.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "A URL, file path, or raw HTML string to classify and resolve."
+          }
+        },
+        "required": [
+          "input"
+        ]
+      },
+      "annotations": {
+        "title": "Classify build input",
+        "readOnlyHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "mimic_build_table",
+      "description": "Bulk table builder — creates an entire data table in ONE call: column frames, DS Table header cell + Table cell components, variants (cellVariants for per-value badge colors), text, and consistent row height. Use for ANY HTML data table instead of cell-by-cell insertion; reduces 200+ tool calls to 1. Requires table cell components in the DS (returns creation guidance if missing). Key params: parentId, columns (header/style/cellVariants), rows (\"text|supporting\" syntax), cellHeight. Phase 2+.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parentId": {
+            "type": "string",
+            "description": "Parent node ID to insert the table body into."
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "header": {
+                  "type": "string",
+                  "description": "Column header text (e.g. \"Name\", \"Status\")."
+                },
+                "style": {
+                  "type": "string",
+                  "description": "Table cell variant Style for this column. Common values: \"Text\", \"Lead text\", \"Lead avatar\", \"Badge\", \"Link\". Check available styles from mimic_map_components or figma_insert_component response."
+                },
+                "supportingText": {
+                  "type": "boolean",
+                  "description": "Whether cells in this column show supporting text (second line). Default false."
+                },
+                "cellVariants": {
+                  "type": "object",
+                  "description": "Maps cell text values to variant overrides. Applied AFTER the column Style variant. Example for badge colors: {\"Active\": {\"Color\": \"Success\"}, \"Pending\": {\"Color\": \"Warning\"}, \"Inactive\": {\"Color\": \"Gray\"}}. Nested components (e.g. Badge inside Table cell) inherit variant changes.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "description": "Variant property key-value pairs to apply when cell text matches the key."
+                  }
+                }
+              },
+              "required": [
+                "header",
+                "style"
+              ]
+            },
+            "description": "Column definitions. Each column becomes a vertical frame with a header cell + data cells."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Row data as arrays of strings. Each inner array has one value per column. Use \"|\" to separate text and supporting text (e.g. \"Sarah Chen|sarah@company.com\"). Array length must match columns length."
+          },
+          "headerCellKey": {
+            "type": "string",
+            "description": "Component key for Table header cell. If omitted, auto-resolved from DS cache/knowledge store."
+          },
+          "dataCellKey": {
+            "type": "string",
+            "description": "Component key for Table cell. If omitted, auto-resolved from DS cache/knowledge store."
+          },
+          "cellHeight": {
+            "type": "number",
+            "description": "Fixed height for ALL data cells in pixels. Ensures row alignment across columns. Common values: 44, 56, 64, 72. If omitted, cells use HUG (may cause misalignment)."
+          },
+          "headerVariant": {
+            "type": "object",
+            "description": "Variant overrides for all header cells (e.g. {\"Checkbox\": \"False\"}). Applied to every header."
+          },
+          "firstColumnPaddingLeft": {
+            "type": "string",
+            "description": "DS spacing variable path for extra left padding on header cells and data cells of the FIRST column. Use when the table is inside a card to create visual inset (e.g., 24px/spacing-3xl). Applied via paddingLeftVariable on cells."
+          },
+          "lastColumnPaddingRight": {
+            "type": "string",
+            "description": "DS spacing variable path for extra right padding on header cells and data cells of the LAST column. Use when the table is inside a card to create visual inset (e.g., 24px/spacing-3xl). Applied via paddingRightVariable on cells."
+          }
+        },
+        "required": [
+          "parentId",
+          "columns",
+          "rows"
+        ]
+      },
+      "annotations": {
+        "title": "Bulk-build a data table",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "mimic_build_chart",
+      "description": "Bulk chart builder — creates an entire chart in ONE call: container, visualization (native rectangles or stroke-free SVG), axis labels, grid lines, and legend, all bound to DS variables and text styles. Use for ANY HTML chart instead of hand-building; reduces 30-50 tool calls to 1. chartType: bar, line, donut, radar. Key params: parentId, chartType, title, data, dimensions, colors (neutral DS data palette — never Brand/Success/Warning/Error). Use mimic_compute_chart for geometry-only. Phase 2+.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parentId": {
+            "type": "string",
+            "description": "Parent node ID to insert the chart into."
+          },
+          "chartType": {
+            "type": "string",
+            "enum": [
+              "line",
+              "bar",
+              "donut",
+              "radar"
+            ],
+            "description": "The type of chart to build."
+          },
+          "title": {
+            "type": "string",
+            "description": "Chart card title text."
+          },
+          "data": {
+            "type": "array",
+            "description": "Chart data points. Bar: [{label, value}]. Donut: [{label, value}]. Line: [{label, value}] or [{x, y}]. Radar: [{label, value}] or [{label, values: [v1, v2]}] for multi-series."
+          },
+          "dimensions": {
+            "type": "object",
+            "description": "Chart dimensions. Bar: {chartHeight, chartWidth?}. Donut: {outerRadius, innerRadius}. Line: {plotWidth, plotHeight}. Radar: {radius}. Optional for bar/line: yPrefix, ySuffix."
+          },
+          "seriesNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Legend labels for multi-series charts (e.g. [\"Current\", \"Target\"]). For donut charts, legend is auto-generated from data labels."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "DS color variable paths for data elements. Falls back to DS cache palette or default."
+          },
+          "gridColor": {
+            "type": "string",
+            "description": "DS variable path for grid lines. Falls back to DS cache border/secondary match."
+          },
+          "labelColor": {
+            "type": "string",
+            "description": "DS variable path for axis label text color. Falls back to DS cache text/tertiary match."
+          },
+          "labelStyle": {
+            "type": "string",
+            "description": "DS text style name for axis labels. Falls back to smallest text style in DS cache."
+          },
+          "titleStyle": {
+            "type": "string",
+            "description": "DS text style name for chart title. Falls back to DS cache sm/Semibold match."
+          },
+          "titleColor": {
+            "type": "string",
+            "description": "DS variable path for title text color. Falls back to DS cache text/primary match."
+          }
+        },
+        "required": [
+          "parentId",
+          "chartType",
+          "title",
+          "data",
+          "dimensions"
+        ]
+      },
+      "annotations": {
+        "title": "Bulk-build a chart",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "mimic-ai",
+    "version": "3.0.1"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 10438,
+  "stderr": ""
+}

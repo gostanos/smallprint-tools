@@ -1,0 +1,886 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "slimdex-mcp",
+  "version": "1.1.0",
+  "integrity": {
+    "dist": "sha512-dGADCGD1wmRBv8JRz1FxrWxFbHaFTlgZTZBdyjsT3vN5FgzFHsE3nKRuyM37VjsjagdSiQUgfw907iPzY2ic3w==",
+    "installed": "sha512-dGADCGD1wmRBv8JRz1FxrWxFbHaFTlgZTZBdyjsT3vN5FgzFHsE3nKRuyM37VjsjagdSiQUgfw907iPzY2ic3w=="
+  },
+  "bin": "node_modules/slimdex-mcp/dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T20:54:58.323Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "index_repo",
+      "description": "Build or refresh the persistent code index (symbols + imports). Only files whose mtime changed are re-parsed, so re-run it liberally, like `git fetch`, before trusting a search. Honors <root>/.slimdex.json (ignoreDirs/extensions/exclude/maxFileBytes) and reports config problems instead of ignoring them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "description": "Ignore cache and reparse everything."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "snapshot",
+      "description": "Copy every uncommitted file into .slimdex/snapshots/<timestamp>/ as insurance against accidental resets. Also runs automatically (at most hourly) when index_repo sees a dirty tree; newest 10 kept. Defeats a stray `git checkout .`; does NOT replace committing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "outline_file",
+      "description": "Compact outline of one file — declarations with line numbers, not the body. Orient before reading.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_lines",
+      "description": "Read only lines [start..end] (1-indexed, inclusive) of a file. Cheaper than the whole file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "path",
+          "start",
+          "end"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_code",
+      "description": "Search indexed files; return path:line:col + the matching line (+ optional caret highlight). Every occurrence on a line counts, and the reported total is exact unless the scan cap trips (then it says so). Page with limit and either offset or the opaque cursor from a previous call. Vendor/build dirs are already excluded. Use pathPrefix to scope; for symbols prefer find_definition/find_references.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string"
+          },
+          "regex": {
+            "type": "boolean"
+          },
+          "ignoreCase": {
+            "type": "boolean"
+          },
+          "pathPrefix": {
+            "type": "string"
+          },
+          "highlight": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Max matches to return (default 20)."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Skip this many matches. Ignored if cursor is given."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque token from a previous call's 'next cursor' to fetch the next page."
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_definition",
+      "description": "Look up a symbol name in the index; return definition site(s) as path:line:col + kind. Heuristic. Paged: the total is always exact, `limit`/`offset` control how many are printed, `pathPrefix` scopes them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "pathPrefix": {
+            "type": "string",
+            "description": "Only definitions under this path."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Max sites to print (default 50)."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_symbols",
+      "description": "Find indexed symbols whose name matches a query, ranked exact > prefix > substring > subsequence. Use this when you half-remember a name (\"something like handleAuth\") — it reads only the index, never the files, so it is far cheaper and far less noisy than search_code for finding a declaration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Filter by kind: function, class, method, interface, type, …"
+          },
+          "pathPrefix": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Default 25."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_references",
+      "description": "Whole-word textual search for a symbol, returned as path:line:col with the enclosing function/class. Counts every occurrence, including repeats on one line. Not scope-aware, so may include unrelated same-named identifiers. Supports pathPrefix, limit and offset.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "pathPrefix": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_tests",
+      "description": "Which references to a symbol live in TEST files: 'if I change calculateTax, which tests catch a break' — run exactly those, not the whole suite. Nothing covering it is surfaced as risk BEFORE you edit. Detected by path convention (*.test.*, *.spec.*, __tests__/, test_*.py …) or an indexed describe/it title. Textual, so same caveat as find_references.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "pathPrefix": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_intent",
+      "description": "Know WHAT the code does but not its name: a words query ranked over every indexed symbol by BM25 on tokenized names (camelCase/snake_case), kinds and filenames — 'validate user email' surfaces validateEmail / emailValidator. Matches WORDING, not meaning. Exact/partial name → search_symbols; literal string → search_code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What the code does, in words — 'parse the config file', 'retry a failed request'."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Top matches to return (default 10)."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "context_pack",
+      "description": "Understand a whole topic in ONE call instead of ~10: give a natural-language query ('how does auth work') and slimdex runs the exploration itself — BM25-ranks the symbols, shows how their files connect (import graph, one hop), includes the top few bodies, all under a char budget. Saves the round-trips AND keeps ten separate results out of the transcript. Orient with this; drop to get_symbol_context / read_lines for exact source.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The topic to understand, in words — 'how does login work', 'the indexing pipeline'."
+          },
+          "budget": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 20000,
+            "description": "Soft char cap on the whole pack (default 6000)."
+          },
+          "symbols": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "How many ranked symbols to list (default 8)."
+          },
+          "bodies": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8,
+            "description": "How many top symbols to include full bodies for (default 3)."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_symbol_context",
+      "description": "Return ONLY the body of a symbol (function/class/method) plus a few context lines — not the whole file. Give a name (resolved via the index), several `names` at once, or an explicit path+line. This is the biggest per-lookup token saver. When a skeleton showed you WHERE the functions are, pull their bodies with names:[...] here — do NOT fall back to reading the whole file for a handful of bodies.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Symbol name to resolve via the index."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 10,
+            "description": "Several symbol names in one call — one bounded body each. The narrow alternative to a whole-file read."
+          },
+          "path": {
+            "type": "string",
+            "description": "File path (use with line instead of name)."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Definition line (use with path)."
+          },
+          "pathPrefix": {
+            "type": "string",
+            "description": "Restrict name resolution to files under this prefix — disambiguates a duplicated name in ONE call."
+          },
+          "before": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "after": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "maxLines": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000,
+            "description": "Cap each returned span (default 200); tail elided with a notice."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "replace_symbol",
+      "description": "Write a symbol by NAME — you never re-send the old body to locate the edit. Two modes: REPLACE (name/path+line plus body) overwrites an existing definition; INSERT (after:\"X\" or before:\"X\" plus body) adds a NEW symbol next to an existing one, which is what you want for 'add a method beside the related ones' — the anchor's own span comes from the index, so `after` means after its closing brace, not its signature line. Insert puts `body` in verbatim: indent it for the file, and include a leading/trailing newline if you want a blank line. range comes from the index; the file is SNAPSHOTTED first (.slimdex/snapshots), re-indexed after, and the new line span is reported so you don't re-read to verify. Safe to mix with ordinary edit tools: if the file moved under the index, a NAME is re-resolved against a fresh parse automatically (an explicit path+line still refuses, since that coordinate is yours). Ambiguous/unknown names are refused, never guessed. `body` = the complete replacement definition, indented for the file. `edits:[…]` applies several at once (one snapshot, one re-index); the batch is refused before any write if a target is ambiguous, two edits overlap, or a file isn't writable, and a write that fails mid-batch rolls the earlier files back and says so.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Symbol to replace, resolved via the index."
+          },
+          "path": {
+            "type": "string",
+            "description": "File path (use with line instead of name)."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Definition line (use with path)."
+          },
+          "body": {
+            "type": "string",
+            "description": "The complete new definition, replacing the old one verbatim."
+          },
+          "after": {
+            "type": "string",
+            "description": "INSERT mode: add `body` as a NEW symbol immediately after this existing symbol's closing brace. Pin which occurrence with path + line when the name repeats inside one file (normal for CSS)."
+          },
+          "before": {
+            "type": "string",
+            "description": "INSERT mode: add `body` as a NEW symbol immediately before this existing symbol."
+          },
+          "pathPrefix": {
+            "type": "string",
+            "description": "Disambiguate the after/before anchor when the name exists in several files."
+          },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "body": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "body"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 20,
+            "description": "Several replacements, applied atomically. Each entry takes name, or path+line, plus body."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_file_skeleton",
+      "description": "Structural skeleton of a file: every declaration's signature with its indentation preserved and bodies replaced by ' … {line}'. Turns a 2,000-line file into a readable map for a fraction of the tokens. Use this before any full read of a file over ~300 lines.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_context",
+      "description": "ONE call for what would take several: definition, signature, callers/references (attributed to their enclosing symbol — heuristic), imports, dependents. Sections are OPT-IN via `include` (default definition,signature,callers,imports); add 'body' for full source, 'dependents' for reverse deps. Bounded by callerLimit and maxChars with explicit truncation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "definition",
+                "signature",
+                "body",
+                "callers",
+                "imports",
+                "dependents"
+              ]
+            },
+            "description": "Which sections to return. Omit for the default set."
+          },
+          "callerLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Max callers to list (default 12)."
+          },
+          "maxChars": {
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 50000,
+            "description": "Hard cap on response size (default 12000)."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "repo_map",
+      "description": "Birds-eye overview: top directories with file counts, total lines, and symbol counts. Pass `path` to drill into one directory and list its largest files (with `top` to cap the list) — the bridge between orienting at the directory level and picking a file to skeleton. Start every session here.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "path": {
+            "type": "string",
+            "description": "Drill into this directory and list files instead of directories."
+          },
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "With `path`: how many files to list (default 20)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "changed_files",
+      "description": "Summarize the working-tree diff (or a diff against `base`) as changed files with +added/-deleted counts AND the enclosing functions/classes each hunk lands in — the blast radius, without pulling the patch into context. The cheap way to start a session on a dirty repo. Requires a git checkout.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "base": {
+            "type": "string",
+            "description": "Ref to diff against (e.g. 'main', 'HEAD~3'). Omit for working tree vs HEAD."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Max files to list (default 30)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dep_graph",
+      "description": "Query the internal import graph. mode=imports: what a file imports. mode=dependents: what imports it. mode=mermaid: a diagram — pass root (+depth, default 2) to walk outward from one file instead of dumping the whole graph, or scope to a path prefix. Run before refactoring a shared module.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "imports",
+              "dependents",
+              "mermaid"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "root": {
+            "type": "string",
+            "description": "mermaid: start file to walk out from (BFS)."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "mermaid: import hops to follow from root (default 2)."
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "stats",
+      "description": "Per-tool call counts and response sizes recorded to <root>/.slimdex/stats.json. Reported in characters, not tokens — char/4 estimates are unreliable across tokenizers, so this measures what it can measure honestly. Use it to see which tool is actually producing your context, and to tune limits. Counters are CUMULATIVE across every session on this repo until reset. To measure ONE task: call checkpoint:true when you start, then session:true when you finish — the server is long-lived, so session:true alone means 'since the server booted', which can span several chats.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reset": {
+            "type": "boolean",
+            "description": "Clear ALL counters, including the repo's all-time history."
+          },
+          "checkpoint": {
+            "type": "boolean",
+            "description": "Zero the session tally only (all-time history untouched). Call at the start of a task."
+          },
+          "session": {
+            "type": "boolean",
+            "description": "Report what this process recorded since it started, or since the last checkpoint."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "memory_save",
+      "description": "Save a durable note (decision, gotcha, TODO, location) to <root>/.slimdex/memory.json.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "memory_search",
+      "description": "Find saved memory facts by substring and/or tag. Previews by default; memory_get expands one by id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "full": {
+            "type": "boolean",
+            "description": "Whole bodies instead of previews."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "recap",
+      "description": "Prior activity from the server's own tool-call journal — most-examined files, most-looked-up symbols, recent searches. Needs NO prior memory_save; works even when the last session saved nothing. recap = where sessions looked, memory = what they concluded. Normally use brief (folds both in); reach here for the raw journal.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 400,
+            "description": "How many recent journaled calls to summarize (default 200)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "brief",
+      "description": "CALL THIS FIRST in a fresh chat — including on a repo slimdex has never seen, where it builds the index itself rather than sending you to index_repo. One synthesized opener instead of stitching memory_list + recap yourself: what the repo is, where recent sessions were digging (automatic journal), and each saved conclusion CHECKED against the current index so stale ones are flagged (✓ live, ⚠ may be stale).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 400,
+            "description": "Journaled calls to summarize for the focus section (default 200)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "install_hook",
+      "description": "Wire slimdex's write discipline into the CLIENT, which registering the MCP server cannot do — the protocol has no mechanism for a server to add a hook, so this is the one call that closes the gap. Writes a PreToolUse hook that speaks up ONLY when an edit re-sends 25+ lines that an indexed symbol actually covers, or a whole file over 12KB is read. Merges rather than clobbers, is idempotent, and prints exactly what changed. scope: claude-global (default, all your repos) | claude-local | claude-project | copilot-global (VS Code, all your repos) | copilot-project (.github/hooks, COMMITTED). Use uninstall:true to remove it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "claude-global",
+              "claude-local",
+              "claude-project",
+              "copilot-global",
+              "copilot-project"
+            ],
+            "description": "Which config to write. Default claude-global; use copilot-global for a VS Code-only setup."
+          },
+          "uninstall": {
+            "type": "boolean",
+            "description": "Remove the hook instead of adding it."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "digest_save",
+      "description": "Store a compact 'how this repo works' cheat-sheet — modules, flows, entry points, conventions — so future sessions read a page instead of re-exploring. `covers` (the paths it summarizes) lets later sessions be told when a covered file changed. Overwrites the previous one. Save the why and the shape, not a symbol list.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The digest prose — compact, the architecture and flows, not a file dump."
+          },
+          "covers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Repo-relative paths/dirs this digest summarizes (omit = whole repo)."
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "digest_get",
+      "description": "Return the stored architecture cheat-sheet plus a freshness verdict: covered files that changed since it was written are flagged as reasons it may be out of date. Read it early to understand the system without re-exploring; if flagged stale, re-read the changed areas and digest_save an update.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "memory_list",
+      "description": "Saved facts newest-first as PREVIEWS (id, date, tags, opening clause); memory_get ids:[…] expands the ones that matter, full:true dumps everything. Prefer brief as the opener — same previews, staleness-checked.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Max facts (default 50)."
+          },
+          "full": {
+            "type": "boolean",
+            "description": "Whole bodies instead of previews — costly on a large store."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "memory_get",
+      "description": "Full text of specific facts by id, with the provenance note of what was being examined when each was saved. The expansion half of the preview model: triage cheaply with brief/memory_list, expand only what you need.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 20,
+            "description": "Fact ids from memory_list/brief/memory_search."
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "memory_delete",
+      "description": "Remove one saved memory fact by its id. Permanent — no undo, and no snapshot is taken.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "batch",
+      "description": "Execute multiple slimdex calls in one request to avoid per-call protocol overhead. Pass calls: [{ \"tool\": \"find_definition\", \"args\": { \"name\": \"login\" } }, ...]. Cannot nest batch inside itself.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "tool"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 20
+          }
+        },
+        "required": [
+          "calls"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "slimdex",
+    "version": "1.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": "slimdex answers questions without reading whole files. The discipline IS the saving.\n\nOPEN: call brief FIRST — repo summary, where recent sessions dug, saved conclusions checked against the live index.\nFIND: symbol-shaped -> find_definition / find_references / get_context. Behaviour but not the name -> search_intent. Literal strings -> search_code. A whole AREA (\"how does auth work\") -> context_pack: ONE bounded bundle, not ~10 calls re-costing every turn. Scope with pathPrefix.\nREAD: get_file_skeleton before opening anything over ~300 lines, then FOLLOW THROUGH — get_symbol_context names:[…] or read_lines for just those spans, never the whole file after.\nWRITE — output tokens cost ~4-5x input, so this is where the money is:\n * replace_symbol name:\"X\" body:\"…\" rewrites a whole function/class/method WITHOUT re-sending the old code to locate it. Snapshots, re-indexes, reports the new span. Many at once: edits:[{name,body},…]. Never re-emit a file to change a few lines; never splice by line number.\n * find_tests on a symbol BEFORE changing it — run only the covering tests, or SEE that none cover it and treat that as risk.\n * dep_graph root:\"<file>\" before touching a shared module; changed_files for which symbols a dirty tree lands in.\nSAVE: memory_save a conclusion the moment it is confirmed, never \"at the end\" — unsaved findings die with the tab. Lead with the conclusion; only ~150 chars preview. digest_save an architecture cheat-sheet once you know the shape.\nindex_repo is incremental — re-run like `git fetch` before trusting a search.",
+  "durationMs": 7527,
+  "stderr": "slimdex-mcp v1.1.0, build 2026-10-13 20:55:04Z ready. root=/pkg  tools=30\n"
+}

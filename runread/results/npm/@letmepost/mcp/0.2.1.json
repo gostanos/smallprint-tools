@@ -1,0 +1,935 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@letmepost/mcp",
+  "version": "0.2.1",
+  "integrity": {
+    "dist": "sha512-QJsvivn1h4u5UVgGGsl71lcrHcjnv7GUMfwdwgAQSnLZhAn6W9n/EiHCKHHVcT7PVhMqkjZpX9cQTre8FAYS0A==",
+    "installed": "sha512-QJsvivn1h4u5UVgGGsl71lcrHcjnv7GUMfwdwgAQSnLZhAn6W9n/EiHCKHHVcT7PVhMqkjZpX9cQTre8FAYS0A=="
+  },
+  "bin": "node_modules/@letmepost/mcp/./dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [
+    "LMP_API_KEY",
+    "LMP_API_BASE"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T08:47:45.587Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "post_v1_posts",
+      "description": "Publish or schedule a multi-target post\n\nPublish a single body to up to 25 connected accounts in one call, or schedule the whole batch for a future time.\n\n- **Multi-target only:** the v1 wire shape requires `targets[]`. The legacy `account: {}` single-target shape is no longer accepted.\n- **Idempotent:** include `Idempotency-Key`. Replays within 24 hours return the original response.\n- **Preflight:** every documented platform constraint runs locally before the upstream call. Cheap shape preflight is atomic across the batch — if any target fails the synchronous checks the whole call is rejected as `400 preflight_failed`. Deep checks (URL reachability, MIME sniffing, byte caps) run per target and surface inside `results[i].error`, producing a `partial_failed` batch rather than a 400.\n- **Errors:** failures use the [stable error envelope](https://letmepost.dev/docs/errors/) — `code`, `rule`, `platformResponse`, `remediation`, `docUrl`, `ruleUrl`.\n\nFor per-platform payload differences, see the [platforms guides](https://letmepost.dev/docs/platforms/bluesky/).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targets": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 25,
+            "items": {
+              "type": "object",
+              "description": "One target on a multi-target publish. Carries an `accountId`, a `platform` hint, or both (must agree). Per-target `text` / `media` / `firstComment` / `options` override the top-level defaults.",
+              "properties": {
+                "accountId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "letmepost platform_account id. When omitted, `platform` must be set and the org must have exactly one connected account for that platform."
+                },
+                "platform": {
+                  "allOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "bluesky",
+                        "facebook",
+                        "instagram",
+                        "linkedin",
+                        "pinterest",
+                        "threads",
+                        "tiktok",
+                        "twitter"
+                      ],
+                      "description": "Supported platforms. `tiktok` is currently in App Review — connect requests return `platform_not_enabled` until approval lands."
+                    }
+                  ],
+                  "description": "Auto-resolve hint. Used alone when the org has exactly one connected account for the platform; combined with `accountId` it must agree (else `targets.account.platform_mismatch`)."
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Per-target text override. Falls back to the top-level `text`."
+                },
+                "media": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "A single media item attached to a post. Exactly one of `mediaId` / `url` / `bytesBase64` must be present.",
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "image",
+                          "video"
+                        ]
+                      },
+                      "altText": {
+                        "type": "string",
+                        "description": "Per-platform alt-text caps apply (e.g. Bluesky 2000, Twitter 1000)."
+                      },
+                      "mediaId": {
+                        "type": "string",
+                        "pattern": "^med_[0-9A-Za-z]{22}$",
+                        "description": "References a previous `POST /v1/media` upload. Preferred for production — bytes already live on our CDN.",
+                        "example": "med_01HY6X4AWBJM2K9F2PTQMR"
+                      },
+                      "url": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "Public URL we fetch from your CDN at publish time. Must respond 200 to anonymous GET.",
+                        "example": "https://cdn.example.com/launch.jpg"
+                      },
+                      "bytesBase64": {
+                        "type": "string",
+                        "description": "Inline base64. Convenient for tiny images and tests; use `POST /v1/media` for anything substantial."
+                      }
+                    }
+                  },
+                  "description": "Per-target media override. Falls back to the top-level `media`."
+                },
+                "firstComment": {
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "description": "Auto-posted reply to the published post. Bluesky-only today; ignored on platforms that don't support it.",
+                      "required": [
+                        "text"
+                      ],
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  ],
+                  "description": "Per-target first-comment override."
+                },
+                "options": {
+                  "description": "Per-target platform options. Discriminated on `platform`; the discriminator must match the resolved account's platform or the request fails with `targets.options.platform_mismatch`. Replaces the v0 top-level `pinterest` / `threads` / `twitter` keys.",
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "platform"
+                      ],
+                      "properties": {
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "twitter"
+                          ]
+                        },
+                        "replyToTweetId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Reply under this tweet id."
+                        },
+                        "quoteTweetId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Quote this tweet id. Mutually exclusive with `replyToTweetId` — X rejects tweets that combine the two."
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "platform"
+                      ],
+                      "properties": {
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "pinterest"
+                          ]
+                        },
+                        "boardId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Pinterest board to pin to. Falls back to the account's default board when omitted."
+                        },
+                        "destinationUrl": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Outbound link attached to the pin."
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "coverImageUrl": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Cover image URL for video pins."
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "platform"
+                      ],
+                      "properties": {
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "threads"
+                          ]
+                        },
+                        "replyToId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Threads thread id to reply under."
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "platform"
+                      ],
+                      "properties": {
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "bluesky"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "platform"
+                      ],
+                      "properties": {
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "facebook"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "platform"
+                      ],
+                      "properties": {
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "instagram"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "platform"
+                      ],
+                      "properties": {
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "linkedin"
+                          ]
+                        }
+                      }
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "platform"
+                  }
+                }
+              }
+            }
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Default text applied to any target that omits its own `text`."
+          },
+          "media": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "A single media item attached to a post. Exactly one of `mediaId` / `url` / `bytesBase64` must be present.",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "image",
+                    "video"
+                  ]
+                },
+                "altText": {
+                  "type": "string",
+                  "description": "Per-platform alt-text caps apply (e.g. Bluesky 2000, Twitter 1000)."
+                },
+                "mediaId": {
+                  "type": "string",
+                  "pattern": "^med_[0-9A-Za-z]{22}$",
+                  "description": "References a previous `POST /v1/media` upload. Preferred for production — bytes already live on our CDN.",
+                  "example": "med_01HY6X4AWBJM2K9F2PTQMR"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "Public URL we fetch from your CDN at publish time. Must respond 200 to anonymous GET.",
+                  "example": "https://cdn.example.com/launch.jpg"
+                },
+                "bytesBase64": {
+                  "type": "string",
+                  "description": "Inline base64. Convenient for tiny images and tests; use `POST /v1/media` for anything substantial."
+                }
+              }
+            },
+            "description": "Default media applied to any target that omits its own `media`."
+          },
+          "firstComment": {
+            "type": "object",
+            "description": "Auto-posted reply to the published post. Bluesky-only today; ignored on platforms that don't support it.",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "publishNow": {
+            "type": "boolean",
+            "description": "Explicit immediate-publish mode. Mutually exclusive with `scheduledAt` (`mode_conflict`). When neither is set the request publishes immediately."
+          },
+          "scheduledAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 timestamp at least 1 second in the future. When set, every target row is queued and the response is 202. Scheduled posts currently accept text only — media and firstComment require an immediate publish.",
+            "example": "2026-06-01T12:00:00.000Z"
+          },
+          "profileId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Profile scope for this batch. Use to target a specific workspace when the API key or OAuth token is org-wide. Forbidden when the key is already scoped to a different profile (rule `profile.scope_mismatch`). Omit to fall back to the key's bound profile."
+          }
+        },
+        "required": [
+          "targets"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_v1_posts",
+      "description": "List posts (post log)\n\nCursor-paginated post log scoped to the caller's organization (and profile, when the key is profile-scoped). Filters compose. Array filters (`platform`, `status`, `errorCode`) accept either repeated query params or comma-separated single values.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platform": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "bluesky",
+                "facebook",
+                "instagram",
+                "linkedin",
+                "pinterest",
+                "threads",
+                "tiktok",
+                "twitter"
+              ],
+              "description": "Supported platforms. `tiktok` is currently in App Review — connect requests return `platform_not_enabled` until approval lands."
+            }
+          },
+          "status": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "validated",
+                "publishing",
+                "published",
+                "failed",
+                "rejected",
+                "canceled"
+              ],
+              "description": "Lifecycle state of a single per-target post row. `canceled` is the terminal state reached via `DELETE /v1/posts/{id}` on a queued scheduled post."
+            }
+          },
+          "errorCode": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "after": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 lower bound on `createdAt` (exclusive)."
+          },
+          "before": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 upper bound on `createdAt` (exclusive)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_v1_posts_by_id",
+      "description": "Fetch a single post with its publish attempts\n\nReturns the post row plus every publish attempt (start/finish, success flag, upstream response, error code). Use the `postId` returned in `CreatePostResponse.results[]` as `{id}`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "patch_v1_posts_by_id",
+      "description": "Reschedule a queued post\n\nMove a scheduled post to a new firing time. Only allowed when `status=queued` AND `scheduledAt` is still in the future — once a post enters `publishing` or any terminal state, the window closes and the request returns `409`.\n\nThe operation is atomic: the API replaces the BullMQ job (removes the old delayed job, enqueues a new one at the updated delay) and only persists the new `scheduledAt` if the queue swap succeeded. A `post.rescheduled` webhook fires on success, carrying both the old and new timestamps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "scheduledAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 timestamp with timezone. Must be at least 1 second in the future."
+          }
+        },
+        "required": [
+          "id",
+          "scheduledAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delete_v1_posts_by_id",
+      "description": "Cancel a queued scheduled post\n\nCancel a scheduled post before it fires. Only allowed when `status=queued` AND `scheduledAt` is still in the future — same window as `PATCH`. Removes the BullMQ job and transitions the row to `status=canceled`. A `post.canceled` webhook fires on success.\n\nIf a worker is already processing the job when cancellation lands, the worker's conditional `UPDATE … WHERE status IN ('queued','validated')` short-circuits and the publish never happens.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_v1_media",
+      "description": "List uploaded media\n\nCursor-paginated. Scoped to the caller's organization, and (when the key is profile-scoped) to that profile. Org-wide keys may narrow with `?profileId=`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_v1_accounts",
+      "description": "List connected accounts\n\nLists every connected platform account in the caller's organization. No secrets ever leak — display name, platform identifiers, and lifecycle timestamps only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "description": "Narrow to a single profile. Malformed values match nothing rather than 400 (preserves the dashboard's profile-switcher contract)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_v1_accounts_by_id",
+      "description": "Fetch a connected account",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delete_v1_accounts_by_id",
+      "description": "Disconnect (hard delete)\n\nDashboard session only — programmatic keys cannot disconnect accounts. Hard delete: the platform_accounts row is removed and any persisted token is destroyed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "post_v1_accounts_connect_by_platform",
+      "description": "Start a connect flow\n\nDashboard session only. Returns a `ConnectDescriptor` describing how to finish the connect — an OAuth authorization URL for OAuth platforms, or a credentials form schema for Bluesky. Programmatic API keys cannot mint OAuth state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "bluesky",
+              "facebook",
+              "instagram",
+              "linkedin",
+              "pinterest",
+              "threads",
+              "tiktok",
+              "twitter"
+            ],
+            "description": "Supported platforms. `tiktok` is currently in App Review — connect requests return `platform_not_enabled` until approval lands."
+          },
+          "profileId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Land the resulting account in this profile. Falls back to the org's default profile when omitted."
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "post_v1_accounts_connect_by_platform_complete",
+      "description": "Finish a connect flow\n\nDashboard session only. Completes the handshake started by `POST /v1/accounts/connect/{platform}` — for OAuth platforms this is invoked from the redirect callback flow; for credentials platforms (Bluesky) it carries the credentials in the body. Upserts the platform_accounts row (re-connecting the same account rotates the stored token rather than 409-ing).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "bluesky",
+              "facebook",
+              "instagram",
+              "linkedin",
+              "pinterest",
+              "threads",
+              "tiktok",
+              "twitter"
+            ],
+            "description": "Supported platforms. `tiktok` is currently in App Review — connect requests return `platform_not_enabled` until approval lands."
+          },
+          "profileId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_v1_accounts_by_id_pinterest_boards",
+      "description": "List Pinterest boards on a connected account\n\nProxy to Pinterest's `/v5/boards` using the stored token. Used by the dashboard's default-board picker so a user can see their actual boards.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "post_v1_accounts_by_id_pinterest_boards",
+      "description": "Create a Pinterest board\n\nCreates a board on the user's Pinterest account without sending them off-site. Optional `setAsDefault` lifts the new board id into the account's default in one round-trip. Optional `upsert: true` returns the existing board (with `existing: true`) on duplicate-name instead of 409-ing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 180
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "PUBLIC",
+              "PROTECTED",
+              "SECRET"
+            ]
+          },
+          "setAsDefault": {
+            "type": "boolean",
+            "description": "Lift the new board id into `tokenMetadata.defaultBoardId`."
+          },
+          "upsert": {
+            "type": "boolean",
+            "description": "When true, a duplicate-name response from Pinterest resolves to a 200 with the existing board (`existing: true`) instead of a `platform_rejected` failure."
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "patch_v1_accounts_by_id_pinterest_default_board",
+      "description": "Set the default Pinterest board for publishes\n\nPersists the supplied `boardId` as the account's default — used when a `POST /v1/posts` body omits `options.boardId` for a Pinterest target. The board is validated against the account's own boards list before persisting.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "boardId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "boardId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "post_v1_api_keys",
+      "description": "Mint an API key\n\nDashboard session only. The plaintext `key` is returned **once** in this response and never again — store it securely. Optional `profileId` pins the key to a single profile; cross-profile reads/writes 404 under that key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "ci-publish-key"
+          },
+          "prefix": {
+            "type": "string",
+            "enum": [
+              "lmp_live_",
+              "lmp_test_"
+            ],
+            "default": "lmp_live_"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "profileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional profile scope. When set, the key only authenticates requests targeting that profile; cross-profile reads/writes 404."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_v1_api_keys",
+      "description": "List API keys\n\nDashboard session only. Plaintext is never returned again — only `last4` and metadata.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delete_v1_api_keys_by_id",
+      "description": "Revoke an API key\n\nSoft-revoke. The key is invalidated immediately; the row stays for audit. Already-revoked keys 404.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "post_v1_webhook_endpoints",
+      "description": "Register a webhook endpoint\n\nDashboard session only. The `signingSecret` is returned **once** at creation — used to verify the HMAC-SHA256 `X-Letmepost-Signature` header on every delivery. An empty `events` array subscribes to every event type.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://hooks.example.com/letmepost"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "post.queued",
+                "post.validated",
+                "post.published",
+                "post.rejected",
+                "post.failed",
+                "post.canceled",
+                "post.rescheduled",
+                "token.expiring",
+                "token.revoked",
+                "version.deprecated"
+              ]
+            },
+            "default": [],
+            "description": "Empty array subscribes the endpoint to every event type."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_v1_webhook_endpoints",
+      "description": "List webhook endpoints",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_v1_webhook_endpoints_by_id",
+      "description": "Fetch a webhook endpoint",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "patch_v1_webhook_endpoints_by_id",
+      "description": "Update a webhook endpoint\n\nPartial update. Setting `active: false` pauses delivery without losing the endpoint; flipping back to `true` re-enables it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "post.queued",
+                "post.validated",
+                "post.published",
+                "post.rejected",
+                "post.failed",
+                "post.canceled",
+                "post.rescheduled",
+                "token.expiring",
+                "token.revoked",
+                "version.deprecated"
+              ]
+            }
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delete_v1_webhook_endpoints_by_id",
+      "description": "Delete a webhook endpoint\n\nHard delete — the row is removed. Use `PATCH … { active: false }` instead if you want to pause delivery while preserving history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "post_v1_webhook_endpoints_by_id_test",
+      "description": "Send a synthetic test delivery\n\nFires a synthetic event at the endpoint URL synchronously and returns what the consumer responded — bypasses the BullMQ delivery queue on purpose so operators get immediate feedback. The real signing secret is used; the consumer's HMAC verification path is identical to production.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "post.queued",
+              "post.validated",
+              "post.published",
+              "post.rejected",
+              "post.failed",
+              "post.canceled",
+              "post.rescheduled",
+              "token.expiring",
+              "token.revoked",
+              "version.deprecated"
+            ]
+          },
+          "data": {}
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "letmepost",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 6653,
+  "stderr": "[letmepost-mcp] connected (base=smallprint-placeholder, tools=23)\n"
+}

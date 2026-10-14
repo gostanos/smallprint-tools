@@ -1,0 +1,3328 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "purecontext-mcp",
+  "version": "1.40.0",
+  "integrity": {
+    "dist": "sha512-bTdXMxnQdV3ltL1nYEgyAknZvvxO97/ahFjbC42by2zNDGvstpdDaF8F4yUfrDBdPe2tR6raCAGh7T0g8NAKGQ==",
+    "installed": "sha512-bTdXMxnQdV3ltL1nYEgyAknZvvxO97/ahFjbC42by2zNDGvstpdDaF8F4yUfrDBdPe2tR6raCAGh7T0g8NAKGQ=="
+  },
+  "bin": "node_modules/purecontext-mcp/./dist/bin.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T19:41:45.530Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "index_folder",
+      "description": "Index a local project folder. Discovers source files, parses symbols and imports, and builds a dependency graph stored in a local SQLite database. Returns the repo ID needed by other tools plus indexing statistics. Re-runs are incremental by content hash but DISCOVERY-bound (every file is stat-ed). After a git checkout / pull / merge / rebase pass onlyChanged: true — the changed paths come from git (no directory walk); it falls back to a full run automatically when it cannot (mode + reason in the response). A new git worktree of an indexed repository is seeded by cloning a sibling index (clonedFrom in the response). The response echoes head (indexed sha vs HEAD) so you can see drift.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the project root directory to index"
+          },
+          "fileLimit": {
+            "description": "Maximum number of files to index (0 = unlimited; default from config, typically 10000)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "workspaceId": {
+            "description": "Workspace ID to associate this repo with (default: \"local\" for single-user mode)",
+            "type": "string"
+          },
+          "onlyChanged": {
+            "description": "Re-index only what git reports changed since the sha the index was last brought up to (plus uncommitted edits). No discovery walk. Falls back to a full index when there is no stored sha / not a git checkout / too many changes (see mode + reason).",
+            "type": "boolean"
+          },
+          "since": {
+            "description": "With onlyChanged: diff from this commit instead of the stored sha.",
+            "type": "string"
+          },
+          "verifyIndexed": {
+            "description": "With onlyChanged: also re-hash every indexed file and refresh mismatches (covers `git checkout -- <path>` and external writes; reads only indexed paths).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "index_file",
+      "description": "Re-index one or a few specific files WITHOUT the full-tree discovery + stat pass that index_folder performs. This is the cheap, O(one file) freshness path: call it after an agent writes/edits a file so subsequent searches reflect the real current state. Accepts absolute or repo-relative paths; files that no longer exist on disk are treated as deletions and their symbols/edges are removed. Use index_folder for the initial index.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePaths": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "One or more file paths (absolute or relative to the repo root) to re-index. Paths that do not exist on disk are treated as deletions."
+          }
+        },
+        "required": [
+          "repoId",
+          "filePaths"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_index_staleness",
+      "description": "Cheaply check whether the index is current for specific files — WITHOUT a full discovery pass. Pass filePaths to get a per-file fresh/stale verdict (compares the stored content hash against the file on disk); omit them for a lightweight repo-level summary (indexed? + last-indexed time + counts + `head`: indexed sha vs HEAD, behindBy, dirtyFiles, inProgress). Use at task start to decide: \"behind\" → index_folder({ path, onlyChanged: true }); a few edited paths → index_file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePaths": {
+            "description": "Files (absolute or repo-relative) to check. Omit for a repo-level summary only.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_consistency",
+      "description": "Pre-write consistency check for a symbol/file you are ABOUT to create — the greenfield mirror of prepare_change (needs zero git history). Given the intended name (+ optional kind/signature/file path), it returns: duplicates (\"you already wrote this\"), patternFit (the closest existing siblings to mirror), placement (does the intended path fit the established structure?), and existingApiPointer (what already lives in the target area). Runs on structural search alone — no embedding provider required (mode:\"structural\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "name": {
+            "type": "string",
+            "description": "The intended new symbol name (e.g. \"WindsurfConnector\", \"parseExpenseRow\")"
+          },
+          "kind": {
+            "description": "Intended symbol kind (function, class, method, component, …) — narrows pattern matching",
+            "type": "string"
+          },
+          "signature": {
+            "description": "Intended one-line signature (optional, improves matching)",
+            "type": "string"
+          },
+          "intendedFilePath": {
+            "description": "Where you intend to put it (repo-relative) — enables placement + existingApiPointer",
+            "type": "string"
+          },
+          "codeSnippet": {
+            "description": "Optional draft body (reserved for future semantic dedup)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoId",
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "merge_readiness",
+      "description": "Pre-merge go/no-go for a completed change. Folds verify_change (is the change complete vs the prepare_change prediction — unaddressed co-change + diff coverage gaps) and compare_change_impact (did it introduce a new import cycle or layer violation vs a baseline snapshot) into one { gate: pass|warn|block, reasons[], unresolved[] }. The gate is the most severe of the two. Read-only — it never merges; call it before your own git-merge step. Thin consumer: no new analysis.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "diff": {
+            "type": "string",
+            "description": "Unified diff of the completed change (output of `git diff`)"
+          },
+          "predictedFilePaths": {
+            "description": "predictedChange.changedFilePaths from prepare_change (default [] — verify runs unscoped).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "predictedCoChange": {
+            "description": "missingCoChange[].filePath from prepare_change (the partners you were advised to consider).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "baselineSnapshotId": {
+            "description": "Snapshot ID from get_architecture_snapshot taken BEFORE the change (for regression check).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoId",
+          "diff"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_repos",
+      "description": "List all indexed repositories. Scans the local index directory and returns metadata (repo ID, root path, symbol count, file count, last indexed time) for every project that has been indexed. Each git-backed repo also carries `head` — the sha the index reflects vs the checkout's HEAD (behindBy commits, dirtyFiles, inProgress when a detached re-index is running) and a one-line `freshness` verdict. Read it before trusting an index: \"behind\" → index_folder({ path, onlyChanged: true }). `links` (when present) lists the indexes this one resolves dependency edges across (same git checkout, or graph.linkedRepos) with per-link drift — \"moved\" means re-run index_folder on THIS repo to re-resolve the seam. Since 1.33.0 every repo carries `sizeBytes` (its index file) and `rootExists`; the top-level `store` sums the index dir, the shared blob store, and orphan indexes — `gc_indexes` reclaims them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "description": "Filter repos by workspace ID. When omitted, returns all repos (single-user mode).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "resolve_repo",
+      "description": "Resolve a local path to its repo ID and check whether it has been indexed. Use this to get the repoId before calling other tools, or to check if a project needs (re-)indexing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute or relative path to the project root"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_symbols",
+      "description": "Search for symbols (functions, classes, types, etc.) by name across one or more indexed repos. Returns signatures and summaries — not raw source code — for token efficiency. Supports keyword, semantic, and hybrid search modes. Omit repoId/repoIds to search ALL indexed repos in one call. Use get_symbol_source to retrieve the full source of a specific symbol.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "description": "Single repo ID — mutually exclusive with repoIds. Omit both to search all repos.",
+            "type": "string"
+          },
+          "repoIds": {
+            "description": "Multiple repo IDs to search — mutually exclusive with repoId. Omit both for all repos.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "type": "string",
+            "description": "Name fragment or natural-language description to search for"
+          },
+          "kind": {
+            "description": "Filter by symbol kind",
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "const",
+              "type",
+              "interface",
+              "enum",
+              "component",
+              "composable",
+              "hook",
+              "route",
+              "decorator",
+              "middleware"
+            ]
+          },
+          "filePath": {
+            "description": "Filter to a specific file path",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max results (default 50)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "mode": {
+            "description": "Search mode: 'keyword' (FTS name match), 'semantic' (vector similarity), 'hybrid' (RRF-merged; default when semantic index exists)",
+            "type": "string",
+            "enum": [
+              "keyword",
+              "semantic",
+              "hybrid"
+            ]
+          },
+          "semantic_weight": {
+            "description": "Weight for semantic score in hybrid mode (default 0.5)",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "keyword_weight": {
+            "description": "Weight for keyword score in hybrid mode (default 0.5)",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "debug": {
+            "description": "Return per-result score breakdown for tuning and diagnostics (default false)",
+            "type": "boolean"
+          },
+          "includeRisk": {
+            "description": "When true, attach a compact change-risk verdict { band, riskScore } to each result (Phase 76). Default false (no extra cost). Use get_symbol_risk for the full factor breakdown before editing a high-risk symbol.",
+            "type": "boolean"
+          },
+          "cfgFilter": {
+            "description": "Filter results to only symbols gated by a specific Rust #[cfg(...)] predicate. Applied after ranking. Ignored with a _diagnostics warning when no cfg metadata exists.",
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Simple predicate string, e.g. 'target_os = \"linux\"'"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "description": "Structured predicate object"
+              }
+            ]
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_symbol_source",
+      "description": "Retrieve the raw source code of a specific symbol using its byte offsets. Returns only the symbol definition, not the entire file. Optionally expand with surrounding context lines or verify the cached hash. Use search_symbols or get_file_outline to find symbol IDs first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID from search_symbols or get_file_outline"
+          },
+          "contextLines": {
+            "description": "Lines of surrounding code to include before and after the symbol boundary. Default 0 (symbol only). Clamped to 50.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "verify": {
+            "description": "Re-hash the source file from disk and compare with the stored hash. Sets hashDrift: true when the file has changed since indexing. Performance cost: one disk read per call.",
+            "type": "boolean"
+          },
+          "includeRisk": {
+            "description": "When true, attach a compact change-risk verdict { band, riskScore } (Phase 76). Default false (no extra cost). Use get_symbol_risk for the full factor breakdown.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_file_outline",
+      "description": "List all symbols defined in a specific file with their signatures and summaries. Token-efficient alternative to reading the entire file. Use get_symbol_source to drill into a specific symbol.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "File path relative to the repo root"
+          }
+        },
+        "required": [
+          "repoId",
+          "filePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_repo_outline",
+      "description": "Get a structural overview of an indexed repo: all files with their top-level symbols. Useful for understanding project structure before diving into specific files. Returns signatures and summaries only — no source code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "limit": {
+            "description": "Max symbols per file (default unlimited)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_file_tree",
+      "description": "Get the directory tree of an indexed repo with file counts per directory. Shows which source files have been indexed, organized as a tree structure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_context_bundle",
+      "description": "Forward-walk the dependency graph from a symbol's FILE to collect everything needed to understand it. Returns the symbol plus transitively imported files and their symbols (file-granular, depth-capped). Includes a token estimate so you can gauge context size before loading. Since 1.32.0 the walk follows imports INTO linked indexes (same git checkout, or graph.linkedRepos): those files come back under `linked`, per index. When git co-change data exists (git.coChangeDepth > 0), also returns historicalNeighbors — files that historically change together with the target but are not reachable via imports (e.g. a route and its test). Since 1.34.0 granularity=\"symbol\" follows symbol-level `ref` edges instead: only the symbols this one actually mentions (transitively), with the file bundle size kept as `fileBundle`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID to start the forward walk from"
+          },
+          "depth": {
+            "description": "Max dependency hops to follow (default 3)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "granularity": {
+            "description": "\"file\" (default): every symbol of every transitively imported file. \"symbol\": only the symbols this symbol references (symbol-level `ref` edges, 1.34.0).",
+            "type": "string",
+            "enum": [
+              "file",
+              "symbol"
+            ]
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_blast_radius",
+      "description": "Reverse-walk the dependency graph to find files that (transitively) import the symbol's FILE. Use this to assess the impact of changing or deleting a symbol before making edits. Granularity is file-level: every symbol in the same file returns the same radius. The walk stops at `depth` hops (default 3) — `truncated: true` means deeper dependents exist. Since 1.32.0 the walk crosses into LINKED indexes (same git checkout, or graph.linkedRepos): dependents there come back under `linked` (per index, with its rootPath) and `links` lists the indexes searched. When the symbol's file still has internal-looking imports that resolved to nothing, `externalImports` names them: edges stop at an UNLINKED index boundary, so the radius is a lower bound there. Since 1.34.0 pass granularity=\"symbol\" to walk symbol-level `ref` edges instead (which SYMBOLS mention this one, N hops, lexical confidence): `symbols` carry `depth`, `fileRadius` keeps the file-level answer as the upper bound. Falls back to the file answer (granularity: \"file\" + note) on an index that has no symbol edges yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID of the code you plan to change"
+          },
+          "depth": {
+            "description": "Max reverse-dependency hops (default 3)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "granularity": {
+            "description": "\"file\" (default): files that import the symbol FILE, transitively. \"symbol\": symbols that reference THIS symbol (symbol-level `ref` edges, 1.34.0); the file answer is returned alongside as `fileRadius`.",
+            "type": "string",
+            "enum": [
+              "file",
+              "symbol"
+            ]
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_importers",
+      "description": "Find all files that directly import a given file. Returns each importing file along with its symbols. Useful for understanding who depends on a module before refactoring it. Since 1.32.0 importers in LINKED indexes (same git checkout, or graph.linkedRepos) are returned too, under `linkedImporters` with their index rootPath. `externalImports` (when present) lists the file's own internal-looking imports that resolved to nothing here — the sign that this file sits on an UNLINKED index boundary and importers outside are invisible.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "File path (relative to repo root) to find importers of"
+          }
+        },
+        "required": [
+          "repoId",
+          "filePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_dead_code",
+      "description": "Find exported symbols in files that are never imported by any other file in the repo. Helps identify potentially unused code that could be removed. Note: entry-point files (e.g. index.ts) are expected to appear here as nothing imports them. Files imported from a LINKED index (since 1.32.0) are not reported as dead; since 1.35.0 `keptAliveByLinks` lists them (files with NO local importer that a linked root imports) with, per symbol, the linked files that name it (`referencedBy`, from symbol refs or the import names) — a symbol with an empty `referencedBy` is kept alive by the file import only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_text",
+      "description": "Search for a literal string or regex pattern across all cached file content in one or more indexed repos. Returns matching lines with surrounding context. Omit repoId/repoIds to search ALL indexed repos in one call. Complements search_symbols (which searches symbol names) by finding arbitrary strings in source.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "description": "Single repo ID — mutually exclusive with repoIds. Omit both to search all repos.",
+            "type": "string"
+          },
+          "repoIds": {
+            "description": "Multiple repo IDs to search — mutually exclusive with repoId. Omit both for all repos.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "type": "string",
+            "description": "Literal string or regex pattern to search for"
+          },
+          "isRegex": {
+            "default": false,
+            "description": "Treat query as a regular expression (default false)",
+            "type": "boolean"
+          },
+          "filePattern": {
+            "description": "Glob pattern to filter which files are searched (e.g. '**/*.ts')",
+            "type": "string"
+          },
+          "contextLines": {
+            "default": 2,
+            "description": "Lines of context to show before and after each match (default 2)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxResults": {
+            "default": 50,
+            "description": "Maximum number of matches to return (default 50)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_layer_violations",
+      "description": "Analyse the dependency graph for architectural layer violations. Checks that files only import in allowed directions (e.g. core must not import handlers). Layer definitions can be provided inline or read from config.json. crossIndex:true (since 1.35.0) also checks this root's imports INTO linked indexes: a linked file is matched as `<rootName>:<path>` (rootName = basename of the linked root), so a definition `{ name: \"db\", paths: [\"lib:src/db/**\"] }` plus a rule `ui → db` disallowed catches ui/… importing lib/src/db/…. Plain globs match local files only; `<rootName>:` globs match only that root (the glob applies to the path inside it). Rules are this root's; edges FROM linked roots are judged by their own root's rules (call the tool there).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "layers": {
+            "description": "Layer definitions and rules. If omitted, reads from config.json layers field.",
+            "type": "object",
+            "properties": {
+              "definitions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Layer name"
+                    },
+                    "paths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Glob patterns for files in this layer"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "paths"
+                  ]
+                }
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "description": "Source layer name"
+                    },
+                    "to": {
+                      "type": "string",
+                      "description": "Target layer name"
+                    },
+                    "allowed": {
+                      "type": "boolean",
+                      "description": "Whether this direction is allowed"
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "allowed"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "definitions",
+              "rules"
+            ]
+          },
+          "crossIndex": {
+            "description": "Also check edges from this root into LINKED indexes (default false). Linked targets are matched as `<rootName>:<path>`; violations carry `to_repo_id` / `to_root`.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "index_repo",
+      "description": "Clone a Git repository and index it, or index a GitHub repo via the API (no git clone required). For github.com URLs, GitHub API mode is auto-detected — set useGitHubApi: false to force git clone. Incremental: unchanged files are skipped on re-index. Returns the repo ID and indexing statistics.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Git repository URL (https://, http://, or git@) or GitHub URL"
+          },
+          "branch": {
+            "description": "Branch or tag to clone/index (default: repository default branch)",
+            "type": "string"
+          },
+          "token": {
+            "description": "GitHub/GitLab personal access token for private repos (git clone path)",
+            "type": "string"
+          },
+          "fileLimit": {
+            "description": "Maximum number of files to index (default 5000)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "useGitHubApi": {
+            "description": "Force GitHub API mode (auto-detected for github.com URLs). Set to false to use git clone even for GitHub URLs.",
+            "type": "boolean"
+          },
+          "githubToken": {
+            "description": "GitHub personal access token for API mode. Falls back to GITHUB_TOKEN env var.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_semantic",
+      "description": "Search for symbols using natural language with semantic (vector) and hybrid (semantic + keyword) modes across one or more indexed repos. Requires a semantic index — use index_folder with an embedding provider configured. Omit repo/repoIds to search ALL indexed repos in one call. Returns results ranked by combined relevance score with per-result repoId and repoName for disambiguation. Falls back to an error when no semantic index exists for any targeted repo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "description": "Single repo ID (16-char hex) or absolute path — mutually exclusive with repoIds. Omit both for all repos.",
+            "type": "string"
+          },
+          "repoIds": {
+            "description": "Multiple repo IDs to search — mutually exclusive with repo. Omit both for all repos.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "type": "string",
+            "description": "Natural language query describing what to find"
+          },
+          "mode": {
+            "description": "Search mode: 'hybrid' (semantic + keyword RRF fusion, default) or 'semantic' (vector only)",
+            "type": "string",
+            "enum": [
+              "semantic",
+              "hybrid"
+            ]
+          },
+          "semantic_weight": {
+            "description": "Weight for semantic score in hybrid mode (default 0.5)",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "keyword_weight": {
+            "description": "Weight for keyword score in hybrid mode (default 0.5)",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "max_results": {
+            "description": "Maximum results to return (default 10)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "kind": {
+            "description": "Filter by symbol kind",
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "const",
+              "type",
+              "interface",
+              "enum",
+              "component",
+              "composable",
+              "hook",
+              "route",
+              "decorator",
+              "middleware"
+            ]
+          },
+          "file_pattern": {
+            "description": "Filter results to files whose path contains this substring",
+            "type": "string"
+          },
+          "debug": {
+            "description": "Return per-result score breakdown for tuning and diagnostics (default false)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_savings_stats",
+      "description": "Query cumulative token savings tracked across all PureContext tool calls. Returns total tokens saved, cost avoided per model tier, and context-window equivalents, plus `calls` — how many PureContext tool calls this server session and the last 24 h made, by tool (from the local usage ledger; names, ids and timestamps only). Pass reset:true to clear the savings counter and start fresh.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reset": {
+            "default": false,
+            "description": "Reset the savings counter to zero (returns previous total)",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_references",
+      "description": "Find every file that uses (calls, references) a given identifier across the indexed repo. Distinct from find_importers, which works at the import-statement level — this scans actual file content for word-boundary matches of the identifier. Useful for finding all call sites, type usages, and variable accesses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "identifier": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Symbol name to search for"
+          },
+          "kind": {
+            "description": "Optional: narrow definition exclusion to a specific symbol kind",
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "const",
+              "type",
+              "interface",
+              "enum",
+              "component",
+              "composable",
+              "hook",
+              "route",
+              "decorator",
+              "middleware",
+              "model",
+              "view",
+              "struct",
+              "macro",
+              "signal",
+              "namespace",
+              "widget"
+            ]
+          },
+          "includeDefinition": {
+            "description": "When true, include the file(s) that define the identifier. Default false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "identifier"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_file_content",
+      "description": "Retrieve raw cached file content for any indexed file, with optional line-range slicing. Always serves from the SQLite cache — consistent with indexed symbol offsets. Supports line-number prefixing and enforces a configurable max-lines limit per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "File path relative to the repo root"
+          },
+          "startLine": {
+            "description": "1-based, inclusive. Omit to start from the beginning of the file.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "endLine": {
+            "description": "1-based, inclusive. Omit to read to the end of the file.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "withLineNumbers": {
+            "description": "Prefix each line with its 1-based line number. Default true.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "filePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_symbols",
+      "description": "Batch-fetch full source code for a list of known symbol IDs in a single call. More efficient than calling get_symbol_source N times. Use search_symbols or get_file_outline to discover symbol IDs first. Optionally expand each result with surrounding context lines, or verify the cached content hash against disk.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolIds": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Up to 50 symbol IDs to fetch (from search_symbols / get_file_outline)"
+          },
+          "contextLines": {
+            "description": "Number of surrounding lines to include before/after each symbol boundary. Clamped to 50.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "verify": {
+            "description": "Re-hash each file from disk and compare with the stored hash. Sets hashDrift: true on results where the file has changed since indexing.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolIds"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "invalidate_cache",
+      "description": "Delete a repo's index data from the database, forcing a full re-index on the next index_folder or index_repo call. Provide exactly one of: repoId (by ID), repoPath (resolved by path), or all: true (clear every indexed repo). Does not delete the SQLite file itself — only removes indexed rows.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "description": "Invalidate a specific repo by its ID",
+            "type": "string"
+          },
+          "repoPath": {
+            "description": "Invalidate the repo at this absolute path (resolved to repoId internally)",
+            "type": "string"
+          },
+          "all": {
+            "description": "When true, invalidate all indexed repos in the local index directory",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gc_indexes",
+      "description": "Garbage-collect the index directory (Phase 100). Dry-run by default: lists orphan index files (no repo row — crashed or half-deleted runs) and indexes whose root path no longer exists (removed worktrees / deleted checkouts) with their sizes; with blobs: true also the blobs in the shared content store that no index references any more (mark-and-sweep across every live index). Nothing is deleted unless apply: true. A live index, or one with a re-index in progress, is never a candidate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "apply": {
+            "description": "Delete what the dry run lists. Default false (report only).",
+            "type": "boolean"
+          },
+          "blobs": {
+            "description": "Also plan / sweep unreferenced blobs in <dataDir>/blobs.db (then VACUUM). Default false.",
+            "type": "boolean"
+          },
+          "scopePath": {
+            "description": "Only consider the index whose stored root is this path (e.g. a worktree just removed).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_columns",
+      "description": "Search column metadata across dbt/SQLMesh models — find columns by name, description, or tag without reading entire schema files. Returns up to 77% fewer tokens than grep. Requires the dbt provider to have run on the repo (triggered automatically by index_folder when a dbt_project.yml is detected).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "query": {
+            "type": "string",
+            "description": "Substring to match against column names and descriptions (case-insensitive)"
+          },
+          "modelFilter": {
+            "description": "Only search within this exact model name (e.g. \"orders\")",
+            "type": "string"
+          },
+          "tagFilter": {
+            "description": "Only return columns that have ALL of these tags",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "description": "Max results to return (default 20, max 100)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "repoId",
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_similar",
+      "description": "Find semantically similar code using HNSW embedding search. Given a code snippet or an existing symbol ID, returns the most similar symbols across any indexed repos by cosine similarity. Unlike keyword search, this finds code that implements the same pattern even when names differ — the killer differentiator for cross-repo code discovery. Using symbolId reuses the stored embedding (no API call); codeSnippet embeds on-the-fly and requires a configured embedding provider. Requires a semantic index — run index_folder with semantic.enabled=true first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "description": "Scope results to a single repo ID or absolute path (optional)",
+            "type": "string"
+          },
+          "repoIds": {
+            "description": "Scope results to multiple repo IDs (optional). Omit both repoId/repoIds for all repos.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "symbolId": {
+            "description": "Use an existing symbol's stored embedding as the similarity query — no API call. Mutually exclusive with codeSnippet.",
+            "type": "string"
+          },
+          "codeSnippet": {
+            "description": "Embed a raw code snippet on-the-fly and use it as the similarity query. Requires a configured embedding provider. Mutually exclusive with symbolId.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum results to return (default 10, max 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "threshold": {
+            "description": "Cosine similarity floor — results below this are excluded (default 0.75)",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "excludeSelf": {
+            "description": "When source is symbolId, exclude the source symbol from results (default true)",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "Filter results by symbol kind",
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "const",
+              "type",
+              "interface",
+              "enum",
+              "component",
+              "composable",
+              "hook",
+              "route",
+              "decorator",
+              "middleware"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_cross_repo_usages",
+      "description": "Detect when source files in other indexed repos reference an identifier defined in a given repo. Useful for finding which downstream packages or services consume a symbol from a shared library. Uses word-boundary text search — results are heuristic, not type-resolved. For generic identifiers (e.g. \"init\", \"handler\") provide symbolKind to reduce false positives.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceRepoId": {
+            "type": "string",
+            "description": "Repo ID of the repo that defines the symbol"
+          },
+          "symbolName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Symbol name to search for in other repos"
+          },
+          "symbolKind": {
+            "description": "Optional: filter symbol lookup in the source repo by kind (reduces false positives for generic names)",
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "const",
+              "type",
+              "interface",
+              "enum",
+              "component",
+              "composable",
+              "hook",
+              "route",
+              "decorator",
+              "middleware",
+              "model",
+              "view",
+              "struct",
+              "macro",
+              "signal",
+              "namespace",
+              "widget"
+            ]
+          },
+          "targetRepoIds": {
+            "description": "Repos to search in. Omit to search all indexed repos except the source repo.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "description": "Max usages to return. Default 50.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "sourceRepoId",
+          "symbolName"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_symbol_history",
+      "description": "Return the git commit history for a specific symbol (function, class, method, etc.), filtered to commits that actually touched the symbol's line range — not just the containing file. Includes a churnScore (commits per 90 days) that quantifies how volatile the symbol is. High churn = frequently changing = higher risk to modify.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID from search_symbols or get_symbols"
+          },
+          "limit": {
+            "description": "Maximum commits to return (default 10, max 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "analyze_diff",
+      "description": "Parse a unified git diff and produce an impact-aware change report: which symbols are added, modified, signature-changed, or deleted, the downstream blast radius, composite symbol risk, historically co-changing files MISSING from the diff (the senior-reviewer \"you forgot to touch X\" signal), recommended tests, coverage gaps, and architectural flags (cycles / layer crossings the change sits on). Returns a reviewPriority rating (low / medium / high / critical). Impact-aware sections default ON and are individually switchable for cheap runs. Most useful in CI and AI-assisted PR review.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "diff": {
+            "type": "string",
+            "description": "Unified diff string (output of `git diff` or `git diff HEAD~1`)"
+          },
+          "includeBlastRadius": {
+            "description": "Compute downstream blast radius for changed symbols (default true)",
+            "type": "boolean"
+          },
+          "blastRadiusDepth": {
+            "description": "Max dependency hops for blast-radius walk (default 2)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "includeRisk": {
+            "description": "Score composite symbol risk for changed symbols (default true)",
+            "type": "boolean"
+          },
+          "includeCoChangeGaps": {
+            "description": "Flag historically co-changing files missing from the diff (default true)",
+            "type": "boolean"
+          },
+          "includeTests": {
+            "description": "Recommend tests + report coverage gaps for changed symbols (default true)",
+            "type": "boolean"
+          },
+          "includeArchitectureFlags": {
+            "description": "Flag cycles / layer crossings the changed files sit on (default true)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "diff"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_churn_metrics",
+      "description": "Report code churn (change frequency) across an entire repo or a specific directory, identifying the most volatile files and symbols. Requires git metadata to have been captured during indexing. Useful for risk assessment and identifying areas that need refactoring attention. granularity:\"file\" aggregates commits per file; granularity:\"symbol\" maps those commits down to individual symbols via line-range overlap.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "scope": {
+            "description": "Directory prefix filter (e.g. \"src/core/\") — narrows analysis to that subtree",
+            "type": "string"
+          },
+          "dayWindow": {
+            "description": "Look back N days (default 90)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650
+          },
+          "topN": {
+            "description": "Return top N results by churn score (default 20)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "granularity": {
+            "type": "string",
+            "enum": [
+              "file",
+              "symbol"
+            ],
+            "description": "\"file\" — per-file churn; \"symbol\" — per-symbol churn (slower)"
+          }
+        },
+        "required": [
+          "repoId",
+          "granularity"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_co_change",
+      "description": "Report temporal coupling: files that historically change together with a target file or symbol, derived from git commit history (the commit_files capture). Reveals coupling the import graph cannot — e.g. a route and its test, or a feature flag and the code it gates. Returns explainable metrics (support = shared commits; confidence = directional A→B probability; lift = association strength) with mega-commits (reformats/lockfile sweeps) filtered out. Granularity is FILE-level: a symbolId resolves to its file. Requires git.coChangeDepth > 0 at index time; returns signalQuality:\"low\" on shallow/sparse histories rather than overstating weak ratios.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePath": {
+            "description": "Target file path (repo-relative). Provide this OR symbolId.",
+            "type": "string"
+          },
+          "symbolId": {
+            "description": "Target symbol ID — resolved to its containing file (git is file-granular).",
+            "type": "string"
+          },
+          "minSupport": {
+            "description": "Drop partners with fewer than this many shared commits (default 2).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "dayWindow": {
+            "description": "Look back N days (default: entire captured commit window).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650
+          },
+          "topN": {
+            "description": "Maximum co-changing partners to return (default 20).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_symbol_risk",
+      "description": "Composite, explainable risk score (0–100, banded low/review/high) for changing a symbol. Fuses churn (90d), centrality (afferent coupling + reverse blast radius), cyclomatic complexity, test-coverage gap, and co-change spread — each normalized repo-relative. Returns factors (raw + normalized) and human-readable reasons[], not just a number. Consult before broad automated edits to a high-risk symbol. Co-change/churn factors need git metadata (git.coChangeDepth > 0) at index time; signalQuality:\"low\" flags shallow histories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID from search_symbols or get_file_outline"
+          },
+          "strictness": {
+            "description": "What counts as tested for the testGap factor. 'mention' (default): some test file contains the symbol name. 'ref': some test symbol references it through a symbol-level ref edge (a test that only names it in a string or comment no longer counts). The response says which one was used in coverageEvidence; an index without symbol refs falls back to mention and adds coverageNote.",
+            "type": "string",
+            "enum": [
+              "mention",
+              "ref"
+            ]
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_quality_metrics",
+      "description": "Return per-symbol code quality metrics (cyclomatic complexity, cognitive complexity, line count, parameter count, nesting depth) for an indexed repo. Use threshold filters to surface only the problematic symbols, and sortBy to rank by the dimension you care about most. Metrics are calculated at index time — zero overhead at query time. Only functions, methods, classes, and similar logic-carrying symbol kinds have metrics; constants and type aliases are excluded.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "scope": {
+            "description": "Directory prefix filter (e.g. \"src/core/\") — narrows to that subtree",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Filter to a specific symbol kind",
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "const",
+              "type",
+              "interface",
+              "enum",
+              "component",
+              "composable",
+              "hook",
+              "route",
+              "decorator",
+              "middleware",
+              "model",
+              "view",
+              "struct",
+              "macro",
+              "signal",
+              "namespace",
+              "widget"
+            ]
+          },
+          "sortBy": {
+            "description": "Sort dimension: \"complexity\" (cyclomatic, default), \"size\" (line count), \"nesting\" (max nesting depth), \"params\" (parameter count)",
+            "type": "string",
+            "enum": [
+              "complexity",
+              "size",
+              "nesting",
+              "params"
+            ]
+          },
+          "threshold": {
+            "description": "Return only symbols that meet ALL specified threshold conditions",
+            "type": "object",
+            "properties": {
+              "cyclomaticComplexity": {
+                "description": "Only return symbols with cyclomatic complexity ≥ this value",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "lineCount": {
+                "description": "Only return symbols with line count ≥ this value",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "nestingDepth": {
+                "description": "Only return symbols with nesting depth ≥ this value",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "limit": {
+            "description": "Maximum number of results to return (default 20)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "detect_antipatterns",
+      "description": "Scan an indexed repo for structural anti-patterns: circular dependencies, god classes, high coupling, dead code, deep nesting, long parameter lists, and duplicate code (requires HNSW semantic index). Returns findings with severity, evidence, and actionable remediation hints. Intended for CI use and periodic health reviews.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "checks": {
+            "description": "Specific checks to run (default: all checks)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "circular_dependencies",
+                "god_class",
+                "high_coupling",
+                "dead_code",
+                "deep_nesting",
+                "long_parameter_list",
+                "duplicate_code"
+              ]
+            }
+          },
+          "severity": {
+            "description": "Filter findings by severity (default: all)",
+            "type": "string",
+            "enum": [
+              "all",
+              "warning",
+              "error"
+            ]
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_refactoring_opportunities",
+      "description": "Identify actionable refactoring opportunities in an indexed repo using stored quality metrics (from get_quality_metrics) and dependency data. Detects: functions that are too long/complex (extract_function), excessive parameters (introduce_parameter_object), over-loaded files (extract_class), trivial single-callsite wrappers (inline_function), near-duplicate functions (consolidate_duplicates — requires semantic index), and deeply nested conditionals (simplify_conditional). Results are sorted by impact descending, effort ascending.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "scope": {
+            "description": "Directory prefix filter (e.g. \"src/core/\") — narrows to that subtree",
+            "type": "string"
+          },
+          "types": {
+            "description": "Specific refactoring types to detect (default: all types)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "extract_function",
+                "introduce_parameter_object",
+                "extract_class",
+                "inline_function",
+                "consolidate_duplicates",
+                "simplify_conditional"
+              ]
+            }
+          },
+          "minImpact": {
+            "description": "Minimum impact level to include (default: low — all results)",
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_task_context",
+      "description": "Given a natural language task description, returns the minimal but complete set of symbols and files an agent needs to complete that task. In the default 'associative' mode it discovers seed symbols, then walks the real dependency + co-change graph around them (imports, callers, historically co-changing files), derives each symbol's role from the edge that surfaced it, and reports evidenceGaps (what was dropped / co-change partners you may also need) and suggestedProbes. AI ranking is used when configured; otherwise results are ranked by graph provenance. Pass mode:\"flat\" for the legacy single-pass similarity selection. Eliminates the need for iterative search-and-read discovery loops.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Natural language task description, e.g. \"add OAuth login to the user service\""
+          },
+          "maxSymbols": {
+            "description": "Maximum number of symbols to return (default 15, max 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "includeSource": {
+            "description": "Return full source code for each symbol (default false — metadata only)",
+            "type": "boolean"
+          },
+          "model": {
+            "description": "AI model for context planning (default: configured summarizer model)",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Retrieval mode. 'associative' (default) expands the top discovery hits along the dependency + co-change graph, derives roles from edges, and reports evidence gaps. 'flat' is the legacy single-pass similarity selection.",
+            "type": "string",
+            "enum": [
+              "flat",
+              "associative"
+            ]
+          }
+        },
+        "required": [
+          "repoId",
+          "task"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "generate_docs",
+      "description": "Generate a structured architecture document for a repository (or a directory within it) from indexed symbols, the dependency graph, and AI summaries. Outputs markdown or JSON. Useful for onboarding, architecture reviews, and automated documentation pipelines.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "scope": {
+            "description": "Directory prefix to narrow scope, e.g. \"src/core/\"",
+            "type": "string"
+          },
+          "format": {
+            "description": "Output format: \"markdown\" (default) or \"json\"",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          },
+          "includeSymbols": {
+            "description": "List key symbols per module (default true)",
+            "type": "boolean"
+          },
+          "includeDependencies": {
+            "description": "Show import relationships between modules (default true)",
+            "type": "boolean"
+          },
+          "includeMetrics": {
+            "description": "Append quality metrics per module: symbol count, avg complexity (default false)",
+            "type": "boolean"
+          },
+          "aiEnhance": {
+            "description": "Use AI to write module descriptions for files without a docstring (default true). Requires a configured AI provider — skipped gracefully if none is set.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "export_index",
+      "description": "Serialize a repo's index (symbols, files, dep edges, and optionally HNSW embeddings) into a portable .pcx bundle that can be shared between team members, stored in CI artifacts, or loaded on a new machine with import_index. One bundle per repo — repo-scoped, not full-DB.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "ID of the repo to export (from list_repos)"
+          },
+          "outputPath": {
+            "type": "string",
+            "description": "Absolute path where the .pcx bundle will be written"
+          },
+          "includeSource": {
+            "description": "Include cached file source content in the bundle (default: true)",
+            "type": "boolean"
+          },
+          "includeVectors": {
+            "description": "Include HNSW embedding vectors in the bundle (default: true)",
+            "type": "boolean"
+          },
+          "compress": {
+            "description": "Gzip-compress the bundle (default: true). Set false for debugging.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "outputPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "import_index",
+      "description": "Import a .pcx bundle created by export_index into the local index store. Restores all symbols, files, dependency edges, and optionally embedding vectors. Use repoPath to override the stored root path (needed on a different machine). Set merge: false (default) to skip the import if the repo is already indexed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bundlePath": {
+            "type": "string",
+            "description": "Absolute path to the .pcx bundle file to import"
+          },
+          "repoPath": {
+            "description": "Override the repo root path stored in the bundle. Required when importing on a machine where the repo lives at a different absolute path.",
+            "type": "string"
+          },
+          "merge": {
+            "description": "When false (default), skip import if the repo is already indexed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bundlePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "fetch_public_index",
+      "description": "Download a pre-built index bundle for a popular open-source repository from the PureContext public registry. After fetching, the repo is immediately searchable via search_symbols, get_repo_outline, and other tools — no local clone or indexing needed. Bundles are signed (SHA-256) and verified before import. Use list_public_indexes to see the available repos.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "GitHub repository in \"owner/repo\" format, e.g. \"expressjs/express\""
+          },
+          "version": {
+            "description": "Git tag or version to fetch. Defaults to \"latest\".",
+            "type": "string"
+          },
+          "force": {
+            "description": "Re-download and re-import even if the repo is already locally cached. Default: false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_coupling_map",
+      "description": "Return per-file coupling scores showing exactly which files each file depends on and which files depend on it. Goes beyond get_quality_metrics to expose the full dependency lists, not just aggregate counts. Uses Martin's instability metric: instability = efferentCoupling / (efferentCoupling + afferentCoupling). A score near 0 means the file is a stable hub (risky to change). A score near 1 means it is a leaf (safe to change). Use topN to surface the most coupled files in the repo, or filePath to inspect one file. crossIndex:true (since 1.35.0) counts imports across LINKED indexes in both directions: linked deps appear as `<linkedRepoId>:<path>` and each row adds crossEfferent / crossAfferent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePath": {
+            "description": "Scope to a single file (relative to repo root). If omitted, returns the top-N most coupled files across the whole repo.",
+            "type": "string"
+          },
+          "topN": {
+            "description": "Maximum number of files to return when filePath is omitted (default 20)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "minScore": {
+            "description": "Only include files whose total coupling (efferent + afferent) is ≥ this value. Use to focus on highly coupled files only.",
+            "type": "number",
+            "minimum": 0
+          },
+          "direction": {
+            "description": "\"efferent\" — show only outgoing deps (files this file imports); \"afferent\" — show only incoming deps (files that import this file); \"both\" (default) — show both. Restricting direction reduces response size.",
+            "type": "string",
+            "enum": [
+              "efferent",
+              "afferent",
+              "both"
+            ]
+          },
+          "crossIndex": {
+            "description": "Count dependencies across LINKED indexes too (default false — this index only).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_implementations",
+      "description": "Find all concrete implementations of a TypeScript interface or abstract class, and all method overrides for a given base method. Returns implementing classes with their implemented and missing methods. Use search_symbols to find the symbolId for an interface or abstract class first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID of the interface or abstract class to search for"
+          },
+          "includeAbstract": {
+            "description": "Include abstract subclasses in results (default false). When true, abstract classes that extend the target are included alongside concrete implementations.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum number of implementations to return (default 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_cycles",
+      "description": "Detect all import cycles in the dependency graph and return them as ordered file paths. Unlike detect_antipatterns (which only counts cycles), this tool returns the actual cycle paths so you can understand and resolve circular dependencies. Severity is \"error\" for tight 2–3 node cycles and \"warning\" for longer chains. Use filePath to scope results to cycles involving one file. crossIndex:true (since 1.35.0) searches the union graph of this index AND its linked indexes, so a cycle that passes through two roots (app → lib → app) is found; linked members are named `<linkedRepoId>:<path>` and each cycle carries `members` + `crossIndex`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePath": {
+            "description": "Scope to cycles that involve this file (relative to repo root). If omitted, all cycles in the repo are returned up to maxCycles.",
+            "type": "string"
+          },
+          "maxCycles": {
+            "description": "Stop after finding this many cycles (default 20)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "minLength": {
+            "description": "Minimum cycle length to report (default 2). A mutual import A→B→A has length 2. Raise this to skip direct pairs.",
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 20
+          },
+          "crossIndex": {
+            "description": "Search across LINKED indexes too (default false — this index only). Adds `links` (indexes searched) and, per cycle, `members` with repo ids.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_class_hierarchy",
+      "description": "Return the full inheritance chain for a class or interface — ancestors (extends chain upward) and/or descendants (all subclasses/implementations downward). External base classes not in the repo appear as leaf nodes with symbolId: null. Use search_symbols to find the symbolId for a class or interface first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID of the class or interface to root the hierarchy at"
+          },
+          "direction": {
+            "description": "Which direction to traverse: \"ancestors\" (extends chain upward), \"descendants\" (all subclasses downward), or \"both\" (default: \"both\")",
+            "type": "string",
+            "enum": [
+              "ancestors",
+              "descendants",
+              "both"
+            ]
+          },
+          "maxDepth": {
+            "description": "Maximum traversal depth in each direction (default 5)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "includeInterfaces": {
+            "description": "Include implemented interfaces in the ancestor chain and interface subclasses in descendants (default true)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_call_hierarchy",
+      "description": "Return the callers and callees of a function, N levels deep, as a tree structure. Use direction=\"callees\" to see what a function calls, \"callers\" to see what calls it, or \"both\" for a bidirectional view. Recursive functions are detected and marked with cyclic=true. Use search_symbols to find the symbolId for the function first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID of the function or method to build the hierarchy for"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "callers",
+              "callees",
+              "both"
+            ],
+            "description": "\"callees\" — what this function calls; \"callers\" — what calls this function; \"both\" — bidirectional (callers and callees combined at each level)"
+          },
+          "maxDepth": {
+            "description": "Maximum tree depth (default 3, max 6)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "maxNodes": {
+            "description": "Stop expanding the tree once total nodes reach this count (default 50). When hit, truncated=true is set in the response.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "maxTokens": {
+            "description": "Soft cap on response size in tokens. When the estimated token count exceeds this value, the tree is returned as-is with truncated=true.",
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId",
+          "direction"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "render_diagram",
+      "description": "Generate a Mermaid or DOT diagram from the indexed dependency graph. Use type \"module\" for a file-level import graph of the whole repo or a directory. Use type \"call\" with rootSymbolId for a call hierarchy flowchart. Use type \"class\" with rootSymbolId for a class inheritance classDiagram. Use type \"import\" for the same as \"module\" (alias). Mermaid output renders natively in GitHub, VS Code, and Claude. maxNodes (default 30) and maxDepth (default 3) prevent oversized diagrams.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "module",
+              "call",
+              "class",
+              "import"
+            ],
+            "description": "\"module\"/\"import\" — file-level import graph; \"call\" — call graph (requires rootSymbolId); \"class\" — class hierarchy (requires rootSymbolId)"
+          },
+          "rootSymbolId": {
+            "description": "Anchor symbol ID for call/class diagrams. Required for type \"call\" and \"class\".",
+            "type": "string"
+          },
+          "filePath": {
+            "description": "Scope the diagram to a directory or file prefix (relative to repo root). E.g. \"src/core/\" restricts the module diagram to that directory.",
+            "type": "string"
+          },
+          "maxNodes": {
+            "description": "Maximum number of nodes to include. Least-connected nodes are dropped first. Default 30.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "maxDepth": {
+            "description": "Maximum traversal depth for call/class diagrams. Default 3.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "format": {
+            "description": "Output format. Default \"mermaid\".",
+            "type": "string",
+            "enum": [
+              "mermaid",
+              "dot"
+            ]
+          }
+        },
+        "required": [
+          "repoId",
+          "type"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "render_call_graph",
+      "description": "Render a call graph rooted at a symbol as a Mermaid flowchart or DOT diagram. Shows callers and/or callees N levels deep. The root node is styled distinctly. Recursive/cyclic calls are shown as dashed arrows. Use direction=\"callees\" to see what a function calls, \"callers\" to see what calls it, or \"both\" for a bidirectional view. Use search_symbols to find the symbolId first. Mermaid output renders natively in GitHub, VS Code, and Claude.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID of the root function or method. Use search_symbols to find it."
+          },
+          "direction": {
+            "description": "\"callees\" — what this function calls (forward); \"callers\" — what calls this function (reverse); \"both\" — bidirectional (default)",
+            "type": "string",
+            "enum": [
+              "callers",
+              "callees",
+              "both"
+            ]
+          },
+          "maxDepth": {
+            "description": "Maximum depth to traverse. Default 3.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "maxNodes": {
+            "description": "Maximum number of nodes to include. Least-connected nodes are dropped first. Default 25.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "format": {
+            "description": "Output format. Default \"mermaid\".",
+            "type": "string",
+            "enum": [
+              "mermaid",
+              "dot"
+            ]
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "render_import_graph",
+      "description": "Render a file-level import graph for a directory as a Mermaid or DOT diagram. Nodes = files, edges = import relationships. Files inside the directory are clustered by subdirectory using Mermaid subgraph blocks. Files outside the directory that are imported by in-scope files appear as grey boundary nodes. Use maxNodes (default 30) to keep large graphs readable. Mermaid output renders natively in GitHub, VS Code, and Claude. crossIndex:true (since 1.35.0) draws imports into LINKED indexes as boundary nodes named `<rootName>:<file>` (fullPath `<linkedRepoId>:<path>`).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Directory path to scope the graph to (relative to repo root). E.g. \"src/core/\" — only files under this directory are rendered as primary nodes. Files outside this directory that are imported by in-scope files appear as boundary nodes."
+          },
+          "includeExternal": {
+            "description": "When true, external npm imports appear as grey terminal nodes. Default false. Note: external imports are not stored in the dep graph, so this option currently has no effect (reserved for future use).",
+            "type": "boolean"
+          },
+          "maxNodes": {
+            "description": "Maximum number of nodes to include. Least-connected nodes are dropped first. Default 30.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "format": {
+            "description": "Output format. Default \"mermaid\".",
+            "type": "string",
+            "enum": [
+              "mermaid",
+              "dot"
+            ]
+          },
+          "crossIndex": {
+            "description": "Include edges into LINKED indexes as boundary nodes (default false).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "filePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "render_dep_matrix",
+      "description": "Render a dependency matrix for the top-N most coupled files. Each cell shows 1 if the row file imports the column file, 0 otherwise; the diagonal shows \"—\". ASCII format (default) is token-efficient and renders in any markdown context. Mermaid format produces a graph TD showing import edges between the top-N files. Use topN (default 10) to control how many files appear. Use filePath to scope selection to a directory. crossIndex:true (since 1.35.0) counts imports across LINKED indexes; linked files that the selected rows import join the matrix as `<rootName>:<file>` columns (at most topN of them).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "topN": {
+            "description": "Number of most-coupled files to include (default 10)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "filePath": {
+            "description": "Scope file selection to files under this directory path (relative to repo root). When omitted, selects from the whole repo.",
+            "type": "string"
+          },
+          "format": {
+            "description": "\"ascii\" (default) — text table readable in any markdown. \"mermaid\" — graph TD diagram of import edges between the selected files.",
+            "type": "string",
+            "enum": [
+              "ascii",
+              "mermaid"
+            ]
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "render_class_hierarchy",
+      "description": "Render a UML-style class hierarchy diagram using Mermaid classDiagram syntax. Shows ancestors (extends chain upward) and/or descendants (all subclasses downward). Extends relationships are drawn with solid arrows (<|--); implements relationships with dashed arrows (<|..). When includeMembers is true, methods and properties are shown inside each class box with access-modifier prefixes. External base classes (e.g. Error, EventEmitter) that are not indexed appear as empty leaf nodes. Use search_symbols to find the symbolId for a class or interface first. Mermaid output renders natively in GitHub, VS Code, and Claude.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID of the class or interface to root the diagram at. Use search_symbols to find it."
+          },
+          "direction": {
+            "description": "\"ancestors\" — draw the extends chain upward; \"descendants\" — draw all subclasses downward; \"both\" — full hierarchy (default)",
+            "type": "string",
+            "enum": [
+              "ancestors",
+              "descendants",
+              "both"
+            ]
+          },
+          "maxDepth": {
+            "description": "Maximum traversal depth in each direction (default 5)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "includeInterfaces": {
+            "description": "Include implemented interfaces in the ancestor chain and interface subclasses in descendants (default true)",
+            "type": "boolean"
+          },
+          "includeMembers": {
+            "description": "Show methods and properties inside each class box with access-modifier prefixes (+ public, - private, # protected). Default true.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_architecture_snapshot",
+      "description": "Freeze the current architecture state into a named snapshot, then diff two snapshots to measure structural change over time. action \"create\": compute fileCount, symbolCount, edgeCount, cycleCount, avgCoupling, avgComplexity and store them with an optional label. action \"list\": return all snapshots for the repo, newest first. action \"diff\": compare two snapshots and return deltas (cycleCountDelta < 0 means fewer cycles — good). action \"delete\": remove a snapshot by ID. crossIndex:true on \"create\" (since 1.35.0) also stores the cycles / layer violations that cross into LINKED indexes plus the link set, so compare_change_impact({ crossIndex: true }) can diff them; \"diff\" reports crossCycleCountDelta only when both snapshots carry the same link set.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "list",
+              "diff",
+              "delete"
+            ],
+            "description": "\"create\" | \"list\" | \"diff\" | \"delete\""
+          },
+          "snapshotId": {
+            "description": "Snapshot ID — required for diff (snapshotId = base) and delete",
+            "type": "string"
+          },
+          "compareId": {
+            "description": "The second snapshot ID to compare against — required for diff",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable label for the snapshot (e.g. \"before-auth-refactor\")",
+            "type": "string"
+          },
+          "crossIndex": {
+            "description": "On \"create\": also store cross-index cycles / layer violations and the link set (default false).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "action"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_rename_safe",
+      "description": "Pre-flight check for renaming a symbol. Returns a verdict, all affected files, and the specific lines that will need updating. safe: false when the new name conflicts with an existing symbol or when string-literal references exist that require manual updates. Use search_symbols to find the symbolId first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "type": "string",
+            "description": "Symbol ID of the symbol to rename"
+          },
+          "newName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Proposed new name for the symbol"
+          },
+          "checkConflicts": {
+            "description": "Check if newName already exists in the same file (default true). Set false to skip conflict detection for speed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "symbolId",
+          "newName"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_delete_safe",
+      "description": "Pre-flight check for deleting a symbol or file. Returns a verdict and all live references that would break if the symbol were removed. safe: false when live references exist, the symbol is exported (external consumers), or the symbol is an entry point (route handler, main export). Supports two modes: symbolId (single symbol) or filePath (all symbols in a file). Use search_symbols or get_file_outline to find a symbolId first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "description": "Symbol ID of the symbol to check. Mutually exclusive with filePath. Use search_symbols to find the symbolId.",
+            "type": "string"
+          },
+          "filePath": {
+            "description": "File path relative to the repo root — checks all symbols in the file and produces an aggregate verdict. Mutually exclusive with symbolId.",
+            "type": "string"
+          },
+          "includeExternalRisk": {
+            "description": "Warn when a symbol is exported but has no internal references (may be consumed by external npm packages). Default true. Set false to suppress this warning.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_move_safe",
+      "description": "Pre-flight check for moving a file to a new location. Returns a checklist of import statements that need updating (importUpdates) plus cycle-risk analysis (wouldIntroduceCycles). safe: false only when the move would place the file inside an existing import cycle. All moves are mechanically doable — importUpdates gives you the exact edits needed. Use find_importers to preview which files depend on a module before moving it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Current file path relative to the repo root (e.g. \"src/utils/hash.ts\")"
+          },
+          "newFilePath": {
+            "type": "string",
+            "description": "Proposed new location relative to the repo root (e.g. \"src/core/hash.ts\")"
+          },
+          "checkCycles": {
+            "description": "Simulate the move in the dependency graph and detect any import cycles that would involve the new location. Default true.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "filePath",
+          "newFilePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "plan_refactoring",
+      "description": "Generate a sequenced, risk-annotated refactoring plan for a symbol or file. Synthesizes check_rename_safe, check_delete_safe, check_move_safe, find_cycles, get_coupling_map, detect_antipatterns, and get_quality_metrics into a prioritised step list. Read-only — produces a plan but writes nothing. Goals: rename-symbol (symbolId + newName), delete-symbol (symbolId), break-cycle (filePath or symbolId), extract-module (filePath + newFilePath), reduce-coupling (filePath or symbolId), general (filePath or symbolId).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "symbolId": {
+            "description": "Symbol ID of the target symbol. Required for rename-symbol and delete-symbol. Used to derive filePath for break-cycle, reduce-coupling, and general when filePath is omitted.",
+            "type": "string"
+          },
+          "filePath": {
+            "description": "File path relative to the repo root. Required for extract-module and reduce-coupling when symbolId is not provided. Used as scope for break-cycle and general.",
+            "type": "string"
+          },
+          "goal": {
+            "type": "string",
+            "enum": [
+              "extract-module",
+              "rename-symbol",
+              "delete-symbol",
+              "break-cycle",
+              "reduce-coupling",
+              "general"
+            ],
+            "description": "Refactoring goal: rename-symbol, delete-symbol, break-cycle, extract-module, reduce-coupling, or general."
+          },
+          "newName": {
+            "description": "Proposed new name. Required for rename-symbol.",
+            "type": "string"
+          },
+          "newFilePath": {
+            "description": "Proposed new file location (relative to repo root). Required for extract-module.",
+            "type": "string"
+          },
+          "contextHint": {
+            "description": "Free-text description of what you are trying to achieve. Included verbatim in the plan summary.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoId",
+          "goal"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "prepare_change",
+      "description": "Pre-edit refactoring orchestrator: given an intent (rename / delete / modify / extract) and a target (symbolId or free-text query), resolve the change set and return an impact-aware pre-flight BEFORE editing — predicted files, composite risk, historically co-changing files MISSING from the predicted change (the \"you forgot to touch X\" signal), recommended tests, coverage gaps, architectural flags, and plain-English reasons. Read-only — it never edits. Apply the change yourself, then call verify_change with the real diff to confirm completeness. Returns verdict \"ambiguous_target\" with candidates when a query is not a clear match (it never guesses).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "rename",
+              "delete",
+              "modify",
+              "extract"
+            ],
+            "description": "What you intend to do: rename, delete, modify (edit body/signature), or extract (move)."
+          },
+          "targetSymbolId": {
+            "description": "Symbol ID of the target. Provide this OR query.",
+            "type": "string"
+          },
+          "query": {
+            "description": "Free-text name/description of the target symbol. Resolved via search; returns \"ambiguous_target\" with candidates if there is no clear match.",
+            "type": "string"
+          },
+          "includeRisk": {
+            "description": "Score composite risk (default true)",
+            "type": "boolean"
+          },
+          "includeCoChangeGaps": {
+            "description": "Flag historically co-changing files missing from the change (default true)",
+            "type": "boolean"
+          },
+          "includeTests": {
+            "description": "Recommend tests + coverage gaps (default true)",
+            "type": "boolean"
+          },
+          "includeArchitectureFlags": {
+            "description": "Flag cycles / layer crossings the target sits on (default true)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "intent"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_change",
+      "description": "Post-edit refactoring reconciliation: given the real diff and the prediction from prepare_change, confirm the change is COMPLETE. Reports historically co-changing files you planned around but still did not touch (unaddressedCoChange), predicted partners you did touch (addressedCoChange), files changed that were not predicted (unplannedChanges / scope creep), and changed symbols still lacking tests (coverageGapsRemaining). Returns a verdict (complete / incomplete / scope_expanded) with plain-English reasons. Stateless: pass predictedFilePaths and predictedCoChange from the prepare_change output. Co-change reconciliation is suppressed when the git signal is low.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "diff": {
+            "type": "string",
+            "description": "Unified diff of what you actually changed (output of `git diff`)"
+          },
+          "predictedFilePaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "predictedChange.changedFilePaths from the prepare_change output"
+          },
+          "predictedCoChange": {
+            "description": "File paths prepare_change flagged in missingCoChange (the partners you were advised to consider). Pass missingCoChange[].filePath. Defaults to empty.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "predictionId": {
+            "description": "Optional echo of prepare_change.predictionId (label only; not stored).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoId",
+          "diff",
+          "predictedFilePaths"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compare_change_impact",
+      "description": "Architecture regression check: compare the current code against a baseline snapshot (created with get_architecture_snapshot BEFORE your change) and report what the change INTRODUCED — new import cycles (newCycles) and new layer-boundary violations (newLayerViolations) — plus cycles/violations it resolved. Distinct from analyze_diff architecturalFlags, which flag pre-existing issues; this reports only the delta and never blames the change for issues it did not create. Verdict: regressed / improved / unchanged / no_baseline. Workflow: snapshot before, edit, reindex, compare_change_impact. crossIndex:true (since 1.35.0) also diffs cycles and layer violations that cross into LINKED indexes — only against a baseline snapshot taken with crossIndex:true and the SAME link set (`crossBaseline`: compared | no_baseline; a link-set change never reads as a regression).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "baselineSnapshotId": {
+            "description": "Snapshot ID to use as the \"before\" state (from get_architecture_snapshot action:create). If omitted, the most recent snapshot is used.",
+            "type": "string"
+          },
+          "crossIndex": {
+            "description": "Also diff cross-index cycles / layer violations (default false). Needs a baseline created with crossIndex:true against the same links; otherwise crossBaseline = no_baseline.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_debt_report",
+      "description": "Generate a comprehensive technical debt report for an indexed repo. Aggregates complexity, structural, maintainability, and volatility signals into a single scored report with letter grade, per-category breakdown, top debt files, and prioritized action items. Use this for periodic debt reviews, CI gates, and architecture planning.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "scope": {
+            "description": "Directory prefix filter (e.g. \"src/core/\") — narrows analysis to that subtree",
+            "type": "string"
+          },
+          "topN": {
+            "description": "Number of top debt files to return (default 10)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "includeChurn": {
+            "description": "Include churn-based volatility debt (requires git metadata captured during indexing; default true)",
+            "type": "boolean"
+          },
+          "format": {
+            "description": "\"summary\" returns only scores and grade; \"detailed\" (default) includes top files and recommendations",
+            "type": "string",
+            "enum": [
+              "summary",
+              "detailed"
+            ]
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "health_radar",
+      "description": "Compute a multi-axis health radar for an indexed repo. Scores five dimensions (complexity, coupling, maintainability, documentation, stability) on a 0–100 scale where 100 = perfectly healthy. Designed for dashboard charts, CI health gates, and quick repo orientation. Use get_debt_report for a detailed breakdown with per-file rankings and recommendations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repo ID from index_folder or resolve_repo"
+          },
+          "scope": {
+            "description": "Directory prefix filter (e.g. \"src/core/\") — narrows analysis to that subtree",
+            "type": "string"
+          },
+          "includeStability": {
+            "description": "Include churn-based stability axis (requires git metadata; default true). Set false to skip git queries when git data is absent.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "diff_health_radar",
+      "description": "Compare health radar scores between two indexed repos (or two states of the same codebase). Runs health_radar on baseRepoId and headRepoId, then computes per-axis deltas. Positive delta = improvement; negative delta = regression. Primary use cases: PR review (index main vs feature branch), refactoring validation (index before/after), and cross-repo health benchmarking. Use health_radar for a single-repo snapshot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "baseRepoId": {
+            "type": "string",
+            "description": "Baseline repo ID (e.g. main branch). From index_folder or resolve_repo."
+          },
+          "headRepoId": {
+            "type": "string",
+            "description": "Head repo ID to compare against the baseline (e.g. feature branch)."
+          },
+          "scope": {
+            "description": "Directory prefix filter applied to both repos (e.g. \"src/core/\"). Narrows analysis to the same subtree in each repo.",
+            "type": "string"
+          },
+          "includeStability": {
+            "description": "Include churn-based stability axis in both snapshots (requires git metadata; default true). Set false to skip git queries when git data is absent.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "baseRepoId",
+          "headRepoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_by_signature",
+      "description": "Find all symbols whose type signature matches a pattern. Use this to locate all async functions, all functions returning a specific type, all functions accepting a particular parameter type, or all exported symbols — without reading files. Operates on the stored one-line signature string for every indexed symbol. Three match modes: \"contains\" (default), \"startsWith\", \"regex\". \n\nPattern examples:\n  \"Promise<void>\"     — all functions returning Promise<void>\n  \"async\"             — all async functions (signature starts with \"async\")\n  \"(req: Request\"     — all functions taking a Request parameter\n  \": string[]\"        — all functions returning string[]\n  \"@Injectable\"       — all symbols with Injectable decorator in signature\n  \"export async\"      — all exported async symbols (startsWith mode)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Pattern to match against the symbol signature string"
+          },
+          "mode": {
+            "description": "Match mode: \"contains\" (default) — signature contains pattern; \"startsWith\" — signature starts with pattern; \"regex\" — pattern is a JavaScript-compatible regular expression",
+            "type": "string",
+            "enum": [
+              "contains",
+              "startsWith",
+              "regex"
+            ]
+          },
+          "kind": {
+            "description": "Filter results to a specific symbol kind",
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "const",
+              "type",
+              "interface",
+              "enum",
+              "component",
+              "composable",
+              "hook",
+              "route",
+              "decorator",
+              "middleware"
+            ]
+          },
+          "filePath": {
+            "description": "Restrict search to a specific file path or directory prefix",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum number of results to return (default 50)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId",
+          "pattern"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_by_complexity",
+      "description": "Find symbols matching specific complexity criteria. Filter by any combination of cyclomatic complexity, cognitive complexity, line count, nesting depth, parameter count, and return count — each with optional min and/or max bounds. Only symbols with computed metrics are returned (functions, methods, classes, components, etc.).\n\nExample use cases:\n  minCyclomaticComplexity: 8              — dangerously complex functions\n  minParamCount: 5                        — functions with too many arguments\n  minLineCount: 100                       — long functions to split\n  minNestingDepth: 4                      — deeply nested, hard-to-read code\n  maxCyclomaticComplexity: 2, maxLineCount: 15  — simple utility functions\n  minReturnCount: 4                       — functions with many exit points",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "minCyclomaticComplexity": {
+            "description": "Only return symbols with cyclomatic complexity ≥ this value",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "maxCyclomaticComplexity": {
+            "description": "Only return symbols with cyclomatic complexity ≤ this value",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "minCognitiveComplexity": {
+            "description": "Only return symbols with cognitive complexity ≥ this value",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "maxCognitiveComplexity": {
+            "description": "Only return symbols with cognitive complexity ≤ this value",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "minLineCount": {
+            "description": "Only return symbols with line count ≥ this value",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "maxLineCount": {
+            "description": "Only return symbols with line count ≤ this value",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "minNestingDepth": {
+            "description": "Only return symbols with max nesting depth ≥ this value",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "maxNestingDepth": {
+            "description": "Only return symbols with max nesting depth ≤ this value",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "minParamCount": {
+            "description": "Only return symbols with parameter count ≥ this value",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxParamCount": {
+            "description": "Only return symbols with parameter count ≤ this value",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "minReturnCount": {
+            "description": "Only return symbols with return statement count ≥ this value",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxReturnCount": {
+            "description": "Only return symbols with return statement count ≤ this value",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sortBy": {
+            "description": "Sort dimension: \"complexity\" (cyclomatic, default), \"cognitive\", \"size\" (line count), \"nesting\", \"params\", \"returns\"",
+            "type": "string",
+            "enum": [
+              "complexity",
+              "cognitive",
+              "size",
+              "nesting",
+              "params",
+              "returns"
+            ]
+          },
+          "sortOrder": {
+            "description": "Sort direction: \"desc\" (default, worst first) or \"asc\" (best first)",
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "kind": {
+            "description": "Filter results to a specific symbol kind",
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "const",
+              "type",
+              "interface",
+              "enum",
+              "component",
+              "composable",
+              "hook",
+              "route",
+              "decorator",
+              "middleware"
+            ]
+          },
+          "filePath": {
+            "description": "Restrict search to a specific file path or directory prefix",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum number of results to return (default 50)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_ast",
+      "description": "Structural AST node-type search. Finds every occurrence of a specific tree-sitter node type across indexed files — e.g. all arrow functions, all try/catch blocks, all await expressions, all JSX elements — without reading files manually. Re-parses stored file content using the appropriate grammar. Only files backed by a WASM grammar (TypeScript, JavaScript, Python, Go, Rust, Java, C/C++, etc.) are searched; regex-only handlers are skipped.\n\nNode type is the exact tree-sitter internal name (case-sensitive):\n  \"arrow_function\"       — all arrow functions\n  \"try_statement\"        — all try/catch blocks\n  \"await_expression\"     — all awaited expressions\n  \"class_declaration\"    — all class declarations\n  \"interface_declaration\"— all TypeScript interfaces\n  \"jsx_element\"          — all JSX elements\n  \"template_string\"      — all template literals\n  \"call_expression\"      — all function calls",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "nodeType": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The tree-sitter AST node type to search for (e.g. \"arrow_function\", \"try_statement\", \"class_declaration\"). Exact, case-sensitive match."
+          },
+          "language": {
+            "description": "Restrict search to files of a specific language (e.g. \"typescript\", \"javascript\", \"python\", \"go\", \"rust\", \"java\"). When omitted, all WASM-backed grammar files in the repo are searched.",
+            "type": "string"
+          },
+          "filePath": {
+            "description": "Restrict search to a specific file path or directory prefix",
+            "type": "string"
+          },
+          "includeText": {
+            "description": "Whether to include the matched node's source text in each result (default true). Set false to reduce response size when you only need locations.",
+            "type": "boolean"
+          },
+          "maxTextLength": {
+            "description": "Maximum characters of matched node text to include (default 120)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "description": "Maximum number of matches to return (default 50)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId",
+          "nodeType"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_by_decorator",
+      "description": "Find all symbols annotated with a specific decorator — e.g. all @Injectable classes, all @Get route handlers, all @Column properties. Re-parses stored file content via tree-sitter to locate decorator nodes and resolves each back to the decorated symbol in the index. \n\nThree match modes:\n  exact (default) — decorator name must exactly match (e.g. \"Injectable\")\n  contains        — decorator name contains the query (e.g. \"inject\" finds @Injectable)\n  prefix          — decorator name starts with the query (e.g. \"Get\" finds @Get, @GetMapping)\n\nExamples:\n  decoratorName: \"Injectable\"             — all @Injectable classes\n  decoratorName: \"Controller\"             — all @Controller route handlers\n  decoratorName: \"Column\", mode: \"prefix\" — all @Column, @ColumnType decorators\n  decoratorName: \"test\", mode: \"contains\" — anything with \"test\" in decorator name",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "decoratorName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Decorator name to search for — without the \"@\" prefix. Case-sensitive for exact/prefix modes, case-sensitive for contains mode."
+          },
+          "matchMode": {
+            "description": "How to match the decorator name: \"exact\" (default) — name must equal query; \"contains\" — name must contain query; \"prefix\" — name must start with query.",
+            "type": "string",
+            "enum": [
+              "exact",
+              "contains",
+              "prefix"
+            ]
+          },
+          "language": {
+            "description": "Restrict search to files of a specific language (e.g. \"typescript\", \"javascript\"). When omitted, all WASM-backed grammar files are searched.",
+            "type": "string"
+          },
+          "filePath": {
+            "description": "Restrict search to a specific file path or directory prefix",
+            "type": "string"
+          },
+          "includeDecoratorText": {
+            "description": "Include the full decorator text in each result (e.g. \"@Injectable()\" or \"@Column({ nullable: false })\"). Default true.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum number of matches to return (default 50)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId",
+          "decoratorName"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_public_api",
+      "description": "Return the public API surface of a repository: all exported symbols, grouped by file. A symbol is considered public when its signature begins with the export keyword. Use this to answer \"what does this library expose?\", audit API contracts, seed documentation, or compare the public surface before and after a refactor. Each result includes symbolId, name, kind, signature, summary, file path, and whether the symbol is a default export.\n\nRelated tools:\n  find_dead_code   — exported symbols that nobody imports\n  get_blast_radius — downstream impact of removing an export\n  get_repo_outline — all symbols (exported and unexported) by file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "filePath": {
+            "description": "Restrict to a specific file path or directory prefix (e.g. \"src/services/\" returns all exports from that subtree)",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Filter results to a specific symbol kind",
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "const",
+              "type",
+              "interface",
+              "enum",
+              "component",
+              "composable",
+              "hook",
+              "route",
+              "decorator",
+              "middleware"
+            ]
+          },
+          "includeMembers": {
+            "description": "When true, also include public methods of exported classes. Methods do not carry the export keyword themselves but are part of the exported API surface. Only effective when kind is not set (default false).",
+            "type": "boolean"
+          },
+          "groupByFile": {
+            "description": "Group results by file (default true). Set false for a flat sorted list.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum number of exported symbols to return (default 500)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_todos",
+      "description": "Scan all indexed source files for TODO/FIXME/HACK/NOTE/OPTIMIZE/BUG/XXX comment tags. Returns each occurrence with file path, line number, tag type, optional assignee (e.g. TODO(alice):), and the comment text. Use this to generate a tech-debt inventory, find all FIXMEs before a release, or audit comment hygiene across a codebase. Supports filtering by tag type, assignee name, and file path.\n\nRelated tools:\n  get_debt_report      — structured tech-debt metrics including comment-based debt\n  get_complexity_hotspots — identify complex symbols that may have hidden TODOs\n  search_text          — free-form text search across file content",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "tags": {
+            "description": "Tag types to scan for. Defaults to all seven tags: TODO, FIXME, HACK, NOTE, OPTIMIZE, BUG, XXX.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "TODO",
+                "FIXME",
+                "HACK",
+                "NOTE",
+                "OPTIMIZE",
+                "BUG",
+                "XXX"
+              ]
+            }
+          },
+          "filePath": {
+            "description": "Restrict to a specific file path or directory prefix (e.g. \"src/services/\" returns todos from that subtree only)",
+            "type": "string"
+          },
+          "assignee": {
+            "description": "Filter by assignee name. Matches \"TODO(alice)\" when assignee=\"alice\". Case-insensitive.",
+            "type": "string"
+          },
+          "groupByFile": {
+            "description": "Group results by file (default true). Set false for a flat sorted list.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum number of todo items to return (default 200)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_entry_points",
+      "description": "Identify the runnable entry points of a repository: main functions, CLI handlers, HTTP server startups, Lambda/serverless handlers, test suites, and standalone scripts. Detection combines symbol name heuristics, file name patterns, and signature analysis. Each result includes a kind (main_function, cli_handler, server_startup, lambda_handler, test_suite, script, android_component), a confidence level (high/medium/low), and the reason for classification. Use this to answer \"where does this application start?\", enumerate all runnable targets, or trace execution paths from the root.\n\nRelated tools:\n  get_context_bundle — full dependency chain from an entry point\n  find_dead_code     — unreachable code relative to entry points\n  get_call_hierarchy — callee tree rooted at an entry point",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "kind": {
+            "description": "Filter results to a specific entry-point kind",
+            "type": "string",
+            "enum": [
+              "main_function",
+              "cli_handler",
+              "server_startup",
+              "lambda_handler",
+              "test_suite",
+              "script",
+              "android_component"
+            ]
+          },
+          "filePath": {
+            "description": "Restrict to a specific file path or directory prefix (e.g. \"src/cmd/\" returns entry points from that subtree only)",
+            "type": "string"
+          },
+          "minConfidence": {
+            "description": "Minimum confidence level to include. \"high\" returns only strong matches; \"low\" returns all candidates (default \"low\").",
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "limit": {
+            "description": "Maximum number of entry points to return (default 100)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_complexity_hotspots",
+      "description": "Aggregate per-symbol complexity metrics to the file level and return a ranked list of the files with the highest complexity concentration. Use this to answer \"where should I focus refactoring effort?\" — it surfaces files with many complex symbols, deeply nested logic, or high average cyclomatic complexity. Returns a hotspot score (0–100) per file, plus the top offending symbols within each hotspot file.\n\nDiffers from related tools:\n  get_quality_metrics    — per-symbol composite score ranked by worst symbols\n  search_by_complexity   — threshold/range filtering of individual symbols\n  get_debt_report        — broader tech-debt summary including comment density\n  health_radar           — multi-dimensional health scores per file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "scope": {
+            "description": "Restrict to a directory prefix (e.g. \"src/core/\"). Omit to analyse the entire repo.",
+            "type": "string"
+          },
+          "topN": {
+            "description": "Number of hotspot files to return (default 10)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "minComplexity": {
+            "description": "Minimum cyclomatic complexity for a symbol to count as \"complex\" when computing the complex-symbol density for each file (default 5).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "metric": {
+            "description": "Primary metric used to rank hotspot files. \"complexity\" = avg cyclomatic (default), \"cognitive\" = avg cognitive complexity, \"size\" = total line count, \"nesting\" = max nesting depth, \"composite\" = weighted hotspot score.",
+            "type": "string",
+            "enum": [
+              "complexity",
+              "cognitive",
+              "size",
+              "nesting",
+              "composite"
+            ]
+          },
+          "includeSymbols": {
+            "description": "Include the top offending symbols within each hotspot file (default true). Set false for a compact file-level-only response.",
+            "type": "boolean"
+          },
+          "symbolLimit": {
+            "description": "Max number of symbols to include per hotspot file (default 5). Symbols are ranked by cyclomatic complexity descending.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_untested_symbols",
+      "description": "Identify symbols (functions, methods, classes) that do not appear to have test coverage by scanning test files for references to each symbol name. Returns a prioritised list of untested symbols ranked by cyclomatic complexity so you can focus testing effort where it matters most.\n\nDetection strategy: static heuristic — symbol name must appear as an identifier in at least one test file (path-based detection). This is not a coverage-report parser; use get_test_coverage_map for line-level accuracy.\n\nDiffers from related tools:\n  find_dead_code        — exports with no importers (unused API)\n  get_test_coverage_map — line-level coverage from a coverage JSON report\n  get_complexity_hotspots — complexity ranking without test-coverage filter",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "scope": {
+            "description": "Restrict analysis to a directory prefix (e.g. \"src/services/\"). Omit to analyse the whole repo.",
+            "type": "string"
+          },
+          "kinds": {
+            "description": "Symbol kinds to include (default: function, method, class, interface, middleware, route). Narrow to e.g. [\"function\",\"method\"] to focus on callable units.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "filePath": {
+            "description": "Restrict to a specific source file path (relative to repo root).",
+            "type": "string"
+          },
+          "minLineCount": {
+            "description": "Minimum symbol line count to include (default 3). Filters out trivial one-liners that are not worth testing individually.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "includeTestRefs": {
+            "description": "When true, include the list of test files that reference each symbol (the \"testRefs\" field). Increases response size. Default false.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum number of untested symbols to return (default 50).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "strictness": {
+            "description": "What counts as tested. 'mention' (default): some test file contains the symbol name. 'ref': some test symbol references it through a symbol-level ref edge — a test that only names it in a string or comment no longer counts, so more symbols come back. The response says which one was used in coverageEvidence (and, under ref, mentionTestedCount for the default answer); an index without symbol refs falls back to mention and adds coverageNote.",
+            "type": "string",
+            "enum": [
+              "mention",
+              "ref"
+            ]
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_test_coverage_map",
+      "description": "Parse a coverage JSON report (Istanbul/NYC or V8/c8 format) and map line-level coverage to symbols in the indexed codebase. Returns per-file statement, function, branch, and line coverage metrics together with per-symbol covered/uncovered status and call counts. Use this to answer \"which functions are untested?\" with line-accuracy, or to build a coverage heat map across the codebase.\n\nSupported report formats: Istanbul/NYC (coverage-final.json), V8/c8 (json reporter). Format is auto-detected.\n\nDiffers from related tools:\n  find_untested_symbols — name-based heuristic, no coverage file needed\n  get_complexity_hotspots — complexity ranking without coverage data\n  get_quality_metrics — per-symbol quality scoring, not coverage",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "coveragePath": {
+            "type": "string",
+            "description": "Absolute path to the coverage JSON file (e.g. \"/project/coverage/coverage-final.json\"). Supports Istanbul/NYC and V8/c8 formats."
+          },
+          "scope": {
+            "description": "Restrict to a directory prefix (e.g. \"src/services/\"). Omit to analyse the whole repo.",
+            "type": "string"
+          },
+          "filePath": {
+            "description": "Restrict to a specific source file (relative to repo root).",
+            "type": "string"
+          },
+          "minCoverage": {
+            "description": "Return only files whose line coverage is BELOW this threshold (0–100). Omit to return all covered files.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "includeUncoveredLines": {
+            "description": "When true, include the list of uncovered line numbers per file. Default false (keeps response size small).",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum number of files to return (default 20).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "format": {
+            "description": "Coverage format. Default \"auto\" (detect from JSON structure).",
+            "type": "string",
+            "enum": [
+              "auto",
+              "istanbul",
+              "v8"
+            ]
+          }
+        },
+        "required": [
+          "repoId",
+          "coveragePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_type_graph",
+      "description": "Return the type dependency graph for a repo, showing how interfaces, classes, type aliases, and enums relate to each other via extends and implements. Returns nodes (type symbols) and directed edges (relationship type + source/target). Optionally rooted at a single type for a focused subgraph up to a given depth. Supports mermaid output format for visual rendering.\n\nUse this to:\n  - Understand a domain model before refactoring\n  - Find all types that inherit from a given interface\n  - Generate a Mermaid class diagram from live code\n\nDiffers from related tools:\n  get_class_hierarchy  — single-root tree for one class/interface\n  find_implementations — concrete implementors of one interface\n  get_type_graph       — full multi-root graph across a scope",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "rootSymbol": {
+            "description": "Name or ID of a type/interface/class to root the graph at. When provided, only connected symbols up to maxDepth are returned. Omit to return the full graph for the scope.",
+            "type": "string"
+          },
+          "maxDepth": {
+            "description": "Maximum traversal depth from rootSymbol (default 3). Ignored when rootSymbol is not provided.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "scope": {
+            "description": "Restrict to a directory prefix (e.g. \"src/types/\"). Omit to analyse the entire repo.",
+            "type": "string"
+          },
+          "kinds": {
+            "description": "Symbol kinds to include. Defaults to all type-like kinds: interface, class, type, enum.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "interface",
+                "class",
+                "type",
+                "enum"
+              ]
+            }
+          },
+          "includeAbstract": {
+            "description": "Include abstract classes as nodes (default true). Set false to show only concrete classes.",
+            "type": "boolean"
+          },
+          "format": {
+            "description": "\"graph\" (default) — structured JSON nodes+edges. \"mermaid\" — Mermaid classDiagram source string. Both formats always include the JSON graph; mermaid adds a \"mermaid\" field.",
+            "type": "string",
+            "enum": [
+              "graph",
+              "mermaid"
+            ]
+          },
+          "limit": {
+            "description": "Maximum number of nodes to include (default 100). Applied after depth traversal.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "repoId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_lexical_scope_matches",
+      "description": "Find all calls to `childCall` that appear lexically inside a `parentCall` scope — e.g. all `get` calls inside `routing { ... }` (Ktor), all `before_action` calls in a Rails controller class, all `register` calls inside a `ClassMethods` module. Re-parses stored file content using the appropriate tree-sitter grammar. Only files backed by a WASM grammar are searched.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "childCall": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The inner call to find (e.g. \"get\", \"before_action\", \"register\")"
+          },
+          "parentCall": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The outer scope name to search inside (e.g. \"routing\", \"ClassMethods\", \"PostsController\")"
+          },
+          "parentKind": {
+            "description": "AST kind of the parent scope: \"call\" (function call with block, e.g. routing { }), \"class\" (class definition), \"module\" (module/namespace definition). When omitted, all scope kinds are checked.",
+            "type": "string",
+            "enum": [
+              "call",
+              "class",
+              "module"
+            ]
+          },
+          "childArgMatches": {
+            "description": "Optional argument-level filter on the child call",
+            "type": "object",
+            "properties": {
+              "position": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "0-indexed argument position to check"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "symbol",
+                  "string",
+                  "identifier"
+                ],
+                "description": "Expected argument AST type at the given position"
+              },
+              "matchesPrivate": {
+                "description": "If true, only include matches where the argument names a method defined in the private section of the enclosing class/module",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "position",
+              "type"
+            ]
+          },
+          "language": {
+            "description": "Restrict search to files of a specific language (e.g. \"ruby\", \"kotlin\")",
+            "type": "string"
+          },
+          "filePath": {
+            "description": "Restrict search to a specific file path or directory prefix",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum matches to return (default 100)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "repoId",
+          "childCall",
+          "parentCall"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "trace_invocation_chain",
+      "description": "Trace all call chains from a start symbol forward through its callees, returning each discovered path as an ordered list of symbols. Use endHint to truncate chains at a symbol matching a glob pattern (e.g. \"*Worker\", \"*Service\"). Cycles are detected and annotated with cyclic=true rather than looping. Useful for multi-hop traces like \"route handler → service → background worker\". Use search_symbols to find the symbolId or name of the start symbol first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "description": "Repository ID returned by index_folder or list_repos"
+          },
+          "startSymbol": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name (or symbolId) of the entry point symbol to start tracing from. If multiple symbols share the name, all are used as starting points."
+          },
+          "endHint": {
+            "description": "Glob-style pattern for terminal symbols (e.g. \"*Worker\", \"*Job\", \"Background*\"). Chains stop when a symbol matching this pattern is found, even before maxDepth. Supports * as wildcard. When omitted, chains end at leaves (no further callees).",
+            "type": "string"
+          },
+          "maxDepth": {
+            "description": "Maximum chain depth (default 6)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "maxChains": {
+            "description": "Maximum number of chains to return (default 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "includeDynamicCalls": {
+            "description": "When true, include symbols tagged with frameworkMeta.dynamicDispatch=true (e.g. method_missing handlers) as potential callees. Default false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repoId",
+          "startSymbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "purecontext-mcp",
+    "version": "1.40.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 10983,
+  "stderr": "[2026-10-13T19:41:56.168Z] WARN  better-sqlite3 native addon unavailable for this Node version; falling back to WASM SQLite (slower, but ABI-independent)\n[2026-10-13T19:41:56.215Z] INFO  SQLite backend: WASM (@sqlite.org/sqlite-wasm)\n[2026-10-13T19:41:56.270Z] INFO  purecontext-mcp v1.40.0 starting\n[2026-10-13T19:41:56.286Z] INFO  PureContext MCP server started (stdio)\n"
+}

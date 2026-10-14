@@ -1,0 +1,1358 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "tim-mcp",
+  "version": "0.1.0-beta.0",
+  "integrity": {
+    "dist": "sha512-X/i0AR7jXBlP1VXbKOO+3gdQKfXWu1VipIu4tRSH3YGU/oFApQwFYvi97/I+S1m4cjd5R76uiEjJVwCZBcNwhA==",
+    "installed": "sha512-X/i0AR7jXBlP1VXbKOO+3gdQKfXWu1VipIu4tRSH3YGU/oFApQwFYvi97/I+S1m4cjd5R76uiEjJVwCZBcNwhA=="
+  },
+  "bin": "node_modules/tim-mcp/dist/server.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T22:12:28.050Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "tim_read",
+      "description": "Read an entry from TIM. Returns entry content, children, and optional edges. id accepts a human label (P0063, L0042, E0007) or an internal entry id — labels are resolved automatically, no need to look up the id first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "maxItems": 50
+              }
+            ],
+            "description": "Entry ID (ULID), or array of IDs for batch read (max 50)"
+          },
+          "project": {
+            "type": "string",
+            "description": "Project label/alias/name (auto-resolved)"
+          },
+          "section": {
+            "type": "string",
+            "description": "Section title — read its children"
+          },
+          "depth": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 2,
+            "description": "How many levels to read (1-5)"
+          },
+          "includeEdges": {
+            "type": "boolean",
+            "default": false
+          },
+          "includeChildren": {
+            "type": "boolean",
+            "default": true,
+            "description": "Default true: returns subtree (capped by depth). Set false for parent-only."
+          },
+          "showIrrelevant": {
+            "type": "boolean",
+            "default": false
+          },
+          "include_body": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return the full content body. Default false — returns summary only (first 500 chars or metadata.summary)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_write",
+      "description": "Write a NEW entry to TIM (never for editing — use tim_update). Placement: where:\"P0063/Ideas\" shorthand, or parentId, or parentTitle+projectId. A near-duplicate title in scope returns duplicate_suspected with the existing entry — read it and update instead; pass force:true only when it is genuinely a different thing. Tags are topics (#tim, #security); status/priority belong in metadata.task.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Entry body content"
+          },
+          "title": {
+            "type": "string"
+          },
+          "parentId": {
+            "type": "string"
+          },
+          "parentTitle": {
+            "type": "string",
+            "description": "Section title; requires projectId"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Project label, e.g. P0062"
+          },
+          "where": {
+            "type": "string",
+            "description": "Shorthand P0062/Tasks → project + section parentId (parentId wins)"
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "blob"
+            ],
+            "default": "text"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 1
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Topic tags only (#tim, #security). Status/priority tags (#todo, #done, #priority-*) are deprecated — use metadata.task.status / metadata.task.priority."
+          },
+          "visibility": {
+            "type": "number",
+            "default": 1
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "Bypass the near-duplicate title check and write anyway"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_search",
+      "description": "Search TIM entries using FTS5 full-text search: keywords, \"quoted phrases\", prefix*. NOT SQL — no column filters. For vague/associative queries use tim_remember; for a known label use tim_read directly. Returns {results, returned, omitted, truncated}; results contain bounded excerpts. Use tim_read for the full body.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "FTS5 search query"
+          },
+          "topK": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10
+          },
+          "excerptChars": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 500,
+            "description": "Maximum Unicode code points per result excerpt"
+          },
+          "searchType": {
+            "type": "string",
+            "enum": [
+              "fts",
+              "vector",
+              "hybrid"
+            ],
+            "default": "fts"
+          },
+          "root": {
+            "type": "string",
+            "description": "Scope to project (label/alias/name)"
+          },
+          "type": {
+            "type": "string",
+            "description": "Filter metadata.type"
+          },
+          "tag": {
+            "type": "string",
+            "description": "Filter exact tag"
+          },
+          "status": {
+            "type": "string",
+            "description": "Filter metadata.status"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "description": "Returns {results, returned, omitted, truncated}. Results contain bounded excerpts; use tim_read for the full body."
+      }
+    },
+    {
+      "name": "tim_guard",
+      "description": "Pre-action check against negative memory: search known failures (kind=error) and learnings (kind=learning) matching a planned action. Call BEFORE risky/expensive actions — returns warnings with entry ids to tim_read, or status \"clear\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 3,
+            "description": "The planned action, in plain words — e.g. \"upload PDF via rmapi\""
+          },
+          "project": {
+            "type": "string",
+            "description": "Scope to a project (label/alias/name). Default: all projects"
+          },
+          "topK": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_delta",
+      "description": "What changed in a project since the previous session (created / updated / deleted entries). Supplement to the full project briefing, not a replacement.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project label/alias/name. Default: the bound project"
+          },
+          "since": {
+            "type": "string",
+            "description": "ISO 8601 cutoff. Default: last activity of the previous session, else 7 days ago"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_link",
+      "description": "Create an edge (relationship) between two entries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceId": {
+            "type": "string"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "relates",
+              "extends",
+              "contradicts",
+              "implements",
+              "blocks",
+              "leases",
+              "tagged",
+              "summarizes",
+              "contradicted_by"
+            ]
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 1
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          }
+        },
+        "required": [
+          "sourceId",
+          "targetId",
+          "type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_trace",
+      "description": "Follow an edge chain from a starting entry (BFS traversal).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "startId": {
+            "type": "string"
+          },
+          "edgeType": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5
+          }
+        },
+        "required": [
+          "startId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_update",
+      "description": "Update an existing entry. Only provided fields are changed — but a provided field REPLACES its old value entirely: content replaces the whole body (it does NOT append — tim_read first, merge, then update), metadata replaces the whole metadata object except system-managed fields (verified_at, provenance), which are preserved. For short flips (status, priority) send only the metadata patch, keep content out.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "description": "Update entry title"
+          },
+          "content": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Topic tags only. Deprecated status/priority tags are stripped — use metadata.task.status / metadata.task.priority."
+          },
+          "visibility": {
+            "type": "number"
+          },
+          "irrelevant": {
+            "type": "boolean",
+            "description": "Set false to restore a soft-deleted entry, true to soft-delete"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_verify",
+      "description": "Re-confirm entries as still valid without editing them. Stamps metadata.verified_at — clears the stale annotation on reads and the stale count in tim_health.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "maxItems": 50
+              }
+            ],
+            "description": "Entry ID (or label like L0042), or array of up to 50 IDs"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_delete",
+      "description": "Delete an entry (soft: mark irrelevant, hard: tombstone).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "hard": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_delete_batch",
+      "description": "Batch hard-delete entries by id (max 100). Skips missing ids.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 100
+          },
+          "hard": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_sync",
+      "description": "Sync operations: push staging records, pull from remote, or check status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "push",
+              "pull",
+              "status"
+            ]
+          },
+          "stagingRecords": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "entityType": {
+                  "type": "string",
+                  "enum": [
+                    "entry",
+                    "edge"
+                  ]
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "upsert",
+                    "delete"
+                  ]
+                },
+                "payload": {
+                  "type": "string"
+                },
+                "lwwTimestamp": {
+                  "type": "number"
+                },
+                "lwwDevice": {
+                  "type": "string"
+                },
+                "lwwConfidence": {
+                  "type": "number",
+                  "default": 1
+                },
+                "acked": {
+                  "type": "boolean",
+                  "default": false
+                }
+              },
+              "required": [
+                "key",
+                "entityType",
+                "operation",
+                "payload",
+                "lwwTimestamp",
+                "lwwDevice"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_suppress",
+      "description": "Suppress entries matching a pattern: hidden from tim_search, tim_read, tim_show, tim_section_children, tim_remember, and tim_load_project. Optional TTL (e.g. \"24h\", \"7d\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "default": "Manual suppression"
+          },
+          "ttl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_health",
+      "description": "Run health diagnostics: broken links, orphans, FTS integrity, counts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_stats",
+      "description": "Content statistics: entry counts, content size aggregates, length buckets, and breakdown by metadata.kind.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Optional project label to scope stats"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional metadata.kind filter"
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "default": [
+              0,
+              100,
+              500,
+              1000,
+              5000,
+              10000,
+              50000
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_section_children",
+      "description": "List direct children of a project section in compact form.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parentId": {
+            "type": "string"
+          },
+          "parentLabel": {
+            "type": "string",
+            "description": "Project label, e.g. P0062"
+          },
+          "sectionTitle": {
+            "type": "string",
+            "description": "Section title under the project"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional metadata.kind filter"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_export",
+      "description": "Export TIM database to markdown or .hmem SQLite format.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "hmem",
+              "md"
+            ],
+            "default": "text"
+          },
+          "targetPath": {
+            "type": "string",
+            "description": "Output path (required for hmem format)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_import",
+      "description": "Import entries from a .hmem SQLite file. Always call tim_import_manifest first, then tim_import with dryRun:true, then live import, then tim_import_audit. Never use raw SQL for hmem migration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Path to .hmem file"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": false
+          },
+          "deduplicate": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_import_manifest",
+      "description": "Read a .hmem file without importing it: format, labels, titles, and node counts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Path to .hmem file"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_project_structure",
+      "description": "Return one project structure: root, direct sections, duplicate sections, loose direct children, and imported hmem provenance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Project label/alias/name, e.g. P0062"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_import_audit",
+      "description": "Post-import audit for hmem migrations: missing sections, duplicate sections, loose imported nodes, health issues, and repair suggestions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Optional .hmem source path to compare labels"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Project labels to audit. Defaults to project labels from source, else imported projects."
+          },
+          "expectedSections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "Overview",
+              "Context",
+              "Decisions",
+              "Tasks",
+              "Bugs",
+              "Errors",
+              "Log",
+              "Next Steps",
+              "Ideas",
+              "Rules"
+            ]
+          },
+          "includeRepairPlan": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, include suggested tool calls. Does not execute them."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_dry_run_move",
+      "description": "Preview tim_move_entry impact without writing: current parent/depth, target parent/depth, descendant count, and cycle risk.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID to move"
+          },
+          "newParentId": {
+            "type": "string",
+            "nullable": true,
+            "default": null,
+            "description": "New parent ID, or null for root"
+          },
+          "order": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_repair_section",
+      "description": "Ensure a canonical project section exists and optionally move specified children into it. Uses TIM writes/moves, never SQL edits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project label/alias/name, e.g. P0062"
+          },
+          "title": {
+            "type": "string",
+            "description": "Section title to ensure under the project"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": false
+          },
+          "moveChildrenFromIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Optional entry IDs to move under the section after ensuring it exists"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          }
+        },
+        "required": [
+          "project",
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_doctor",
+      "description": "Run comprehensive diagnostics: config, DB, API connectivity.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_session_start",
+      "description": "Start a TIM session (idempotent). With projectId (or default P0000 Inbox), creates nested Sessions/Summary/Exchanges tree. Without a resolvable project the response lists recently active projects — follow its ACTION line to bind one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Project label, e.g. P0062"
+          },
+          "agentName": {
+            "type": "string",
+            "default": "default"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "harness": {
+            "type": "string",
+            "default": "mcp"
+          },
+          "batchSize": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "tool": {
+            "type": "string",
+            "description": "CLI tool used, e.g. claude, cursor, codex"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model name, e.g. opus, composer-2.5"
+          },
+          "taskSummary": {
+            "type": "string",
+            "description": "One-line description of what was delegated"
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_resume_list",
+      "description": "List resumable sessions of the bound project (most recent activity first) with date, tool, task summary, and exchange count. Follow the ACTION line: present to the user, then call tim_session_resume.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project label, e.g. P0063; defaults to the bound project"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 10
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_session_resume",
+      "description": "Resume a previous session from any tool: injects session summary + all batch summaries + last N raw exchanges, and aliases the current harness session to the old session node so exchanges keep appending there.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Canonical session id to resume (pick from tim_resume_list)"
+          },
+          "rawCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_record_commit",
+      "description": "Record a git commit under the project Commits section. Idempotent by hash. Links to session via relates/implements when sessionId given.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project label, e.g. P0063"
+          },
+          "hash": {
+            "type": "string",
+            "description": "Full git commit SHA"
+          },
+          "message": {
+            "type": "string",
+            "description": "Commit message body"
+          },
+          "diffSummary": {
+            "type": "string",
+            "description": "git show --stat output"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session that produced this commit"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 commit date"
+          }
+        },
+        "required": [
+          "projectId",
+          "hash",
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_rename_entry",
+      "description": "Atomically rename an entry ID and update all references (edges, parent_id, staging, metadata).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "oldId": {
+            "type": "string",
+            "description": "Current entry ID"
+          },
+          "newId": {
+            "type": "string",
+            "description": "New entry ID (must not exist)"
+          }
+        },
+        "required": [
+          "oldId",
+          "newId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_move_entry",
+      "description": "Move an entry under a new parent and cascade depth updates to descendants. Preview with tim_dry_run_move before moving imported or ambiguous nodes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID to move"
+          },
+          "newParentId": {
+            "type": "string",
+            "nullable": true,
+            "default": null,
+            "description": "New parent ID, or null for root"
+          },
+          "order": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_update_many",
+      "description": "Batch-update irrelevant and/or favorite flags on multiple entries (flags only, never content).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "irrelevant": {
+            "type": "boolean"
+          },
+          "favorite": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_tag_add",
+      "description": "Add tags to an entry (deduplicated). Deprecated status/priority tags (#todo, #done, #priority-*) are skipped — use metadata.task.status / metadata.task.priority.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "id",
+          "tags"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_tag_remove",
+      "description": "Remove tags from an entry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "id",
+          "tags"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_tag_rename",
+      "description": "Rename a tag across all entries (exact match only, safe for substring collisions).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "oldTag": {
+            "type": "string"
+          },
+          "newTag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "oldTag",
+          "newTag"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_create_project",
+      "description": "Create a project in exactly one mode. Every project representing files on disk MUST pass its absolute path; memoryOnly:true is only for an intentionally virtual/database-only project and is never a shortcut for an unknown cwd.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Project label, e.g. P0062"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          },
+          "content": {
+            "type": "string"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path": {
+            "type": "string",
+            "description": "Absolute directory for every project representing files on disk"
+          },
+          "memoryOnly": {
+            "type": "boolean",
+            "description": "Must be true, and only for an intentional database-only project; mutually exclusive with path"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_load_project",
+      "description": "Load a project by label or alias and bind the session once. Rejects a different project if the session is already bound — pass bind:false for cross-project reads (replaces tim_read_project).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Project label, e.g. P0062"
+          },
+          "depth": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 3,
+            "description": "How many child levels to load (1-5)"
+          },
+          "budget": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 200,
+            "description": "Max child entries to return"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "default": null,
+            "description": "Optional section IDs/labels to filter direct children"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Harness session id; binds TIM session project_ref on first load only"
+          },
+          "bind": {
+            "type": "boolean",
+            "default": true,
+            "description": "false = cross-project read without binding the session (replaces tim_read_project)"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_read_project",
+      "description": "[DEPRECATED — use tim_load_project with bind:false] Read a project brief + tree WITHOUT binding the session (cross-project lookup). Use tim_load_project to start working on a project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Project label, e.g. P0062"
+          },
+          "depth": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 3,
+            "description": "How many child levels to load (1-5)"
+          },
+          "budget": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 200,
+            "description": "Max child entries to return"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "default": null,
+            "description": "Optional section IDs/labels to filter direct children"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_show",
+      "description": "Unified overview: tasks, errors, bugs, ideas, decisions, learnings, commits, sections, or all. Use root for project scope (omit=active, \"all\"=cross-project). Use with for comma-separated AND filters (open,done,urgent,recent,<tag>,<free text>).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "what": {
+            "type": "string",
+            "description": "tasks|errors|bugs|ideas|decisions|learnings|commits|all|<SectionName>"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project label/alias/name; \"\" or \"all\" = all projects; omit = active"
+          },
+          "with": {
+            "type": "string",
+            "description": "comma-separated AND filters: open,done,urgent,recent,<tagname>,<free text>"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "what"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_task_order",
+      "description": "Reorder a task within its project queue. Uses integer order with 100-step gaps. Provide before and/or after to position relative to sibling tasks.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Task entry ID to reorder"
+          },
+          "before": {
+            "type": "string",
+            "description": "Insert before this task ID"
+          },
+          "after": {
+            "type": "string",
+            "description": "Insert after this task ID"
+          }
+        },
+        "required": [
+          "taskId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_error_stats",
+      "description": "Show error statistics: total errors, top errors, error rate, alert thresholds (>5 identical errors in 1h).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hours": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 720,
+            "default": 24,
+            "description": "Time window in hours (1-720)"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "Max top errors to return"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tim_remember",
+      "description": "Associative memory recall for vague queries. Expands query variants, FTS5 pre-filters, then CLI-chain rerank. Read-only. Slower and costlier than tim_search — use when exact keywords are unknown.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Vage Erinnerungs-Query. Mehrere Wortvarianten werden automatisch probiert."
+          },
+          "topK": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5,
+            "description": "Anzahl Rückgabe-Treffer. Default 5, max 20."
+          },
+          "minConfidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.3,
+            "description": "Treffer unter diesem Confidence werden gefiltert. Default 0.3."
+          },
+          "includeBatchSummaries": {
+            "type": "boolean",
+            "default": true,
+            "description": "Session-Batch-Summaries der letzten 30 Tage mit einbeziehen. Default true."
+          },
+          "searchType": {
+            "type": "string",
+            "enum": [
+              "fts"
+            ],
+            "default": "fts",
+            "description": "Nur FTS5 in Phase 1.0. \"hybrid\" ist für Embedding-Phase 0.7+ reserviert."
+          },
+          "projectScope": {
+            "type": "string",
+            "pattern": "^P\\d{4}$",
+            "description": "Optional: Suche auf ein Projekt beschränken (z.B. \"P0062\"). Default: alle Projekte."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "tim-mcp",
+    "version": "0.1.0-alpha"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 12115,
+  "stderr": "TIM MCP server started (DB: /tmp/.tim/tim.db)\n"
+}

@@ -1,0 +1,886 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "msstate-policies-mcp",
+  "version": "1.2.8",
+  "integrity": {
+    "dist": "sha512-bjN71C8gXZol0z0wO7eFsp6c3yzaXR0RUPfqs8uI6puV53HIAUYYqfV+gEFFa7WkfMV6p5zCw6uydh0MJbNpTg==",
+    "installed": "sha512-bjN71C8gXZol0z0wO7eFsp6c3yzaXR0RUPfqs8uI6puV53HIAUYYqfV+gEFFa7WkfMV6p5zCw6uydh0MJbNpTg=="
+  },
+  "bin": "node_modules/msstate-policies-mcp/dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T17:33:42.308Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "search_policies",
+      "description": "Search Mississippi State University Operating Policies by keyword. Returns policy numbers + titles + URLs + match snippets, ranked by relevance. Use this when the user asks about a topic and you need to find which policies apply. For one-shot natural-language questions ('what's the rule on X?'), prefer `chain_find_relevant_policies` instead, which fetches full bodies in one call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Search query (free text)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10
+          },
+          "include_body": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, also match against full PDF body text (slower; fetches bodies for top hits)."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_policy",
+      "description": "Fetch the full text of one MSU Operating Policy by number (e.g. '91.100') or URL. Returns policy text from the official PDF, plus effective/revised dates and responsible office. Use after `search_policies` to read a specific policy in full.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string",
+            "pattern": "^\\d{2}\\.(\\d{2}|\\d{3})$"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "chain_find_relevant_policies",
+      "description": "One-call workflow for natural-language MSU policy questions ('what are the rules on amnesty?', 'what's the policy on withdrawal?'). Returns the full text of the top-k most relevant MSU Operating Policies. RULES for answering: (1) Use ONLY the returned text — do not draw on outside knowledge. (2) For any normative claim ('the policy says X', 'you must Y', deadlines, eligibility criteria, dollar amounts, exceptions), QUOTE VERBATIM from the policy text in quotation marks and cite the OP number + URL. Do not paraphrase load-bearing language. (3) If the returned policies don't clearly answer the question, say so plainly and recommend contacting the responsible office; do NOT extrapolate. (4) Always include the `retrievedAt` timestamp and the canonical landing URL so the user can verify.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Natural-language MSU policy question."
+          },
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 2,
+            "description": "How many top policies to fetch in full. Default 2 keeps response under ~16k tokens."
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cite_policy",
+      "description": "Format a citation string for one MSU Operating Policy. Use after `get_policy` or `chain_find_relevant_policies` when you need a cleanly formatted reference for an answer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string",
+            "pattern": "^\\d{2}\\.(\\d{2}|\\d{3})$",
+            "description": "Policy number, e.g. 91.100"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "short",
+              "full"
+            ],
+            "default": "full"
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_msu_date",
+      "description": "Answer natural-language questions about Mississippi State University academic dates, financial-aid deadlines, university holidays, residence-life milestones, and graduate-school deadlines. Returns up to 10 matching calendar rows ranked by relevance, plus up to 3 academic-calendar fallback rows when a term is mentioned and the primary source has limited coverage.\n\nEach row has:\n- `start`, `end` — ISO dates (YYYY-MM-DD).\n- `event`, `term`, `description` — what happened and when.\n- `source`, `source_url` — which calendar and the canonical msstate.edu URL.\n- `citation` — a pre-formatted markdown link. You MUST include this verbatim in your final answer for every row you reference. Do not paraphrase or omit it. Format: `[Event, Term](url)`.\n- `fallback` (optional) — if true, this row came from the academic-calendar fallback because the user's primary source didn't have data for the mentioned term. Surface this explicitly: \"Your primary source doesn't list this date for that term, but the academic calendar shows…\"\n\nRULES:\n1. Use ONLY the returned rows. Do not invent dates or draw on outside knowledge.\n2. Quote the date verbatim. Always include the `citation` field as a clickable link.\n3. If the user's question does NOT specify a year/term and multiple year-versions of an event exist (e.g., Spring Break 2026 and Spring Break 2027), present ALL of them year-by-year with each one's citation.\n4. If matches is empty or no row clearly answers the question, say so plainly; do not extrapolate.\n5. Surface the row's `retrieved_at` and `corpus_built_at` when accuracy is at stake.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Natural-language MSU date question, e.g. 'when does spring break start?'"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_msu_calendar",
+      "description": "Return the raw rows for one MSU calendar source. `source` is one of: academic_calendar, exam_schedule, university_holidays, grad_school_calendar, sfa_financial_aid, housing. Optional `term` filter matches via case-insensitive substring (e.g. 'Fall 2026', '2026', 'fall'). Each row has a pre-formatted `citation` markdown link — include it verbatim when surfacing any specific date to the user. Returns up to `limit` rows starting at `offset`; default limit is 50.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "academic_calendar",
+              "exam_schedule",
+              "university_holidays",
+              "grad_school_calendar",
+              "sfa_financial_aid",
+              "housing"
+            ]
+          },
+          "term": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 50
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "default": 0
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "search_msu_courses",
+      "description": "Fuzzy-search the MSU course catalog by code, title, or description (BM25). Returns a ranked list of `{ code, title, hours, dept, level, score }`. Use this when the student doesn't know the exact course code (e.g., 'what's MSU's networking class?'). All content sourced from catalog.msstate.edu.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_msu_course",
+      "description": "Fetch one course's full record from the MSU catalog: title, hours, level, description, semester offered, prereqs (with structured course-codes + raw prose), coreqs, cross-listed equivalents, source URL. `code` is normalized to uppercase with single space (e.g. 'cse 4153' → 'CSE 4153'). Returns `{found:false, suggestions}` if unknown. Prereq fields `required_courses` and `raw_prose` are authoritative; `logic`, `min_grade`, `non_course` are best-effort parses of MSU's prose. Prefer `prereq_summary` for quoting prereqs in answers; fall back to `raw_prose` when `prereqs.parse_warnings` is non-empty.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_msu_course_graph",
+      "description": "Walk the MSU course prereq DAG forward (`prereqs` — 'what do I need before X?') or reverse (`unlocks` — 'what does X unlock?'). Returns nodes + edges with depth, plus `truncated:true` if the walk hit the depth cap (default 5, max 10) or a cycle. Edge `logic`/`min_grade` come from the source course's prereq parse and are best-effort; `required_courses` (in the upstream nodes' raw records) is authoritative.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "prereqs",
+              "unlocks"
+            ]
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "code",
+          "direction"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "plan_semester",
+      "description": "Catalog-only semester planner. Given a `department` (2-4 letter prefix like 'CSE' / 'MA' / 'ENGL') and the student's `completed_courses` (course codes), returns up to 3 candidate bundles of courses sized to the credit-hour window (default 12-18). Each bundle's courses are prereq-validated against `completed_courses` (conservative AND on mixed/null logic; non_course gates like 'instructor permission' exclude the course). Optional `focus_keyword` filters on title + description (e.g., 'algorithms'). Optional `level` restricts to undergraduate or graduate. EXPLICIT NON-GOALS: this does NOT check live section / seat availability, does NOT verify degree requirement coverage, does NOT predict admission to restricted courses. Treat output as a starting point for advising, not a registration plan. Every response surfaces these limits in the `notes` field.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "department": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 4096
+          },
+          "completed_courses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "maxItems": 200,
+            "default": []
+          },
+          "target_credits_min": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30,
+            "default": 12
+          },
+          "target_credits_max": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30,
+            "default": 18
+          },
+          "focus_keyword": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "undergraduate",
+              "graduate"
+            ]
+          }
+        },
+        "required": [
+          "department"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_msu_emergency_guideline",
+      "description": "Look up MSU's published emergency guideline for a situation (tornado, fire, active shooter, etc.). Returns the guideline verbatim plus a 911 reminder. Every response leads with the disclaimer 'If this is a life-threatening emergency, call 911 now...'. `emergency_type` accepts a slug, an alias ('tornado', 'fire', 'shooter'), or free text — the resolver tries exact slug, then the curated alias map, then BM25. All content sourced from www.emergency.msstate.edu/guidelines.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "emergency_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "emergency_type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_msu_emergency_types",
+      "description": "List MSU's published emergency-guideline types (12 entries: tornado, fire, active threat, evacuation, etc.). Returns `{ slug, title, url }` for each. Pair with `get_msu_emergency_guideline` to fetch the body. Every response leads with the 911 disclaimer. All content sourced from www.emergency.msstate.edu/guidelines.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_msu_severe_weather_refuge",
+      "description": "Look up the published severe-weather refuge area for an MSU building (e.g. 'Colvard', 'Lee Hall'). Returns `{ building, area, note }` rows from www.emergency.msstate.edu/refuge. This tool covers severe weather ONLY — for fires use `get_msu_emergency_guideline(\"smoke-fire\")`; for active threats use `get_msu_emergency_guideline(\"violence\")`. Every response leads with the 911 disclaimer. If the building isn't in the table, returns a `fallback_when_no_match` with the published interior-room guidance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "building_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "building_name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_msu_emergency_contacts",
+      "description": "Return MSU emergency-related phone contacts (911, MSU PD non-emergency, Dean of Students, Counseling, Health, Facilities, IT, plus off-campus: OCH Hospital, Starkville PD/FD, Sheriff's Office). `category` accepts: 'all' (default), 'emergency', 'campus', 'off_campus'. Every response leads with the 911 disclaimer. All numbers sourced from www.emergency.msstate.edu/refuge.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "maxLength": 4096,
+            "default": "all"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_msu_tuition_rate",
+      "description": "Look up MSU tuition for a specific campus + level + residency + (optional) term + (optional) credit_hours. Returns matching rate rows verbatim with effective_term and a breakdown of line_items. Every response includes the disclaimer 'Tuition rates are subject to change without notice. Always verify the current rate at controller.msstate.edu/accountservices/tuition before paying.' Rules: campus=vetmed requires level=dvm (DVM-only flat annual rate); level=dvm requires campus=vetmed; campus=mgccc has no graduate program. Undergrad credit_hours buckets: 1-11 (per-hour) and 12-16 (flat full-time). Grad credit_hours buckets: 1-8 and 9+. Hours >16 are capped to the 12-16 bucket. Omit term to receive every term variant for that triple. Source: controller.msstate.edu (4 campuses) + vetmed.msstate.edu/tuition.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "campus": {
+            "type": "string",
+            "enum": [
+              "starkville",
+              "meridian",
+              "mgccc",
+              "online",
+              "vetmed"
+            ]
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "undergrad",
+              "grad",
+              "dvm"
+            ]
+          },
+          "residency": {
+            "type": "string",
+            "enum": [
+              "resident",
+              "non_resident"
+            ]
+          },
+          "term": {
+            "type": "string",
+            "enum": [
+              "fall_spring",
+              "winter",
+              "summer",
+              "annual"
+            ]
+          },
+          "credit_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "campus",
+          "level",
+          "residency"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_msu_enrollment_fees",
+      "description": "List MSU's per-college, per-program, and per-course/distance enrollment fees (the 'Other Enrollment Costs' section of controller.msstate.edu). `kind`: 'college' (per-credit + full-time-cap by college), 'program' (per-major flat or per-credit), 'course_distance' (online instructional support, course-specific fees). `filter` (optional): case-insensitive substring match against the label (e.g. 'engineering', 'honors', 'mba'). Every response carries the disclaimer about rates being subject to change. Source: controller.msstate.edu/accountservices/tuition/other-enrollment-costs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "college",
+              "program",
+              "course_distance"
+            ]
+          },
+          "filter": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_msu_tuition_faq",
+      "description": "Search MSU's tuition FAQ (controller.msstate.edu/accountservices/tuition/frequently-asked-questions) for a question. Returns the top-k matching Q&A pairs verbatim with their source anchor URL. `q`: free-text question (e.g. 'why are college fees different?', 'how do I find my campus?'). `k`: 1-10, default 3. Every response carries the tuition disclaimer. BM25 over question×2 + answer×1.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_msu_tuition_campuses",
+      "description": "List MSU's 5 published tuition campuses: starkville, meridian, mgccc (Engineering on the Coast — undergrad only), online, vetmed (DVM only, annual_flat). Returns each entry's slug, display_name, levels_offered, rate_basis ('per_credit_hour' or 'annual_flat'), and source_url. Use this to discover valid `campus` values before calling get_msu_tuition_rate. Every response carries the tuition disclaimer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_online_programs",
+      "description": "Browse / filter MSU's online programs from online.msstate.edu. Returns lightweight rows ({slug, name, degree_level, short_description, url}); for full per-program details (contacts, deadlines, tuition) follow up with get_online_program. `level` filters by degree level (bachelor / master / specialist / doctoral / certificate / endorsement). `subject_keyword` is a case-insensitive substring match against the name + short_description (e.g. 'engineering', 'business', 'education'). `limit` (default 50, max 200) and `offset` (default 0) for pagination. Every response carries the online disclaimer about info changing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "bachelor",
+              "master",
+              "specialist",
+              "doctoral",
+              "certificate",
+              "endorsement"
+            ]
+          },
+          "subject_keyword": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_online_program",
+      "description": "Fetch one MSU Online program's full record from online.msstate.edu: name + degree_level + format + short_description + tuition (per-credit + fees) + contacts (advisors with name/email/phone) + application_deadlines + admission_requirements + entrance_exams + accreditation + forms + raw_sections catch-all. Provide `slug` (e.g., 'mba', 'bsee', 'psychology') for direct lookup, OR `name_query` (e.g., 'online psychology bachelor') for fuzzy match. Exactly one is required. name_query uses a substring pre-stage (slug or name) first, then falls back to BM25. The top-1 match is in `matched` and the next-2 best are in `did_you_mean` so the model can clarify if ambiguous. When the query strips to no signal (e.g., 'online program'), `matched` is null and `not_found_reason` explains why. Every response carries the online disclaimer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "name_query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_online_admissions_process",
+      "description": "Return MSU Online's published admissions process from /admissions-process. Sectioned by student type (undergraduate / graduate / transfer / readmit / international). Pass `student_type` to get just one section; omit to get ALL five. Either way, the response ALWAYS includes the shared prelude, the central front-desk contact (ask@online.msstate.edu), application fee tiers, and external apply URLs (apply.msstate.edu for undergrad, grad.msstate.edu/apply for graduate). Every response carries the online disclaimer about info changing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "student_type": {
+            "type": "string",
+            "enum": [
+              "undergraduate",
+              "graduate",
+              "transfer",
+              "readmit",
+              "international"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_online_info",
+      "description": "BM25 search over MSU Online's support pages (state-authorization, military-assistance, orientation, faq, financial-matters) + the central staff directory rendered as a searchable doc. Use when the question isn't about a specific program (use get_online_program) and isn't the general admissions process (use get_online_admissions_process). `scope` lets you pre-filter to a single info-page slug when the category is known. The `staff` scope searches the central staff directory. Returns matches with `slug`, `title`, `excerpt` (~300 chars verbatim from the body), `full_body` (entire body_markdown), `source_url`, and `bm25_score`. Every response carries the online disclaimer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "state-authorization",
+              "military-assistance",
+              "orientation",
+              "faq",
+              "financial-matters",
+              "staff"
+            ]
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_programs_by_staff",
+      "description": "Look up the MSU Online programs a Center for Distance Education staff member is responsible for. Query by email (preferred — unambiguous) or by name (first, last, or full name). Returns each matching staff member's program portfolio with their role label per program. Use for 'what programs am I responsible for?' or 'who handles the MBA?' workflows. Email match is exact and case-insensitive; name match is case-insensitive substring (or all-tokens-present) with diacritic normalization (so 'Elise' matches 'Élise'). Ambiguous queries return ≥2 matches surfaced so the model can disambiguate. No-match returns empty matches + did_you_mean (closest names by trigram similarity).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "match_online_program",
+      "description": "Rank MSU Online programs against a prospective-student profile. ALL fields optional — supply only what the user has stated. `career_goal` (free text — keyword overlap vs. program name + short_description), `level_preference` (HARD filter: bachelor / master / specialist / doctoral / certificate / endorsement), `budget_usd` (soft cap — programs over budget score lower but still appear; see estimate_program_cost for breakdown), `time_budget_months` (penalises doctoral < 36mo and bachelor < 24mo), `state` (2-letter postal code; cross-referenced against the state-authorization info page when present), `estimated_credits` (optional override for cost estimation; defaults per degree level), `include_application_fee` (default false). Returns up to 5 matches sorted by fit_score (0–100) with fit_reasons, estimated_total_usd, application_deadline_next, primary_contact_name/email, and state_authorization_flag (ok / unknown / check_state_authorization_page). Does NOT predict admission probability — only ranks fit. Always carries the online disclaimer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "career_goal": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "level_preference": {
+            "type": "string",
+            "enum": [
+              "bachelor",
+              "master",
+              "specialist",
+              "doctoral",
+              "certificate",
+              "endorsement"
+            ]
+          },
+          "budget_usd": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "time_budget_months": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2}$"
+          },
+          "estimated_credits": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "include_application_fee": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "estimate_program_cost",
+      "description": "Estimate the total cost of an MSU Online program: per_credit × credits + per-credit instructional fee, optionally + application fee. Provide `slug` (exact, from list_online_programs); `credits` (int 0–500) is OPTIONAL — when omitted, defaults to 30 (master/cert/specialist), 120 (bachelor), or 60 (doctoral). MSU Online does NOT publish total required credits in a structured field for every program; for an exact number, consult the program page (raw_prose is included in the response). `include_application_fee` defaults to false. Response carries the online disclaimer, source_url, and any explanatory notes when fields are missing. Out-of-state? MSU Online tuition is largely flat-rate; the published per_credit_usd is what applies to most residency cases.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "credits": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "include_application_fee": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_msu_dining_locations",
+      "description": "Browse / filter MSU's dining locations from msstatedining.mydininghub.com (the Touchpoint platform that dining.msstate.edu redirects to). Returns lightweight rows ({slug, name, url, hours_today, status_now}); for full per-location detail follow up with get_msu_dining_hours. `open_now=true` filters to venues currently open (uses America/Chicago). `name_substring` is case-insensitive substring on name + slug. `limit` (default 50, max 200) and `offset` for pagination. Every response carries the dining disclaimer; stdio/plugin installs may carry a corpus that's days-months old.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "open_now": {
+            "type": "boolean"
+          },
+          "name_substring": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_msu_dining_hours",
+      "description": "Fetch one MSU dining venue's full record: name + url + per-day hours + today's meal periods + status_now (open / closed / closes_at / opens_at, computed in America/Chicago). Provide `slug` (e.g., 'perry-food-hall', 'chick-fil-a') for direct lookup, OR `name_query` (e.g., 'perry', 'chickfila') for fuzzy match. Exactly one required. When name_query matches multiple venues, top-1 is in `matched` and next-2 in `did_you_mean`. Every response carries the dining disclaimer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "name_query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "citation_card",
+      "description": "Trust-surface meta-tool. Given an answer `text`, splits it into sentence-level claims and returns one citation card per claim — {claim, domain, source_url, source_title, last_updated, snippet, confidence}. When the model produces an answer about MSU, call this tool with the answer text to attach receipts. Each card cites the canonical MSU page the claim came from, the last-updated timestamp from the corpus snapshot, and a confidence level. `domain_hints` (optional) is an ordered list of domain preferences ('policies', 'calendar', 'courses', 'emergency', 'tuition', 'online', 'dining', 'hr') applied to all claims, taking priority over the keyword router. Cards with confidence='none' mean we could not trace the claim to an MSU source — present those claims as unverified to the user. NEVER fabricate a citation for a 'none' card. Caps: input up to 8000 chars, up to 40 claims processed per call (the rest is truncated and flagged via claims_truncated).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000
+          },
+          "domain_hints": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "policies",
+                "calendar",
+                "courses",
+                "emergency",
+                "tuition",
+                "online",
+                "dining",
+                "hr"
+              ]
+            }
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_msu_hr_info",
+      "description": "BM25 search across MSU HR pages (hrm.msstate.edu): benefits, retirement, onboarding, manager resources, learn & grow, forms-index, about. `scope` (optional) restricts to one section: 'benefits' / 'retirement' / 'onboarding' / 'manager_resources' / 'learn_grow' / 'forms' / 'about' / 'all' (default). `limit` (default 5, max 20). Returns top-k {page_title, snippet, url, last_updated, scope, score}. Carries the HR disclaimer. Use when the user's question doesn't map cleanly to a specific benefit or form (catch-all). For benefit pages with structured fields (leave, retirement), prefer get_msu_hr_benefit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "benefits",
+              "retirement",
+              "onboarding",
+              "manager_resources",
+              "learn_grow",
+              "forms",
+              "about",
+              "all"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_msu_hr_form",
+      "description": "Search/filter over MSU HR's ~170 forms (hrm.msstate.edu/forms). `query` (optional) substring-matches the form name. `category` (optional) filters by one of: 'benefits' / 'compensation' / 'development' / 'employment' / 'student_affairs' / 'all' (default). `limit` (default 10, max 50). Returns top-k {form_name, category, url, format ('pdf' | 'workflow' | 'external_vendor'), retrieved_at}. 'external_vendor' formats link to third-party sites (CVS Caremark, Delta Dental, AFLAC, etc.) — the user is leaving msstate.edu. Carries the HR disclaimer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "benefits",
+              "compensation",
+              "development",
+              "employment",
+              "student_affairs",
+              "all"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_msu_hr_benefit",
+      "description": "Get one MSU HR Benefits sub-page (or the retirement page) with hybrid output: page-level body for every category; structured fields layered on top for `leave` (accrual rates, FMLA eligibility), `retirement` (plan list with employer/employee %), and `employee_holidays` (pointer to the existing university_holidays calendar — use find_msu_date or get_msu_calendar for the actual list). Categories: new_employee_forms | insurance | employee_perks | work_life_balance | leave | employee_assistance_program | tax_forms | dual_career_program | employee_holidays | retirement. Returns {page, structured, related_forms, related_contacts, notes}. EXPLICIT NON-GOALS: does NOT return personal balances (Banner only), does NOT submit enrollment changes (use the linked form), does NOT advise on plan choice. Surfaced in every response's `notes` field.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "new_employee_forms",
+              "insurance",
+              "employee_perks",
+              "work_life_balance",
+              "leave",
+              "employee_assistance_program",
+              "tax_forms",
+              "dual_career_program",
+              "employee_holidays",
+              "retirement"
+            ]
+          }
+        },
+        "required": [
+          "category"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_msu_hr_contacts",
+      "description": "Look up MSU HR staff by name substring OR role keyword. `query_or_role` (optional): substring on name, or exact role keyword (e.g., 'benefits_coordinator', 'payroll', 'talent_acquisition', 'leave_administrator', 'learn_grow', 'retirement', 'eap', 'onboarding', 'manager_resources'). If omitted, returns the directory paginated. `limit` default 20, max 50. Returns {matches: [{name, title, email, phone, office, role_keywords}], total, filtered_total, did_you_mean: string[]}. did_you_mean is populated via trigram similarity when no direct match is found. Carries the HR disclaimer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query_or_role": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "health_check",
+      "description": "Report the scraper's current health: cached index size, last fetch time, last error, taxonomy size, cache stats, and version. Use this when answers seem suspiciously empty (the scraper may be broken) or when you want to verify the server is reaching MSU.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "msstate-policies",
+    "version": "unknown"
+  },
+  "protocolVersion": null,
+  "instructions": "You answer questions about Mississippi State University using the msstate-policies MCP server, which covers MSU Operating Policies, six academic-date calendars (registrar, exams, holidays, grad school, financial aid, housing), the course catalog, emergency guidance, and tuition.\n\nRouting rules — pick the tool whose CATEGORY matches the question. If your first tool returns nothing useful, try the next-most-likely tool BEFORE giving up:\n\n1. Policy / rule questions (\"what's the policy on...\", \"is X allowed?\", \"what's the rule for...\") → chain_find_relevant_policies with k=5.\n2. Date / deadline / holiday / closure / break / exam-schedule questions (\"when is...\", \"what days off\", \"spring break\", \"staff holidays\", \"fall 2026 exams\") → find_msu_date. Use get_msu_calendar with source=\"university_holidays\" for the full holiday list. If the user does NOT specify a year, present ALL year-versions returned.\n3. Course questions (\"what's the prereq for...\", \"what does X unlock?\", \"find a class about Y\", \"what should I take next semester in CSE?\") → search_msu_courses, get_msu_course, get_msu_course_graph, plan_semester. Use plan_semester when the user gives a department + completed courses and wants a candidate schedule. Always surface the non-goals from plan_semester.notes (no live sections, no degree-audit, no admission prediction).\n4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with \"Call 911 now.\"\n5. Tuition / fee / cost questions (\"how much is tuition\", \"college fees\", \"DVM cost\") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.\n6. Online-program / online-admissions / online-student-services questions (\"does MSU have an online MBA?\", \"how do I apply to MSU online?\", \"who's the advisor for the online psychology program?\", \"what's the application deadline for the online MS in Cybersecurity?\", \"does MSU online operate in my state?\", \"military assistance for MSU online\", \"which online program fits me?\", \"how much does an online master's cost?\") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info / list_programs_by_staff / match_online_program / estimate_program_cost, picked by question shape. Use match_online_program when the user describes a profile (career goal, budget, level, state) and wants a shortlist; use estimate_program_cost when the user names a specific program and asks \"how much\". Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.\n7. Dining / food / meal-hour questions (\"is Perry open?\", \"what time does Chick-fil-A close?\", \"where can I get coffee right now?\", \"list dining halls\", \"what's open at 9 pm\") → get_msu_dining_hours for a specific venue (slug or fuzzy name), list_msu_dining_locations for browse/filter. Always surface corpus_built_at and the disclaimer - dining hours change frequently and the local-install snapshot may be days-months old. Distinct from meal-plan-cost questions which are not yet covered.\n8. Citation / \"where did you get that?\" / \"is this true?\" / trust questions, OR when the model has just composed an MSU-related answer and wants to attach receipts → citation_card(text=…). Pass the full answer text. Returns one card per claim with source_url + last_updated + confidence. Confidence='none' = could not verify; surface the claim as unverified, do NOT fabricate a URL.\n9. Employee HR / benefits / leave / retirement / forms / payroll-process questions (\"how much sick leave do I get\", \"when's open enrollment\", \"how do I update my W-4 or direct deposit\", \"who's the benefits coordinator\", \"what's the retirement match\", \"PERS vs ORP\", \"tuition assistance for staff\", \"FMLA workflow\") → find_msu_hr_info / get_msu_hr_benefit / find_msu_hr_form / list_msu_hr_contacts, picked by question shape. Use get_msu_hr_benefit when the user names a benefit category and wants the page content (plus structured fields for leave/retirement). Use find_msu_hr_form when they ask \"where's the form for X\". Use list_msu_hr_contacts when they ask \"who do I email about Y\". Use find_msu_hr_info as the catch-all for fuzzy phrasings. Distinct from policies/OPs: HR site covers operational layer (forms, contacts, benefit details, structured accrual rates); OPs cover policy text. For personal balances (sick leave used, paycheck stubs, current enrollment) say \"that lives in Banner — log in at my.msstate.edu\".\n\nAnti-hallucination rules — load-bearing:\n- Use ONLY data returned by the tools. Never substitute training-data knowledge of \"what universities usually have\" for actual tool results.\n- Quote dates, policy text, fee amounts, and emergency guidance VERBATIM from the tool result. Always include the source URL or pre-formatted citation field returned by the tool.\n- If the question is not about MSU, or no tool returns a useful result after a reasonable attempt, say so plainly. Do NOT invent dates, dollar amounts, holiday lists, or policy text.\n- If your first tool guess returns an empty/unhelpful result, try the next-most-likely tool before falling back to general knowledge.",
+  "durationMs": 8909,
+  "stderr": "{\"ts\":\"2026-10-13T17:33:50.879Z\",\"level\":\"info\",\"msg\":\"msstate-policies-mcp starting\",\"version\":\"unknown\",\"gitSha\":\"unknown\",\"node\":\"v22.23.3\",\"pid\":1}\n{\"ts\":\"2026-10-13T17:33:51.010Z\",\"level\":\"info\",\"msg\":\"course corpus loaded\",\"count\":3737}\n{\"ts\":\"2026-10-13T17:33:51.012Z\",\"level\":\"info\",\"msg\":\"emergency corpus loaded\",\"guidelines\":12,\"refuge_areas\":6,\"contacts\":12}\n{\"ts\":\"2026-10-13T17:33:51.013Z\",\"level\":\"info\",\"msg\":\"tuition corpus loaded\",\"rate_rows\":74,\"fee_rows\":23,\"faq_rows\":14,\"campuses\":5}\n{\"ts\":\"2026-10-13T17:33:51.015Z\",\"level\":\"info\",\"msg\":\"online corpus loaded\",\"programs\":115,\"staff\":21,\"info_pages\":5}\n{\"ts\":\"2026-10-13T17:33:51.015Z\",\"level\":\"info\",\"msg\":\"dining corpus loaded\",\"locations\":24}\n{\"ts\":\"2026-10-13T17:33:51.017Z\",\"level\":\"info\",\"msg\":\"hr corpus loaded\",\"pages\":16,\"forms\":138,\"contacts\":28}\n{\"ts\":\"2026-10-13T17:33:51.035Z\",\"level\":\"info\",\"msg\":\"msstate-policies-mcp ready\"}\n{\"ts\":\"2026-10-13T17:33:51.038Z\",\"level\":\"error\",\"msg\":\"index fetch failed\",\"url\":\"https://www.policies.msstate.edu/current\",\"err\":\"fetch failed\"}\n{\"ts\":\"2026-10-13T17:33:51.039Z\",\"level\":\"warn\",\"msg\":\"background warm failed; will retry on first request\",\"err\":\"fetch failed\"}\n{\"ts\":\"2026-10-13T17:33:51.040Z\",\"level\":\"warn\",\"msg\":\"calendar source scrape error (serving LKG)\",\"source\":\"academic_calendar\",\"error\":\"fetch failed\",\"lkg_count\":0}\n{\"ts\":\"2026-10-13T17:33:51.050Z\",\"level\":\"warn\",\"msg\":\"calendar source scrape error (serving LKG)\",\"source\":\"exam_schedule\",\"error\":\"fetch failed\",\"lkg_count\":0}\n{\"ts\":\"2026-10-13T17:33:51.053Z\",\"level\":\"warn\",\"msg\":\"calendar fetch failed\",\"source\":\"university_holidays\",\"err\":\"fetch failed\"}\n{\"ts\":\"2026-10-13T17:33:51.054Z\",\"level\":\"warn\",\"msg\":\"calendar source scrape error (serving LKG)\",\"source\":\"university_holidays\",\"error\":\"fetch failed\",\"lkg_count\":0}\n{\"ts\":\"2026-10-13T17:33:51.059Z\",\"level\":\"warn\",\"msg\":\"calendar source scrape error (serving LKG)\",\"source\":\"grad_school_calendar\",\"error\":\"fetch failed\",\"lkg_count\":0}\n{\"ts\":\"2026-10-13T17:33:51.062Z\",\"level\":\"warn\",\"msg\":\"calendar source scrape error (serving LKG)\",\"source\":\"sfa_financial_aid\",\"error\":\"fetch failed\",\"lkg_count\":0}\n{\"ts\":\"2026-10-13T17:33:51.065Z\",\"level\":\"warn\",\"msg\":\"calendar fetch failed\",\"source\":\"housing\",\"err\":\"fetch failed\"}\n{\"ts\":\"2026-10-13T17:33:51.065Z\",\"level\":\"warn\",\"msg\":\"calendar source scrape error (serving LKG)\",\"source\":\"housing\",\"error\":\"fetch failed\",\"lkg_count\":0}\n{\"ts\":\"2026-10-13T17:33:51.066Z\",\"level\":\"info\",\"msg\":\"loaded calendar synonyms sidecar\",\"path\":\"/pkg/node_modules/msstate-policies-mcp/dist/calendar-synonyms.json\",\"entries\":869}\n{\"ts\":\"2026-10-13T17:33:51.067Z\",\"level\":\"info\",\"msg\":\"calendar background warm done\",\"rows\":0}\n"
+}

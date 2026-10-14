@@ -1,0 +1,243 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "hesperan-mcp",
+  "version": "0.1.0",
+  "integrity": {
+    "dist": "sha512-5Imoa0ttERSADB1BnaT7NR65Z8qPuRphLoD0pfjpTbnX+niGXtIXwrFzxuk/MgtPzpX5cBq969y14yLtKcatEg==",
+    "installed": "sha512-5Imoa0ttERSADB1BnaT7NR65Z8qPuRphLoD0pfjpTbnX+niGXtIXwrFzxuk/MgtPzpX5cBq969y14yLtKcatEg=="
+  },
+  "bin": "node_modules/hesperan-mcp/src/cli.js",
+  "installScriptsRan": false,
+  "envNames": [
+    "HESPERAN_API_KEY",
+    "HESPERAN_BASE_URL"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T12:42:24.663Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "decide",
+      "description": "Ask Hesperan 1 one or more typed questions about a state and get a probability for every possible answer. Types: choice (pick one of named options), noul (probability that a statement is true), score (level on an ordinal scale). Use for decisions with known options: routing, triage, policy or risk checks, \"should I proceed?\". Not for writing text, summaries or knowledge questions. Ask all questions about the same state in one call: billing is by input tokens (the state once plus each question once), from the user's monthly allowance and then their prepaid balance; failed calls are free.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            ],
+            "description": "The situation to judge: free text, or a JSON object (keeps dates, amounts and fields unambiguous). Leave out data that does not matter for the question."
+          },
+          "questions": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "choice"
+                    },
+                    "instructions": {
+                      "type": "string",
+                      "description": "The question, e.g. \"Which team should handle this ticket?\""
+                    },
+                    "criteria": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "Option key -> plain-language description of what the option means. Mutually exclusive; add an \"other\" option if the list is not complete. Up to about 26 options work best."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "instructions",
+                    "criteria"
+                  ],
+                  "description": "Pick one of named options. Answer: choice and a probability per option."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "noul"
+                    },
+                    "instructions": {
+                      "type": "string",
+                      "description": "A statement (not a question), e.g. \"This email is a phishing attempt.\""
+                    },
+                    "criteria": {
+                      "description": "Optional: what counts as yes and as no.",
+                      "type": "object",
+                      "properties": {
+                        "true": {
+                          "type": "string"
+                        },
+                        "false": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "instructions"
+                  ],
+                  "description": "Probability that a statement is true. Answer: noul = P(yes)."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "score"
+                    },
+                    "instructions": {
+                      "type": "string",
+                      "description": "What to rate, e.g. \"How upset is the customer?\""
+                    },
+                    "criteria": {
+                      "minItems": 2,
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "One description per level, lowest first."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "instructions",
+                    "criteria"
+                  ],
+                  "description": "Rate on an ordinal scale you define. Answer: score = expected level, plus a probability per level (\"0\", \"1\", ...)."
+                }
+              ]
+            },
+            "description": "Named questions, answered together: { \"<name>\": { \"type\": \"choice\" | \"noul\" | \"score\", \"instructions\": \"...\", \"criteria\": ... } }."
+          }
+        },
+        "required": [
+          "state",
+          "questions"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "decide_with_profile",
+      "description": "Run one of the user's decision profiles on a state. A profile is one question calibrated on the user's own labelled cases with a target precision; the answer is a decision, its calibrated confidence and an action: \"auto\" (confidence reaches the profile's threshold — act on it) or \"review\" (hand it to a person). Profiles are created in the Hesperan console; ask the user for the profile slug. Keep the returned decision_id to report the correct answer later with report_outcome. Billed by input tokens like decide; pass an idempotency_key to make retries safe (a repeat with the same key returns the first decision without charging again).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Slug of the decision profile, e.g. \"ticket-routing\"."
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            ],
+            "description": "The situation to judge: free text, or a JSON object (keeps dates, amounts and fields unambiguous). Leave out data that does not matter for the question."
+          },
+          "idempotency_key": {
+            "description": "Optional unique key for this decision (1-255 visible ASCII characters, e.g. the ticket id). Reusing it within 24 hours with the same state replays the stored decision.",
+            "type": "string",
+            "pattern": "^[\\x21-\\x7e]{1,255}$"
+          }
+        },
+        "required": [
+          "profile",
+          "state"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "report_outcome",
+      "description": "Record the correct answer for an earlier decide_with_profile decision, once it is known (e.g. the team that finally handled the ticket). This tracks the live precision of the profile in the console. actual must be one of the profile's option keys. Free of charge.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "decision_id returned by decide_with_profile."
+          },
+          "actual": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The correct option key."
+          }
+        },
+        "required": [
+          "decision_id",
+          "actual"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "hesperan",
+    "version": "0.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Hesperan 1 is a decision model, not a text generator. Give it a state (text or JSON) and typed questions; it returns a probability for every possible answer.\nUse it when the answer is one of options you can name (routing, triage, policy checks, \"should I proceed?\"). Do not use it to write, summarise, extract free-form values or answer knowledge questions.\nAct automatically only when the probability clears a threshold that fits the cost of a mistake; otherwise ask the user. With a decision profile, act on action \"auto\" and hand \"review\" to a person.",
+  "durationMs": 2258,
+  "stderr": ""
+}

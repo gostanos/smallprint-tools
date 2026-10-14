@@ -1,0 +1,256 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "buyforme-mcp",
+  "version": "1.1.0",
+  "integrity": {
+    "dist": "sha512-bWGf4lVrb/gMTPOyVNhiBs1HnV6vFzi3KkCtbi2Cd5DAi3d1Lp6IoIn3+VETIgrVL/SXCzn2qNKlcp47wPSltw==",
+    "installed": "sha512-bWGf4lVrb/gMTPOyVNhiBs1HnV6vFzi3KkCtbi2Cd5DAi3d1Lp6IoIn3+VETIgrVL/SXCzn2qNKlcp47wPSltw=="
+  },
+  "bin": "node_modules/buyforme-mcp/./bin/server.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T12:26:15.904Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "setup",
+      "description": "Creates or recovers an ArisPay account for delegated custody and provisions a USDC payer wallet in one call (side effects: registers the email, creates a Coinbase CDP-managed wallet, writes credentials to ~/.payagent/config.json on this machine). Moves no money — it does NOT spend funds. Idempotent: re-running with the same email recovers the existing account and its wallets. Not needed in self-custody mode: if PAYAGENT_PRIVATE_KEY is set, skip setup entirely — pay works with the local key alone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Email to register the account under. It is also the recovery key — use a real address."
+          },
+          "name": {
+            "type": "string",
+            "description": "Human name. Falls back to the email local-part."
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "discover",
+      "description": "Searches the ArisPay marketplace for paid APIs by capability or plain-language intent, optionally budget-bounded (integer cents). Read-only — spends no money, needs no API key. Returns ranked candidates with endpoint URL, price in cents, health and verification flags. Select this to FIND an endpoint; then inspect to price a specific URL, then pay to call it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Capability or plain-language intent, e.g. 'flight search'."
+          },
+          "budgetCentsMax": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum acceptable price in INTEGER CENTS (500 = $5.00). Free listings always pass."
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional category filter (inference, data, media, search, social, infrastructure, trading, other)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5,
+            "description": "Max results (default 5, max 20)."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "inspect",
+      "description": "Fetches an x402-protected URL WITHOUT paying and reports its price, asset, network, and payment requirements. Read-only — spends no money, sends no payment header, needs no API key or account. Always safe. Select this before pay to know exactly what a resource costs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL to inspect. Expected to return HTTP 402 with an x402 challenge."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "pay",
+      "description": "SPENDS REAL MONEY — on-chain and irreversible. The complete machine payment path: makes the HTTP request, and if the server answers 402, selects the supported asset/network variant (USDC on Base/Ethereum/Polygon; delegated mode also settles Solana and BNB Chain variants), validates policy, pays, retries the request, and returns the response plus a structured machine-readable receipt. Requires an idempotencyKey: re-calling with a key that already paid returns the cached receipt and does NOT pay again. Mode selection: PAYAGENT_PRIVATE_KEY set → signs locally (self-custody; wallet balance is the only cap); otherwise pays through the stored ArisPay agent whose per-tx/daily/monthly mandate is enforced server-side BEFORE signing. Use inspect first to see the price. Do not use for ordinary unpaid HTTP requests.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The full URL of the API endpoint to call."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "description": "Caller-chosen unique key for this payment intent (min 8 chars, e.g. a UUID). Re-calling with a key that already paid returns the cached receipt WITHOUT paying again. Use a fresh key for each new payment intent."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE",
+              "PATCH"
+            ],
+            "default": "GET"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string",
+            "description": "Optional name of a stored x402 payer agent (delegated mode)."
+          }
+        },
+        "required": [
+          "url",
+          "idempotencyKey"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "balance",
+      "description": "Read-only: shows the active payment identity — the stored ArisPay agent (delegated) or the PAYAGENT_PRIVATE_KEY-derived address (self-custody) — with its USDC deposit address, on-chain balance, and (delegated) spend-mandate limits. Spends no money, never pays. Select this to find where to send USDC, to confirm a deposit landed, or when a payment fails.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "description": "Optional name of a locally-stored x402 agent."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "history",
+      "description": "Read-only: lists recent payments — the server-side activity feed in delegated mode (newest first), or locally recorded receipts in self-custody mode. Spends no money. Select this to reconcile what was paid, retrieve a past receipt, or audit an agent's spending.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "description": "Optional stored agent name — limits the feed to that wallet (delegated mode)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "Max entries (default 10, max 50)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "check_payment_signal",
+      "description": "SPENDS REAL MONEY — 1¢ (USDC, Base mainnet) per UNCACHED call; a still-valid cached artifact returns WITHOUT spending, and an unknown resource is answered free. Buys ArisPay Signal: recent signed probe evidence about an x402 resource (did a real paid probe settle and deliver?) as an arispay.signal.v1 artifact, verified against the published JWKS. Use it BEFORE a material first payment to an unfamiliar resource, or after cached evidence expires. The decision denominator is CUMULATIVE exposure before the artifact expires — planned spend across all intended calls, or the expected cost of one failure, whichever is larger — not the price of the next call: an agent planning 100 calls to a 1¢ endpoint should check; an agent making a single 1¢ call should not. Skip it when cumulative exposure is at or below the 1¢ check price. Returns signed observational evidence with explicit freshness — NOT a guarantee, insurance, or endorsement. Network side effect: one HTTPS request to the Signal endpoint; payment side effect: the 1¢ x402 purchase on uncached calls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string",
+            "description": "The exact absolute HTTPS URL of the x402 resource you are about to pay. Signal evidence is keyed by this exact URL."
+          },
+          "agent": {
+            "type": "string",
+            "description": "Optional name of a stored x402 payer agent (delegated mode)."
+          }
+        },
+        "required": [
+          "resource"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "payagent",
+    "version": "4.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 8111,
+  "stderr": ""
+}

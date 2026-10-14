@@ -1,0 +1,1762 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@co-engram/claude-code",
+  "version": "0.6.0",
+  "integrity": {
+    "dist": "sha512-RwfAlshTgl2wfUDbDZgWO7K32NLfRehZmtyqBBRV1lAQa4WEFH3Ayq9r4y1taTCH/toj90NYrPmhRgFe+jHMYw==",
+    "installed": "sha512-RwfAlshTgl2wfUDbDZgWO7K32NLfRehZmtyqBBRV1lAQa4WEFH3Ayq9r4y1taTCH/toj90NYrPmhRgFe+jHMYw=="
+  },
+  "bin": "node_modules/@co-engram/claude-code/./dist/mcp-server.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T06:25:55.323Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "engram_create",
+      "description": "为重要的团队知识创建新记忆(engram)。\n\n何时调用:用户表达持久偏好、做出带理由的设计决策、分享 bug 教训、纠正过时记忆。\n\n何时不调用:琐碎/一次性信息、CLAUDE.md 已有、用户只是在询问(用 engram_search)。\n\n⚠️ visibility='private' 用于个人凭据/路径/设备特定信息(ADB 序列号、token、本机偏好),落 private/ 子目录被 .gitignore 隔离。\n\n⚠️ 本工具是本会话**唯一**的持久化记忆写入路径。不要写 ~/.claude/projects/<cwd>/memory/*.md —— AutoMemorySyncEngine 会把它镜像为待审批 proposal(visibility 归属丢失)。所有记忆都通过本工具入库。\n\n返回:engram ID + 版本号,自动检测重复。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "observation",
+              "fact",
+              "pattern",
+              "procedure",
+              "hypothesis"
+            ]
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/kind"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "domainTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "contextTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "encodingContext": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "sourceType": {
+            "type": "string",
+            "enum": [
+              "firsthand",
+              "secondhand",
+              "inferred"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "team",
+              "private",
+              "restricted"
+            ]
+          },
+          "createdBy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dedupe": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "title",
+          "content",
+          "kind",
+          "domainTags"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_get",
+      "description": "按 ID 读取单条记忆(engram)的完整内容。\n\n何时调用:\n- engram_search 返回的命中需要读全文\n- 用户明确询问某个 engram ID 的详情\n- 需要搜索摘要里没显示的元数据(重要性、tags、验证状态)\n\n何时不调用:\n- 还没调过 engram_search(先搜索)\n- engram ID 来自过时的对话(重新搜索验证)\n\n返回:完整内容 + 元数据(创建时间、重要性、truthScore、强化次数)+ 相关 engram ID 列表。\n\n概念:一条被持久化的团队记忆。每条记忆有标题、内容、领域标签,以及随使用强度变化的『重要性』分数。一条记忆可以被多次检索、强化或反驳,状态会随使用反馈演化。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "catalog",
+              "digest",
+              "content",
+              "meta",
+              "synapses",
+              "auto"
+            ],
+            "default": "digest"
+          },
+          "contextBudget": {
+            "type": "object",
+            "properties": {
+              "totalTokens": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "reserved": {
+                "type": "number",
+                "minimum": 0,
+                "default": 0
+              }
+            },
+            "required": [
+              "totalTokens"
+            ],
+            "additionalProperties": false
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_update",
+      "description": "当已有记忆的内容需要细化(不是矛盾)时更新。\n\n何时调用:\n- 给已有 engram 补充细节(\"迁移还要处理 X\")\n- 修正记忆里的笔误/不精确表述\n- 用户澄清之前的记忆(\"我的意思是...\")\n\n何时不调用:\n- 新信息和旧的矛盾(用 engram_create + contradiction_resolve)\n- 记忆没问题(不要为了刷新时间戳而更新)\n\n⚠️ 改 visibility 触发文件路径迁移(private → private/<domainTags>/;其他 → <domainTags>/);原子性,冲突失败,stableId 不变。\n\n**可见性**:新 content 含风险信号且当前为 public/team 时,update 前询问是否同时降级 private。\n\n返回:更新后的 engram + 新版本号。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "observation",
+                "fact",
+                "pattern",
+                "procedure",
+                "hypothesis"
+              ]
+            }
+          },
+          "domainTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "contextTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "encodingContext": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "team",
+              "private",
+              "restricted"
+            ]
+          },
+          "updatedBy": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Ignored (kept for backward compat): authorship is resolved from the host git identity, same as engram_create.createdBy. Use encodingContext to convey automation context."
+          }
+        },
+        "required": [
+          "id",
+          "updatedBy"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_delete",
+      "description": "永久删除一条记忆(立即失效,不可恢复)。\n\n⚠️ 除非用户明确指示,调用前必须先确认。\n\n何时调用:\n- 用户明确要删除(\"删掉关于 X 的那条记忆\")\n- 记忆重复或含敏感信息\n- 事实已确定失效(运行验证或用户陈述,非推测)—— 跳过累积式 engram_report_failure,直接 delete\n\n何时不调用:\n- 召回答案不准(用 engram_report_failure)\n- 用户表述模糊(\"忘掉那个\" — 确认含义)\n\n返回:{ deleted: true } 或未找到错误。\n\n⚠️ Fail-loud:删除后 post-check;若检测到 race / 不一致,抛\"still exists\"(跑 engram_doctor 自愈)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_search",
+      "description": "搜索团队记忆(过去的设计决策、偏好、项目上下文)。\n\n何时调用:\n- 用户引用过去的工作(\"我们之前决定\"、\"上次\"、\"以前我们\")\n- 用户提到偏好(\"我喜欢\"、\"我一直用\"、\"我讨厌\")\n- 用户问项目历史(\"X 为什么存在\"、\"谁决定的\"、\"我们讨论过...吗\")\n- 遇到可能之前见过的 bug\n- 用户明确说\"记住\"或\"我们讨论过\"\n\n何时不调用:\n- 与团队历史无关的纯代码问题\n- 通用编程知识(用 web search)\n- 简单问候\n\n返回:Top N 条 engram(标题 + 摘要 + 分数 + tags)。需要全文用 engram_get。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "filter": {
+            "type": "object",
+            "properties": {
+              "domainTags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "kinds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "status": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "freshness": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "createdBy": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "createdAfter": {
+                "type": "string"
+              },
+              "createdBefore": {
+                "type": "string"
+              },
+              "minImportance": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "contextTags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "verificationStatus": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_list",
+      "description": "浏览所有记忆(分页),最新优先。\n\n何时调用:\n- 用户想看存储的记忆概览(\"你知道我什么\")\n- 需要找记忆但没精确查询词\n- 回顾最近捕获的内容\n\n何时不调用:\n- 有明确查询(用 engram_search 更快更准)\n- 只为检查记忆是否存在(按内容搜)\n\n返回:engram 摘要列表(标题、tags、更新时间)+ 总数。支持分页。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "object",
+            "properties": {
+              "domainTags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "kinds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "status": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "freshness": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "createdBy": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "createdAfter": {
+                "type": "string"
+              },
+              "createdBefore": {
+                "type": "string"
+              },
+              "minImportance": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "contextTags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "verificationStatus": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 500
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_reinforce",
+      "description": "标记某条记忆被有效使用(正向强化)。\n\n何时调用:\n- 你在回答里引用了 engram ID 且用户接受了结果\n- 取回的记忆直接帮助解决了任务\n- 成功完成依赖某条记忆的任务后\n\n何时不调用:\n- 实际没用那条记忆(只是扫了一眼)\n- 任务失败或记忆错了(用 engram_report_failure)\n\n返回:记忆的强度分数增加 + 有效使用计数 +1。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "effectiveness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 1
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_report_failure",
+      "description": "上报一次\"召回后导致错误答案\"的失败使用(LTD 累积式削弱)。\n\n何时调用:\n- 召回了某条记忆,但其内容导致你给出错误答案或走错路径\n- 用户反馈\"这条不对\",但你不确定是这条记忆整体失效还是只是本次不适用\n\n何时不调用:\n- 代码/决策/约束已确定变更,记忆描述的事实已不成立 → 用 engram_delete(确定性失效,立即)\n- 记忆只是不完整(用 engram_update)\n- 不确定(先问用户)\n\n机制说明:累积式负反馈 —— 单次调用让 importance 下降一档(默认 −0.1,D1 dynamics),记忆仍在检索池里;多次累积后维护周期可能自动驳回。确定性事实失效不要走这条路,直接 engram_delete。\n\n返回: { ok: true, importance, failureCount } + 审计已记录。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "id",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "contradiction_resolve",
+      "description": "解决两条记忆之间的矛盾(旧 vs 新)。\n\n何时调用:\n- 新记忆明确矛盾旧记忆\n- 用户确认旧记忆错了应该 refute\n- 需要标记 contradiction synapse 里哪一方胜出\n\n何时不调用:\n- 两条记忆只是不同视角(裁决为 merge / archive,新 synapse 选用 similar_to 或 contextualizes,不要建 contradicts)\n- 不确定哪个对(问用户)\n\n返回:resolution 记录 + 两条 engram 的验证状态更新。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fromId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "synapseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "keep_new",
+              "keep_old",
+              "merge",
+              "archive"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "resolvedBy": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "fromId",
+          "synapseId",
+          "verdict",
+          "rationale",
+          "resolvedBy"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "close_learning_loop",
+      "description": "使用记忆后,把使用结果反馈给系统,闭合学习回路(强化重要性 / 置信度)。\n\n何时调用:\n- 使用了记忆且验证有效,想把\"用对了\"反馈给系统(提升 importance / confidence)\n- 正向反馈 + 用户确认记忆准确后\n- 完成\"取回 → 使用 → 反馈\"循环\n\n何时不调用:\n- 还没实际验证(等确认扎实后再调)\n- 记忆最终错了(用 engram_report_failure)\n- 想升级验证状态(unverified → plausible → probable → verified):用 upgrade_verification,本工具不改 verificationStatus\n\n返回:闭环元数据(importance / importanceDelta / shouldArchive / shouldForget 等)。本工具不改 verificationStatus —— 验证升级请用 upgrade_verification。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "engramId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure",
+              "partial"
+            ]
+          },
+          "effectiveness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "reportedBy": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "engramId",
+          "outcome",
+          "reportedBy"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "synapse_create",
+      "description": "在两条记忆之间创建有类型的连接(synapse)。\n\n何时调用:\n- 新记忆扩展/矛盾/关联已有记忆\n- 用户提到因果或依赖关系(\"X 因为 Y 发生\")\n- 把决策链接到理由,或 bug 链接到修复\n\n何时不调用:\n- 两条记忆无关\n- 5 族(结构/因果/证据/时间/调节)能覆盖几乎所有合理关联,选最贴近的;不要因「拿不准」就跳过,但也别硬凑。\n\n返回:synapse ID + from/to engram ID。12 种 kind 按 5 族严格推导:结构族(extends/part_of/similar_to)、因果族(depends_on/causes/follows)、证据族(derives_from/contradicts/exemplifies)、时间族(supersedes/consolidates)、调节族(contextualizes)。\n\n副作用:\n- kind=\"contradicts\":给双方 engram 写 contradicted audit 事件(engram_audit_query 可查),并触发矛盾解决流程。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "extends",
+              "part_of",
+              "similar_to",
+              "depends_on",
+              "causes",
+              "follows",
+              "derives_from",
+              "contradicts",
+              "exemplifies",
+              "supersedes",
+              "consolidates",
+              "contextualizes"
+            ]
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "addedBy": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "description",
+                "addedBy"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "createdBy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceSemantic": {
+            "type": "string"
+          },
+          "targetSemantic": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "kind"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_create",
+      "description": "创建新 skill(程序性记忆)并配置参数和策略。\n\n何时调用:\n- 用户想保存可复用的流程或模板\n- 执行完值得未来复用的任务后\n- 创建新的 prompt 模板或 tool sequence\n\n何时不调用:\n- 一次性任务且无复用价值(陈述性记忆用 engram_create)\n- 缺少明确 skillId 和 policy 信息\n- 模板还不稳定(应该先打磨再创建)\n\n返回:创建的 skill 记录,utility=0.5、acquisitionStage=draft、retentionStage=active。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourcePath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "initiationSet": {
+            "type": "string",
+            "minLength": 1
+          },
+          "allowedTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "license": {
+            "type": "string"
+          },
+          "skillVersion": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "compatibility": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "team",
+              "private"
+            ]
+          },
+          "createdBy": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "skillId",
+          "sourcePath",
+          "initiationSet",
+          "createdBy"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_get",
+      "description": "读取 skill 元信息(程序性记忆)。\n\n何时调用:\n- 在 invoke 前检查已注册 skill 做什么\n- 列出可用 skill(程序性模板)\n- 调试 skill registry 问题\n\n何时不调用:\n- 想执行 skill(用 skill_invoke)\n- 想读陈述性记忆(用 engram_search / engram_get)\n\n返回:Skill 元信息(name、description、template kind、parameters)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_list",
+      "description": "列出所有 skill,可按习得深度/时间强度过滤;已退役(retired)的默认不列出,传 includeRetired: true 可含退役项(审计用)。\n\n何时调用:\n- 用户问\"有哪些 skill\"/\"显示所有程序性模板\"\n- 审查程序性记忆库存\n- 按阶段查找 skill(draft/compiled/tuned 或 active/aging/stale/forgotten)\n\n何时不调用:\n- 读某个 skill 的详情(用 skill_get)\n- 搜索陈述性记忆(用 engram_search)\n\n返回:Skill 数组,含元数据(utility、阶段、调用次数)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "acquisitionStage": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "compiled",
+              "tuned"
+            ]
+          },
+          "retentionStage": {
+            "type": "string",
+            "enum": [
+              "active",
+              "aging",
+              "stale",
+              "forgotten"
+            ]
+          },
+          "includeRetired": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_update",
+      "description": "更新 skill 元信息(initiation set、termination、policy、visibility 或习得深度轴)。\n\n何时调用:\n- 改进 skill 的触发条件或终止条件\n- 修改 skill 可见性(public/team/private)\n- 从 draft→compiled→tuned 迁移(只能前进,单步)\n\n何时不调用:\n- 修改 skillId(不可变——改创建新 skill)\n- 向后迁移(tuned→compiled、compiled→draft 非法)\n- 未确认用户想修改\n\n返回:更新后的 skill 记录,version 递增。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "initiationSet": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "team",
+              "private"
+            ]
+          },
+          "acquisitionStage": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "compiled",
+              "tuned"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_delete",
+      "description": "删除 skill 的 sidecar 印迹(不动 SKILL.md 本体)。\n\n何时调用:\n- 用户确认 skill 已废弃或错误\n- 清理测试/临时 skill\n- 移除不应再被调用的 skill\n\n何时不调用:\n- 想临时禁用 skill(用 skill_update 改 visibility)\n- 未确认删除(用户应批准)\n- 可能想恢复(删除是永久性的)\n\n返回:{ id, deleted: true }。SKILL.md 文件不变;仅删除 sidecar。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_invoke",
+      "description": "报告一次 Skill 使用结果，用 Rescorla-Wagner 更新 utility + retention。**本工具只记录使用、不执行 skill**——实际执行由宿主完成；agent 用完 skill 后调用本工具报告结果，让技能印迹随使用演化。forgotten 或 retired（退役）的 skill 经一次使用报告自动复活（使用是最强的再激活信号；久未使用建议先复核 SKILL.md）。\n\n何时调用:\n- 宿主已执行完 skill，报告结果\n- 成功:success=true + effectiveness；失败:success=false\n\n何时不调用:\n- 还未执行 skill 时\n- 只想读印迹（用 skill_get）\n\n返回:更新后的 skill 印迹（utility、retentionStage、successCount、failureCount）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "effectiveness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "args": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "success"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_compose_add",
+      "description": "添加组合关系:skill A 可编排进 skill B 的 workflow(skill chaining)。去重。\n\n何时调用:用户想让一个 skill 作为另一个 skill 更大 workflow 的一步。\n\n返回:更新后的 skill 记录,含新增的 composes 目标。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "targetSkillId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "skillId",
+          "targetSkillId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_compose_remove",
+      "description": "移除 skill 的一个组合关系。\n\n何时调用:skill 不再是另一个 skill workflow 的一部分,或链接有误。\n\n返回:更新后的 skill 记录,目标已移除。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "targetSkillId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "skillId",
+          "targetSkillId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_compose_list",
+      "description": "列出 skill 的组合关系(本 skill 可编排进哪些更大 workflow)。\n\n何时调用:用户想看本 skill 可编排进哪些 workflow,或增删组合关系前查看现状。\n\n返回:{ composes: string[] } —— 目标 skillId 列表。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "skillId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_related_engram_add",
+      "description": "关联 skill 与 engram(程序性 ↔ 陈述性记忆)。去重。\n\n何时调用:skill 的依据已记录在某 engram,想让两者可一起检索。\n\n返回:更新后的 skill 记录,含新增的 relatedEngrams。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "engramId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "skillId",
+          "engramId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_related_engram_remove",
+      "description": "移除 skill 与某个 engram 的关联(程序性 ↔ 陈述性解绑)。\n\n何时调用:engram 已被删除,或该关联不再适用,需清理失效链接。\n\n返回:更新后的 skill 记录,该 engram 已从 relatedEngrams 移除。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "engramId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "skillId",
+          "engramId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "skill_related_engram_list",
+      "description": "列出 skill 关联的 engram(程序性 ↔ 陈述性记忆交叉引用)。\n\n何时调用:用户想看某 skill 背后的上下文/依据 engram,或增删关联前查看现状。\n\n返回:{ relatedEngrams: string[] } —— 关联的 engram id。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "skillId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_list_proposals",
+      "description": "列出待处理的记忆候选(隐式捕获但待审批的)。\n\n何时调用:\n- 系统提示显示\"N 个候选记忆待处理\"\n- 用户问\"有什么候选\"或\"查看待处理记忆\"\n\n何时不调用:\n- 没有待处理候选(系统提示会显示 0)\n- 刚刚显式搜索过(用 engram_search)\n\n返回:候选列表。每条带 `source`(\"conversation\" = 对话聚类 / \"auto-memory\" = Claude Code auto-memory 文件 / \"external-markdown\" = dataRoot 下检测到的未追踪 .md);auto-memory 与 external-markdown 来源还带 `proposedTitle`/`proposedContent`/`proposedDomainTags`/`proposedKind`(accept 时落库的完整 payload),直接 accept 即可。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeAll": {
+            "type": "boolean",
+            "default": false
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 500
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_accept_proposal",
+      "description": "接受待处理的候选(转成真正的 engram)。\n\n何时调用:\n- 用户确认候选有效(\"对,保存那个\")\n- auto-memory / external-markdown 来源:候选自带 payload,直接传 `entityId`(accept 前先审核 title/domainTags/kind)\n\n何时不调用:\n- 候选错误或质量低(用 engram_dismiss_proposal)\n- 还没审核\n\n注意:auto-memory / external-markdown 来源的 title/content/domainTags 可省略(走 payload 兜底);conversation 来源仍需显式传。\n\n**可见性**:payload 含风险信号时,accept 前询问是否传 visibility: \"private\"。\n\n返回:创建的 engram ID + 候选标记为已接受。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "domainTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "createdBy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "observation",
+              "fact",
+              "pattern",
+              "procedure",
+              "hypothesis"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "team",
+              "private",
+              "restricted"
+            ]
+          }
+        },
+        "required": [
+          "entityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_dismiss_proposal",
+      "description": "驳回待处理的候选(拒绝捕获)。\n\n何时调用:\n- 用户说\"不,不值得保存\"\n- 候选是噪声/低质量/已被覆盖\n- 审核后决定不应成为记忆\n\n何时不调用:\n- 还没审核候选内容\n- 候选处于边缘(改为接受 + 细化)\n\n默认**永久驳回**:status=dismissed + dismissedUntil 留空,后续 watcher/observe 都不再重开此候选。若需\"暂时屏蔽\",传 dismissDays > 0 —— N 天后该候选可被新事件重新激活。审计日志始终保留(便于排查)。返回:候选标记为已驳回 + 从待处理列表移除。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "dismissDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 365
+          }
+        },
+        "required": [
+          "entityId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_accept_proposals_by_source",
+      "description": "按 source 批量接受候选(转成真正的 engram)。\n\n何时调用:\n- auto-memory / external-markdown 来源的 pending 候选累积到数十到数千条,逐条 accept 不现实\n- load-test 产生大量 auto-memory 文件, watcher 全部转成候选后需要一次性入库\n\n何时不调用:\n- 候选来源是 conversation(必须用单条 engram_accept_proposal,LLM 需要为每条填 title/content)\n- 想筛选特定 domainTags(本工具只按 source 过滤)\n\n返回:`{ source, acceptedCount, dismissedCount(恒 0), remainingCount, engramIds, failures }`。单条 accept 失败不阻塞 batch,记录到 failures 数组。limit 默认 200(最大 500),超过的 pending 留到下次。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "auto-memory",
+              "external-markdown",
+              "skill"
+            ]
+          },
+          "createdBy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "team",
+              "private",
+              "restricted"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 200
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_dismiss_proposals_by_filter",
+      "description": "按 source / domainTags / 时间窗组合 filter 批量驳回候选。\n\n何时调用:\n- load-test 一次产生数千条 conversation 候选,逐条 dismiss 不现实\n- 某个 domainTag(如 'load-test')的所有候选都要清空\n- 某时间窗内所有候选都是噪声,要一次清掉\n\n何时不调用:\n- 只是少数几条候选(用单条 engram_dismiss_proposal,让 LLM 逐条审核更稳)\n- 不确定 filter 范围(先调 engram_list_proposals 确认)\n\n返回:`{ dismissedCount, acceptedCount(恒 0), remainingCount, dismissedIds, failures }`。reason 必填(审计留存)。默认永久驳回;传 dismissDays > 0 时 N 天后可被新事件重新激活。limit 默认 1000(最大 5000)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "conversation",
+              "auto-memory",
+              "external-markdown",
+              "rem-verification",
+              "rem-pattern",
+              "rem-synapse",
+              "rem-tag-refresh",
+              "rem-insight",
+              "skill",
+              "skill-retire"
+            ]
+          },
+          "domainTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "createdBefore": {
+            "type": "string",
+            "minLength": 1
+          },
+          "createdAfter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "dismissDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 365
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5000,
+            "default": 1000
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_doctor",
+      "description": "对记忆仓库做一次自愈扫描。\n\n自动修复:文件移动(索引重新指向)、标题重命名(re-slug)、过期索引项、skill composes/relatedEngrams、skill utility/stats、skill contentHash。仅报告:dangling synapse 引用、孤儿 markdown、skill 孤儿/不匹配/重复/字段问题 —— 每条带 nextAction。\n\n何时调用:\n- \"记忆看起来不对\"或搜索找不到条目\n- 用户编辑/重命名了数据目录文件\n- 触及数据仓库的 Git 合并后\n- 定期健康检查(每次会话一次)\n\n何时不调用:无不一致;看具体 engram 用 engram_get。\n\n返回:时间戳、计数、自动修复数、待审核数、issues[](kind/path/message/autoFixed)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "incremental": {
+            "type": "boolean",
+            "description": "增量扫描(只比对 mtime 变化的文件);默认全量"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_list_paths",
+      "description": "展示记忆仓库的物理目录树,让你在搜索前先建立全局认知。\n\n每节点带 engramCount(子树累计)。用它了解记忆集中在哪些领域、项目,再决定搜什么。\n\n何时调用:\n- 会话开始时,在 engram_search 之前建立全局观感\n- 用户问\"我们有哪些方面的记忆\"或\"团队做什么领域\"\n- 准备搜索但想先选更具体的 domain tag\n\n何时不调用:\n- 已知道具体查询——直接 engram_search\n- 用户想要某条 engram(用 engram_get)\n\n返回:嵌套 { path, engramCount, children } 树,根为 '/'。可选 maxDepth(1-10,默认 5)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxDepth": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 10,
+            "description": "目录树最大深度(默认 5)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_synthesize",
+      "description": "综合多条 engram 形成一条 pattern 记忆(手工触发的 REM)。\n\n何时调用:\n- 几条 engram 在同一主题下反复出现,组合起来能形成可复用经验\n- 团队刚做完复盘,想从具体记忆提炼抽象模式\n- REM 启发式置信度不够,但人判断是真 pattern\n- 想给一组相关 engram 显式建立 derives_from 溯源\n\n何时不调用:\n- 只有一条 engram(改用 engram_update)\n- 源 engram 主题无关(综合出垃圾)\n- 想合并矛盾记忆(改用 contradiction_resolve)\n- 想去重(engram_create 自带 dedupe)\n- ctx.llmClient 未配置(会抛错带安装指引)\n\n返回:patternEngramId + synapseIds(每源一条 derives_from)+ draft(含 title/content/summary/confidence/reason)。dryRun=true 时不创建,只返回 draft。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 2,
+            "maxItems": 20
+          },
+          "domainTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxItems": 5
+          },
+          "synthesisHints": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "createdBy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_sync",
+      "description": "手动触发记忆仓库的 pull → commit → push 同步。\n\n流程:fetch → pull --rebase --autostash(冲突 abort + 报告清单)→ add -A + commit(无变更跳过)→ push(无 remote 降级为 commit-only)。缺失时自动创建 .gitignore 排除 .co-engram/。\n\n何时调用:用户说\"保存/提交/push 记忆\";密集写入后显式落盘;dryRun=true 预览未提交变更。\n\n返回:{ pulled:{ok,upToDate?,conflicts?}, committed:{ok,sha?,filesChanged,nothingToCommit?}, pushed:{ok,skipped?,reason?}, summary }。冲突时 pulled.ok=false + conflicts 数组,工具中止后续阶段。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Custom commit message. If omitted, auto-generates `co-engram sync: YYYY-MM-DD`."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview-only: return what would be committed, do not pull/commit/push. Default false."
+          },
+          "pull": {
+            "type": "boolean",
+            "description": "Pull with --rebase before committing. Default true. Set false to commit against current HEAD only."
+          },
+          "push": {
+            "type": "boolean",
+            "description": "Push to remote after committing. Default true. Auto-degrades to commit-only when no remote is configured."
+          },
+          "untrackCache": {
+            "type": "boolean",
+            "description": "If .co-engram/ files are already git-tracked (legacy), run `git rm -r --cached .co-engram/` to untrack them in this commit (disk files kept locally). NOTE: teammates who pull this commit will see git delete those files on their disk too. Default false — opt-in. dryRun reports the tracked count regardless."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ponder_create",
+      "description": "提出一个沉思问题:围绕它做一次全资源盘点式深度思考——调用全部记忆图谱、行为日志、技能库、联网检索与宿主可用的 MCP 工具,本地只读不写,深思一次出一份报告(回答 + 洞察提案)。\n\n何时调用:\n- 用户说\"帮我沉思 X\"\"深想一下这个问题\"\"围绕 X 做一次深度思考\"等沉思意图\n- 用户给出一个值得动用全部记忆资产深挖、但不急需即时回答的问题\n\n何时不要调用:\n- 用户要即时答案(直接回答或 engram_search)\n- 一次性琐碎问题\n\n返回: { id, status: \"queued\", question }。条目创建后为 queued,配合 ponder_run 执行(对话场景由你按协议现场执行);可选 seedEngramIds 指定重点记忆(留空自动全库检索);条目上限 50。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 2000
+          },
+          "seedEngramIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxItems": 20
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ponder_run",
+      "description": "执行一次深思(queued 首思 / done 再思)。\n\n何时调用:\n- ponder_create 创建后立即执行(对话场景默认 mode=agent,由你现场按协议执行)\n- 用户对已答条目说\"再想一次/换个角度再思\"(done 条目回灌全部过往深思史)\n\n何时不要调用:\n- 条目 thinking 中(LOCK_BUSY,TTL 30min 回收)\n\n返回: mode=agent → { task }(固化协议任务包:盘点→全资源开采→PLAN→只读执行→写回答→ponder_report 回写);mode=auto → { level, proposals, rounds }。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "auto"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ponder_list",
+      "description": "列出沉思条目。\n\n何时调用:\n- 用户问\"我沉思过什么/上次深思的结果/条目列表\"\n- 需要条目 id 供 run/delete 使用\n\n何时不要调用:\n- 只想要某条报告细节(条目 timeline 已含,无需重复查询)\n\n返回: { items: [{ id, question, status(queued|thinking|done), rounds, lastRunAt, answer?, timeline }], total, limit }。timeline 为深思时间线摘要(answer 仅最近 2 次全文)。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ponder_report",
+      "description": "沉思回写(L2 agent 的唯一写回路径):把一次深思的结构化产出写回。\n\n何时调用:\n- 你按 ponder_run 返回的协议执行完全资源盘点后,交回答与洞察(协议第 6 步,恰好一次)\n\n何时不要调用:\n- 协议未执行完(先完成盘点与回答撰写)\n- 非 L2 现场执行路径(auto 模式由引擎内部写回,无需调用)\n\n返回: { incubationId, proposals, cycleVetoed, rounds, status, hasAnswer }。每条洞察即时走机械校验 + 独立 critic → rem-insight 提案(用户 accept 才落盘);重复洞察(与深思史 Jaccard ≥ 0.65)本次作废。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "incubationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "report": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "string",
+                "minLength": 1
+              },
+              "insights": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "theme",
+                        "lesson",
+                        "analogy",
+                        "hypothesis",
+                        "pattern"
+                      ]
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 300
+                    },
+                    "sourceIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "domainTags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "aar": {
+                      "type": "object",
+                      "properties": {
+                        "expected": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "actual": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "cause": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "improvement": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "expected",
+                        "actual",
+                        "cause",
+                        "improvement"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "content",
+                    "summary",
+                    "sourceIds",
+                    "domainTags",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "plan": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "capability": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "capability"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "trace": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "action": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "action",
+                    "detail"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "resourcesUsed": {
+                "type": "object",
+                "properties": {
+                  "engrams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "logs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "engrams",
+                  "skills",
+                  "logs"
+                ],
+                "additionalProperties": false
+              },
+              "requirements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "planItemId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    },
+                    "resourceType": {
+                      "type": "string",
+                      "enum": [
+                        "engrams",
+                        "skills",
+                        "logs",
+                        "web",
+                        "mcp"
+                      ]
+                    },
+                    "description": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "necessity": {
+                      "type": "string",
+                      "enum": [
+                        "logic-needed",
+                        "helpful"
+                      ]
+                    },
+                    "closed": {
+                      "type": "boolean"
+                    },
+                    "evidence": {
+                      "type": "object",
+                      "properties": {
+                        "ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "maxItems": 50
+                        }
+                      },
+                      "required": [
+                        "ids"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "resourceType",
+                    "description",
+                    "necessity",
+                    "closed"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 50
+              }
+            },
+            "required": [
+              "insights",
+              "plan",
+              "trace"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "incubationId",
+          "report"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ponder_delete",
+      "description": "删除沉思条目本体(生命周期终点;仅非 thinking 态可删)。\n\n何时调用:\n- 用户说\"删掉这个沉思问题/不要了\"\n\n何时不要调用:\n- 条目 thinking 中(等结束或 TTL 回收)\n- 用户只是想要新报告(用 ponder_run 再思,不必删)\n\n返回: { id }。已产出的 rem-insight 提案与审计记录保留,走各自裁决流;深思历史随条目移除。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "engram_audit_query",
+      "description": "查询 audit 审计日志(audit.jsonl),返回匹配的事件(cursor 分页)。\n\n何时调用:\n- \"这个 engram 的修改历史\"(谁创建 / reinforce / contradicted)\n- 调试 importance 异常(reinforce / report_failure 序列)\n- 复盘 proposal 处理(propose → accept/dismiss)\n- 排查 merge 冲突解决\n\n何时不调用:\n- 想看 engram 当前状态(用 engram_get)\n- 想看有效性图表(打开 viewer 网页 UI)\n\n返回:{ items: AuditEvent[], nextCursor: string|null }。limit 必填(1-1000);\n翻页把 nextCursor 原样回传到下一页的 cursor 参数(与 until 互斥,cursor 优先)。\nitems 按时间正序;每条含 ts / actor / action / engramId / metadata。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "engramId": {
+            "type": "string",
+            "description": "按 engram id 过滤(返回这个 engram 的全部修改历史)"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update",
+              "update_lifecycle",
+              "reinforce",
+              "report_failure",
+              "forget",
+              "restore",
+              "sweep_to_trash",
+              "restore_from_trash",
+              "purge",
+              "propose",
+              "accept",
+              "dismiss",
+              "retrieve_hit",
+              "retrieve_effective",
+              "retrieve_inconclusive",
+              "contradicted",
+              "noise_filtered",
+              "necessity_rejected",
+              "merge_resolved",
+              "merge_backup_failed",
+              "merge_conflict_escalated",
+              "merge_llm_arbitrated",
+              "merge_llm_arbitrated_escalated",
+              "merge_llm_arbitrated_failed",
+              "maintenance_run",
+              "skill_create",
+              "skill_update",
+              "skill_delete",
+              "skill_invoke",
+              "skill_compose_add",
+              "skill_compose_remove",
+              "skill_related_engram_add",
+              "skill_related_engram_remove",
+              "contemplation_create",
+              "contemplation_delete",
+              "contemplation_gap_check",
+              "contemplation_orphan_reclaimed",
+              "contemplation_plan_generated",
+              "contemplation_recovered",
+              "contemplation_run_cancel",
+              "contemplation_run_done",
+              "contemplation_run_fail",
+              "contemplation_run_start",
+              "contemplation_seed_fallback"
+            ],
+            "description": "按审计动作过滤(create/update/reinforce/contradicted/...)"
+          },
+          "since": {
+            "type": "string",
+            "description": "ISO8601 起始时间(包含),如 2024-01-01T00:00:00.000Z"
+          },
+          "until": {
+            "type": "string",
+            "description": "ISO8601 截止时间(不包含)。与 cursor 互斥;cursor 优先。"
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 1000,
+            "description": "返回上限(必填,1-1000)。与 cursor 配合做翻页。"
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "分页 cursor(上一页返回的 nextCursor)。编码为上一页 oldest entry 的 ts;下一页返回更早的事件。"
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "co-engram",
+    "version": "0.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": "# Co-Engram 团队记忆\n\n你可以访问一个持久的团队记忆库。请主动使用,不要等用户提醒。\n\n## 何时召回\n\n在回答前调用 `engram_search`,当用户:\n- 引用过去的工作(\"我们之前决定\"、\"上次\"、\"以前我们\")\n- 提到偏好(\"我喜欢\"、\"我一直用\"、\"我讨厌\")\n- 问项目历史(\"X 为什么存在\"、\"谁决定的\")\n- 报告可能之前见过的 bug\n\n## 何时捕获\n\n调用 `engram_create`,当用户:\n- 表达持久偏好(\"以后用 arrow function\")\n- 做出带理由的设计决策(\"我们用 X,因为 Y\")\n- 分享 bug 教训(\"这个失败因为 Z\")\n\n不要捕获琐碎、一次性或已文档化的信息。\n\n## 记忆写入路径\n\nco-engram 是本会话**唯一**记忆写入入口。不要写 `~/.claude/projects/<cwd>/memory/*.md`(Claude Code auto-memory)——它会被镜像为待审批 proposal,visibility 归属丢失。直接调 `engram_create`。\n\n## 学习回路\n\n使用记忆并验证有效后,调用 `close_learning_loop` 强化它(提升 importance / confidence)。要正式验证记忆(升级 verificationStatus),用 `upgrade_verification`。若记忆导致错误答案,调用 `engram_report_failure`。\n\n## 记忆优先级\n\n项目 `CLAUDE.md` 和内联文档优先于存储的记忆。若记忆与当前代码矛盾,以代码为准并将记忆标记为过时。\n\n当前为 standard profile:38 个工具,涵盖读写、学习回路、候选审批,自愈扫描(`engram_doctor`)、渐进式披露(`engram_list_paths`),以及 LLM 综合(`engram_synthesize`)。可定期调用 `engram_list_proposals` 审核待处理记忆。\n\n## 当前状态(会话级快照)\n",
+  "durationMs": 9576,
+  "stderr": "[co-engram-launcher] spawning daemon for /tmp/team-memory\n[co-engram-launcher] daemon ready at /tmp/co-engram/daemon-a4011e7ed262fecc.sock\n"
+}

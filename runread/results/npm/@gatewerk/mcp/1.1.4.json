@@ -1,0 +1,910 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@gatewerk/mcp",
+  "version": "1.1.4",
+  "integrity": {
+    "dist": "sha512-koIyBZyIZE86TlCUNZtY/awXgM/f+Wnjtz4FOpApRSulU1vjr5U8VpxxirrgwbNGIOrRxedXH+nxk41y0Sj4fA==",
+    "installed": "sha512-koIyBZyIZE86TlCUNZtY/awXgM/f+Wnjtz4FOpApRSulU1vjr5U8VpxxirrgwbNGIOrRxedXH+nxk41y0Sj4fA=="
+  },
+  "bin": "node_modules/@gatewerk/mcp/dist/index.js",
+  "installScriptsRan": false,
+  "envNames": [
+    "GATEWERK_API_KEY",
+    "GATEWERK_URL",
+    "GATEWERK_REVIEWER"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T08:32:46.433Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "gatewerk_create_review",
+      "description": "Submit a review request for human oversight. Returns the created review with its ID and status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string",
+            "description": "Template slug (e.g., 'email-review', 'code-deploy')"
+          },
+          "payload": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Data fields matching the template schema. Call gatewerk_list_templates first to discover the field names and types for your chosen template."
+          },
+          "callback_url": {
+            "description": "Webhook URL to receive the review decision. Optional — agents using MCP often don't have a webhook and can poll gatewerk_get_review or wait for tool re-invocation.",
+            "type": "string",
+            "format": "uri"
+          },
+          "priority": {
+            "description": "Review priority",
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "critical"
+            ]
+          },
+          "assignee": {
+            "description": "Assign to specific reviewer (email)",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Arbitrary metadata for agent context",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "timeout": {
+            "description": "Auto-expiry policy",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "auto_approve",
+                  "auto_reject",
+                  "expire"
+                ]
+              },
+              "seconds": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "action",
+              "seconds"
+            ]
+          },
+          "idempotency_key": {
+            "description": "Unique key scoped to the project. A second call with the same key returns the existing review instead of creating a duplicate. Useful for LangGraph node replays and agent retries.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template",
+          "payload"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_list_reviews",
+      "description": "List reviews with optional filters. Returns paginated list of reviews.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Filter by status",
+            "type": "string",
+            "enum": [
+              "pending",
+              "decided",
+              "expired",
+              "monitoring"
+            ]
+          },
+          "priority": {
+            "description": "Filter by priority",
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "critical"
+            ]
+          },
+          "template": {
+            "description": "Filter by template slug",
+            "type": "string"
+          },
+          "assignee": {
+            "description": "Filter by assignee",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max results (default 20)",
+            "type": "number"
+          },
+          "offset": {
+            "description": "Pagination offset",
+            "type": "number"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_get_review",
+      "description": "Get full review details by ID, including payload, status, decision, feedback, and template metadata (field labels, types, editable flags, and available actions). Use this to present structured review forms in conversation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "review_id": {
+            "type": "string",
+            "description": "Review ID (gw_rev_...)"
+          }
+        },
+        "required": [
+          "review_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_decide_review",
+      "description": "[Deprecated; use gatewerk_take_review_action for templates with custom actions] Submit a decision on a pending review. Supports approve, reject, edit (with modified payload), or retry (request changes with feedback).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "review_id": {
+            "type": "string",
+            "description": "Review ID to decide on"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected",
+              "edited",
+              "retried"
+            ],
+            "description": "Decision outcome"
+          },
+          "feedback": {
+            "description": "Feedback or reason for decision",
+            "type": "string"
+          },
+          "edited_payload": {
+            "description": "Modified payload (required for 'edited' decision)",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "reviewer": {
+            "description": "Reviewer identity (auto-filled from GATEWERK_REVIEWER if set)",
+            "type": "string"
+          },
+          "prompt_edit": {
+            "description": "Suggested prompt improvement for the agent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_id",
+          "decision"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_take_review_action",
+      "description": "Invoke a configurable action on a review. Supersedes gatewerk_decide_review for templates with custom actions. Built-in action_ids: 'approve', 'reject', 'request_changes', 'cancel_iteration'. Custom action_ids are template-specific — use gatewerk_list_review_actions to introspect available actions. Supports both session and api-key (agent) authentication.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "review_id": {
+            "type": "string",
+            "description": "Review ID (gw_rev_...)"
+          },
+          "action_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Action identifier as configured on the template"
+          },
+          "feedback": {
+            "description": "Required for actions with requires_feedback=true; optional otherwise",
+            "type": "string"
+          },
+          "edited_payload": {
+            "description": "Modified payload (for edit-on-approve flows)",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "version": {
+            "description": "Optimistic-concurrency guard for edited_payload submissions",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "review_id",
+          "action_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_list_review_actions",
+      "description": "Introspect the configurable actions available on a review's template. Returns the review's canonical TemplateActionConfig[] (action.id, label, kind, decision_value, enabled_for_status, requires_feedback, confirmation, expose_to_recipient, style, description, webhook_event). Use before gatewerk_take_review_action to choose a valid action_id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "review_id": {
+            "type": "string",
+            "description": "Review ID (gw_rev_...)"
+          }
+        },
+        "required": [
+          "review_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_list_templates",
+      "description": "Discover available review templates. Returns all templates with their fields and actions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_create_template",
+      "description": "Define a new review template with form fields and available actions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "URL-safe identifier (lowercase, hyphens, e.g., 'invoice-approval')"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable template name"
+          },
+          "description": {
+            "description": "What this template is used for",
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "markdown",
+                    "json",
+                    "image",
+                    "number",
+                    "boolean",
+                    "select",
+                    "buttons"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "readonly": {
+                  "type": "boolean"
+                },
+                "editable": {
+                  "type": "boolean"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "type",
+                "label"
+              ]
+            },
+            "description": "Form fields for the review"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Available actions (e.g., ['approve', 'reject', 'edit'])"
+          },
+          "default_priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "critical"
+            ]
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "fields",
+          "actions"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_update_template",
+      "description": "Modify an existing template's name, fields, actions, or priority.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "description": "Template ID (gw_tpl_...)"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "markdown",
+                    "json",
+                    "image",
+                    "number",
+                    "boolean",
+                    "select",
+                    "buttons"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "readonly": {
+                  "type": "boolean"
+                },
+                "editable": {
+                  "type": "boolean"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "type",
+                "label"
+              ]
+            }
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "default_priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "critical"
+            ]
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_delete_template",
+      "description": "Remove a template. Existing reviews using this template are not affected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "description": "Template ID to delete (gw_tpl_...)"
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_query_feedback",
+      "description": "Query past review decisions for learning. Returns decided reviews with original payload, edits, and feedback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "description": "Filter by template slug",
+            "type": "string"
+          },
+          "outcome": {
+            "description": "Filter by decision (approved, rejected, edited)",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max results (default 10)",
+            "type": "number"
+          },
+          "offset": {
+            "description": "Pagination offset",
+            "type": "number"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_query_audit",
+      "description": "Query the audit trail. Returns timestamped log of all actions (reviews created, decisions made, templates changed).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "description": "Filter by action (e.g., 'review.created', 'review.decided')",
+            "type": "string"
+          },
+          "resource_type": {
+            "description": "Filter by resource type (e.g., 'review', 'template', 'note', 'chain_run')",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "Filter by specific resource ID",
+            "type": "string"
+          },
+          "actor": {
+            "description": "Filter by actor — reviewer email, or 'api_key:<id>' identifier",
+            "type": "string"
+          },
+          "from": {
+            "description": "Start date (ISO 8601)",
+            "type": "string"
+          },
+          "to": {
+            "description": "End date (ISO 8601)",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max results (default 20)",
+            "type": "number"
+          },
+          "offset": {
+            "description": "Pagination offset",
+            "type": "number"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_get_stats",
+      "description": "View review metrics: total count, breakdown by status/decision, average review time, per-template counts, and daily trend (last 30 days).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_start_chain_run",
+      "description": "Start a chain run from a definition + initial payload. Returns the chain run object including the first step's review_id (step_1_review_id) so agents can pass it to reviewers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "definition": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string",
+                "const": "1.0"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "sequential",
+                  "parallel",
+                  "mixed"
+                ],
+                "description": "Step ordering mode"
+              },
+              "rejection_policy": {
+                "type": "string",
+                "enum": [
+                  "terminate",
+                  "back_one",
+                  "restart"
+                ]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Step identifier (unique within the chain definition)"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "template": {
+                      "type": "string",
+                      "description": "Template slug used for this step's review"
+                    },
+                    "assignee": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "user"
+                            },
+                            "email": {
+                              "type": "string"
+                            },
+                            "user_id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "role"
+                            },
+                            "role": {
+                              "type": "string",
+                              "enum": [
+                                "admin",
+                                "reviewer"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "role"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "external_token"
+                            },
+                            "expires_in_seconds": {
+                              "type": "number"
+                            },
+                            "grace_period_seconds": {
+                              "type": "number"
+                            },
+                            "note": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        }
+                      ],
+                      "description": "Who reviews this step. {kind:'user', email|user_id} | {kind:'role', role:'admin'|'reviewer'} | {kind:'external_token', ...}"
+                    },
+                    "timeout_seconds": {
+                      "type": "number"
+                    },
+                    "priority": {
+                      "type": "string"
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "depends_on": {
+                      "description": "ACCEPTED BUT NOT ENFORCED. Steps always run in step-number order; this field creates no dependency and is ignored by the engine. Do not use it to express ordering.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "rejection_policy": {
+                      "type": "string",
+                      "enum": [
+                        "abort",
+                        "continue",
+                        "branch"
+                      ]
+                    },
+                    "rejection_branch_to": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "template",
+                    "assignee"
+                  ]
+                },
+                "description": "Ordered list of chain steps"
+              }
+            },
+            "required": [
+              "version",
+              "mode",
+              "steps"
+            ],
+            "description": "Chain definition (version 1.0)"
+          },
+          "initial_payload": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Payload merged into the first step's review"
+          },
+          "callback_url": {
+            "description": "Optional webhook URL for chain events",
+            "type": "string",
+            "format": "uri"
+          },
+          "metadata": {
+            "description": "Arbitrary metadata for agent context",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "definition",
+          "initial_payload"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_get_chain_run",
+      "description": "Fetch a chain run by ID. Returns the run's status, mode, rejection_policy, and the full steps[] array (each with review_id, status, and dependency wiring).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain_run_id": {
+            "type": "string",
+            "description": "Chain run ID (gw_chain_...)"
+          }
+        },
+        "required": [
+          "chain_run_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_get_chain_for_review",
+      "description": "Get chain context for a review. Returns the parent chain run plus current_step_number — useful to discover whether a review is part of a chain and what step it represents. Returns 404 if the review is not part of a chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "review_id": {
+            "type": "string",
+            "description": "Review ID (gw_rev_...)"
+          }
+        },
+        "required": [
+          "review_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_create_note",
+      "description": "Create a note. api_key callers MUST set is_shared=true (or omit; default is true) — private notes are session-only. Notes can be pinned to one or more review/template/chain_run targets via attachments[].",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Note body (Markdown supported)"
+          },
+          "tags": {
+            "description": "Tags for categorization (e.g., ['risk', 'follow-up'])",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "is_shared": {
+            "description": "Whether the note is visible to other reviewers. Default true. api_key subjects MUST leave true (private notes are session-only).",
+            "type": "boolean"
+          },
+          "attachments": {
+            "description": "Targets to pin this note to on creation",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "target_kind": {
+                  "type": "string",
+                  "enum": [
+                    "review",
+                    "template",
+                    "chain_run"
+                  ],
+                  "description": "Target type the note attaches to"
+                },
+                "target_id": {
+                  "type": "string",
+                  "description": "Target resource ID (e.g., gw_rev_..., gw_tpl_..., gw_chain_...)"
+                }
+              },
+              "required": [
+                "target_kind",
+                "target_id"
+              ]
+            }
+          },
+          "project_id": {
+            "description": "Project ID. session callers must pass; api_key callers may omit (server resolves from the key).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "gatewerk_list_notes",
+      "description": "List notes visible to the caller within a project. Filter by author, tags, target (attached_to_kind + attached_to_id), shared/private, or has_attachments. Supports cursor pagination.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to scope the listing"
+          },
+          "author_id": {
+            "description": "Filter to notes by a specific author",
+            "type": "string"
+          },
+          "is_shared": {
+            "description": "Filter shared (true) or private (false)",
+            "type": "boolean"
+          },
+          "tags": {
+            "description": "Filter to notes that include any of these tags",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attached_to_kind": {
+            "description": "Filter to notes pinned to this target kind",
+            "type": "string",
+            "enum": [
+              "review",
+              "template",
+              "chain_run"
+            ]
+          },
+          "attached_to_id": {
+            "description": "Filter to notes pinned to this specific target ID",
+            "type": "string"
+          },
+          "has_attachments": {
+            "description": "Filter notes that have/lack attachments",
+            "type": "boolean"
+          },
+          "cursor": {
+            "description": "Pagination cursor from a prior response",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max results per page",
+            "type": "number"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "gatewerk",
+    "version": "1.1.4"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 6661,
+  "stderr": "Gatewerk MCP: Cannot connect to Gatewerk at smallprint-placeholder — exposing all tools; the API enforces key scopes on every call.\nGatewerk MCP: registered 18/18 tools (scopes: unfiltered, instance unreachable)\n"
+}

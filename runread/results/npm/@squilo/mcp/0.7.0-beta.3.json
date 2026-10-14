@@ -1,0 +1,261 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@squilo/mcp",
+  "version": "0.7.0-beta.3",
+  "integrity": {
+    "dist": "sha512-gd60NlLG9oxy6COozguYd/fFoUDbj28AHOGGW/N8wilgZ1eSlnreSRgcf/shY77+mK7AuCwfkBti+WSBSkOtCQ==",
+    "installed": "sha512-gd60NlLG9oxy6COozguYd/fFoUDbj28AHOGGW/N8wilgZ1eSlnreSRgcf/shY77+mK7AuCwfkBti+WSBSkOtCQ=="
+  },
+  "bin": "node_modules/@squilo/mcp/./dist/bin.js",
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-13T10:53:23.085Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "targets",
+      "description": "Lists the targets (groups of SQL Server databases) that `run` can read.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "databases",
+      "description": "Lists the databases of a target, with the columns its discovery query returns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "run",
+      "description": "Runs a JavaScript script that reads SQL Server databases through Squilo pipelines, and returns what the script returns. The code parameter describes the API.\nRead only: a batch with INSERT, UPDATE, DELETE, MERGE, DDL, EXEC, transaction statements or SELECT INTO a table is rejected, and each database runs inside a transaction that is rolled back. To write, use plan (when available).\nReturn only what answers the question, aggregated in the script: long output is truncated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Body of an async JavaScript function: plain JavaScript, no TypeScript syntax, no imports. In scope:\n- `target(name, { databases }?)` starts a pipeline on the databases of a target (all of them, or the listed ones):\n  `target(name).Retrieve(async (sql, database) => ...)`, then optionally `.Transform((data) => ...)`, then `.Output(strategy)`.\n  - `Retrieve` runs once per database, in parallel. `sql` is a tagged template that runs one T-SQL batch and resolves to the rows of its first result set; interpolated values are sent as parameters, so they cannot be table or column names. It only reads. `database` is `{ Database, ...other columns of the target's discovery query }`.\n  - `Transform` runs on each database's data.\n  - `Output` consumes the results of every database and resolves to what the strategy returns:\n    - `MergeOutputStrategy()`: `[errors, rows]`, every database's rows in one array (a non-array result is one row);\n    - `JsonOutputStrategy()`: `[errors, path]` of a JSON file with every database's result;\n    - `XlsOutputStrategy(combineSheets = false)`: `[errors, path]` of an Excel file, one sheet per database or all rows in one sheet;\n    - your own `async (results) => ...`, reading `{ database, data, error }` items with `for await`.\n  - `errors` is `[{ database, error }]`: a failing database does not fail the pipeline.\n- `inputs()` lists the files the user put in /tmp/.squilo/inputs; `input(name)` reads one: .json parsed, .csv as rows, .xlsx as `{ [sheet]: rows }`, anything else as text.\n\nCombine pipelines and inputs in JavaScript (await several targets, join, group, rank). Files are written to /tmp/.squilo/results: tell the user the path.\nTo learn a schema, query INFORMATION_SCHEMA on a single database (`{ databases: [\"Name\"] }`) before querying all of them.\n\nExample:\nconst [errors, rows] = await target(\"tenants\")\n  .Retrieve(async (sql, database) => {\n    const [row] = await sql`SELECT COUNT(*) AS Users FROM Users WHERE Active = ${1}`;\n    return { tenant: database.Database, users: row.Users };\n  })\n  .Output(MergeOutputStrategy());\nreturn { errors, top: rows.sort((a, b) => b.users - a.users).slice(0, 10) };"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "config",
+      "description": "Shows the Squilo config (/tmp/.squilo/config.json), passwords masked.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "save_config",
+      "description": "Replaces the Squilo config (servers and targets) and applies it right away. The previous file is kept as a .bak.\n\nBuild the config with the user: for each server ask the host and how to sign in, for each target ask which databases (a fixed list, or a discovery query in a management database that returns a [Database] column).\nSign-in:\n- Azure SQL with Entra ID: auth { kind: \"msal\", clientId, authority }. No secret: the browser opens on first use.\n- SQL login: auth { kind: \"userAndPassword\", user, passwordEnv } with the name of an environment variable the user sets (then restarts the app). A password typed in the chat stays in the conversation: use password only for local development servers, and say so.\nStart from the config tool's output to change an existing config: \"********\" keeps the saved password.\nAfter saving, call databases on each new target to test the connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "type": "object",
+            "properties": {
+              "servers": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "server": {
+                      "type": "string",
+                      "description": "Host name"
+                    },
+                    "auth": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "userAndPassword"
+                            },
+                            "user": {
+                              "type": "string"
+                            },
+                            "password": {
+                              "description": "Stored in plain text: only for local development servers",
+                              "type": "string"
+                            },
+                            "passwordEnv": {
+                              "description": "Name of the environment variable that holds the password",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "user"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "msal"
+                            },
+                            "clientId": {
+                              "type": "string",
+                              "description": "Entra ID app registration (client) id"
+                            },
+                            "authority": {
+                              "type": "string",
+                              "description": "https://login.microsoftonline.com/<tenant id>"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "clientId",
+                            "authority"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "server",
+                    "auth"
+                  ],
+                  "additionalProperties": {},
+                  "description": "Also takes mssql config options, e.g. port, requestTimeout, options: { encrypt, trustServerCertificate }"
+                }
+              },
+              "targets": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "server": {
+                      "type": "string",
+                      "description": "Key of a server in servers"
+                    },
+                    "description": {
+                      "description": "What the databases are, for whoever picks a target",
+                      "type": "string"
+                    },
+                    "databases": {
+                      "description": "A fixed list of databases. Set this or discover",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "discover": {
+                      "description": "Finds the databases with a query. Set this or databases",
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "string",
+                          "description": "Database the query runs in"
+                        },
+                        "query": {
+                          "type": "string",
+                          "description": "SELECT returning a [Database] column, plus any column scripts may use"
+                        }
+                      },
+                      "required": [
+                        "database",
+                        "query"
+                      ]
+                    },
+                    "concurrent": {
+                      "description": "How many databases run at once (all when omitted)",
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "timeout": {
+                      "description": "Per-database time limit in milliseconds",
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "allow": {
+                      "description": "Writes plan/apply may run: dml (INSERT, UPDATE, DELETE, MERGE), ddl (CREATE, ALTER, DROP, TRUNCATE, EXEC). Read only when omitted: ask the user before allowing writes",
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "dml",
+                          "ddl"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "server"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "servers",
+              "targets"
+            ]
+          }
+        },
+        "required": [
+          "config"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "squilo",
+    "version": "0.7.0-beta.3"
+  },
+  "protocolVersion": null,
+  "instructions": "Squilo reads SQL Server databases grouped in targets, and writes to them through plan and apply when the client can ask the user to confirm.\n1. targets lists the targets. With none, set them up with the user through save_config.\n2. databases lists the databases of a target. Before querying many databases, learn the schema with run on a single one (INFORMATION_SCHEMA).\n3. run reads with a JavaScript script of Squilo pipelines. Aggregate in the script and return only what answers the question.\n4. To write, plan a script that uses Execute, show the user the rows per database, then apply: the user confirms in a dialog.",
+  "durationMs": 2136,
+  "stderr": ""
+}
