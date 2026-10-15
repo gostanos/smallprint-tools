@@ -1,0 +1,1264 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "devbridge-mcp",
+  "version": "0.3.2",
+  "integrity": {
+    "dist": "sha512-KQk27SYvDg1k8wpc78aI6g+8dsCnAqH41PxjUDWIuslaZ0YIJu0A1TWhXKE5ytqxmREdFPE8yTIB2wsxhViPJw==",
+    "installed": "sha512-KQk27SYvDg1k8wpc78aI6g+8dsCnAqH41PxjUDWIuslaZ0YIJu0A1TWhXKE5ytqxmREdFPE8yTIB2wsxhViPJw=="
+  },
+  "bin": "node_modules/devbridge-mcp/dist/index.cjs",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-15T01:33:54.242Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "read_page",
+      "description": "Get an accessibility tree representation of elements on the page. Returns element references (ref_1, ref_2, etc.) that can be used with other tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "filter": {
+            "description": "Filter: \"interactive\" for buttons/links/inputs only, \"all\" for everything. Default: \"all\"",
+            "type": "string",
+            "enum": [
+              "interactive",
+              "all"
+            ]
+          },
+          "depth": {
+            "description": "Max tree depth. Default: 15",
+            "type": "number"
+          },
+          "ref_id": {
+            "description": "Focus on a specific element by ref ID",
+            "type": "string"
+          },
+          "max_chars": {
+            "description": "Max output characters. Default: 50000",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "javascript_exec",
+      "description": "Execute JavaScript code in the context of the current page. Returns the result of the last expression — simple expressions work directly (e.g. `document.title` → \"Example Page\"; `1 + 1` → 2; `{ a: 1, b: 2 }` → the object). Do NOT use top-level `return` statements. For multi-statement logic, wrap in an IIFE: `(() => { const x = 1; return x; })()`. Functions and non-serializable values fall back to their string description. Output is sanitized for secrets and truncated to ~50KB.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "JavaScript code to execute in the page context. The result of the last expression is returned. Do NOT use 'return' statements."
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "frameId": {
+            "description": "Target frame ID (omit or 0 for the main frame; positive integer for a sub-frame from read_page, e.g. 2 from `f2::ref_5`). Evaluating inside a cross-origin frame is supported and has no extra permission cost at runtime, but the code executes in the target frame's MAIN world — avoid relying on main-frame globals like `window.React` unless you know the frame also has them.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "text",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "read_console",
+      "description": "Read console messages from the page. Supports pattern filtering, error-only mode, and clearing. Auto-cleared on top-level navigation to a different hostname. Storage holds up to 10000 messages per tab (older messages are dropped).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "pattern": {
+            "description": "Regex pattern to filter messages",
+            "type": "string"
+          },
+          "onlyErrors": {
+            "description": "Only return error messages. Default: false",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Max messages to return. Default: 100",
+            "type": "number"
+          },
+          "clear": {
+            "description": "Clear messages after reading. Default: false",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "read_network",
+      "description": "**Tracking activates on the first call to this tool for a given tab** — requests fired before that first call are NOT retroactively captured. Call once at the start of any flow you want to inspect (e.g. before navigate / form_input), then call again later to read the buffer. Once activated, tracking persists across reloads/navigations until the tab closes — check trackingStartedAt in the response to know the coverage window. Reads network requests from the page using CDP (XHR, Fetch, etc.). Includes cross-origin requests. Auto-cleared on top-level navigation to a different hostname. Storage holds up to 1000 entries per tab (older entries are dropped). \n\n**Two modes (mutually exclusive):**\n- **Bulk mode** (no requestId): returns a request list. Pass `includeBody: true` to attach response bodies (default 10KB truncation per entry via bodyMaxBytes). Only XHR/Fetch/Document bodies are fetched by default. If total payload exceeds the ~1MB browser→host channel limit, the response is hard-truncated with an error message guiding you to use detail mode.\n- **Detail mode** (pass requestId): fetches the full body for a single request. Supports chunked retrieval via bodyOffset + bodyLength for large responses. Single chunk soft cap ~900KB; cumulative cap 10MB (bodies larger than 10MB should be fetched via javascript_exec instead). Returns responseBody (string or null), responseBodyTruncated, nextBodyOffset (null when complete), and responseBodySize. Non-binary responses are JSON.parse-attempted when fully returned in one chunk.\n\n**Error codes:** F1 body released by Chrome — retry immediately or use javascript_exec fetch. F2 body >10MB — use javascript_exec. F3 bulk payload budget exceeded — switch to detail mode per requestId. F4 cross-origin iframe (OOPIF) body — use javascript_exec with frameId.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "urlPattern": {
+            "description": "URL substring to filter requests (bulk mode only; mutually exclusive with requestId)",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max requests to return. Default: 100 (bulk mode only; mutually exclusive with requestId)",
+            "type": "number"
+          },
+          "clear": {
+            "description": "Clear requests after reading. Default: false (bulk mode only; mutually exclusive with requestId)",
+            "type": "boolean"
+          },
+          "includeBody": {
+            "description": "Include response body for each request in bulk mode. Bodies are truncated to bodyMaxBytes (default 10KB). Only XHR/Fetch/Document types are fetched by default; binary (base64) bodies are returned as-is. Mutually exclusive with requestId.",
+            "type": "boolean"
+          },
+          "bodyMaxBytes": {
+            "description": "Max bytes per response body in bulk includeBody mode. Default: 10240 (10KB). Mutually exclusive with requestId.",
+            "type": "number"
+          },
+          "bodyResourceTypes": {
+            "description": "Resource types to fetch body for in bulk mode. Default: [\"XHR\", \"Fetch\", \"Document\"]. Mutually exclusive with requestId.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requestId": {
+            "description": "Target a single request by its CDP requestId for detail mode. Returns full response body (up to ~900KB per chunk, 10MB cumulative cap). Mutually exclusive with urlPattern / limit / clear / includeBody / bodyMaxBytes.",
+            "type": "string"
+          },
+          "bodyOffset": {
+            "description": "Byte offset for chunked body retrieval in detail mode (default: 0). Use nextBodyOffset from the previous response to iterate through large bodies.",
+            "type": "number"
+          },
+          "bodyLength": {
+            "description": "Max bytes to return in detail mode per call (default: ~900KB soft cap). Use with bodyOffset for chunked retrieval of large bodies.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "computer",
+      "description": "Perform browser actions. Uses CDP for precise input simulation. Action groups: (1) page interaction — left_click, right_click, double_click, triple_click, type, screenshot, wait, scroll, key, left_click_drag, zoom (crops region=[x0,y0,x1,y1], returns 2× JPEG), scroll_to, hover. Operates on DOM elements via ref/selector/coordinate. (2) canvas_* family — canvas_screenshot, canvas_click, canvas_drag, canvas_draw_path, canvas_gesture, canvas_scroll, canvas_hover, canvas_keypress, canvas_pixel, canvas_pixel_bulk, canvas_hit_test, canvas_record. Operates on `<canvas>` internals via canvasX/canvasY (bitmap pixels by default; set coordinateSpace=\"css\" for CSS pixels) plus dedicated params (pointerType, pressure, gestureKind, points, ...). Use these for chart/game/whiteboard canvases when DOM refs are insufficient. Keyboard: `key` accepts named keys, single characters, punctuation, and chords with modifiers — e.g. \"Enter\", \"ctrl+/\", \"ctrl+-\", \"meta+a\", \"shift+Tab\", \"ctrl+shift+[\"; modifier aliases option/opt→alt and super/win/windows→meta are accepted, unrecognized modifiers raise an error. `type` inserts text directly and bypasses the IME (CJK is committed literally, not intercepted); pass `submit:true` to press a real Enter after inserting (for search boxes / React inputs that enable their submit button or autocomplete only on a key event) — omit it and behavior is insert-only as before. `left_click_drag` accepts `modifiers` (e.g. \"shift\") held for the entire drag (press→move→release), for shift-select / modifier-drag; and `path` ([[x1,y1],...]) for intermediate waypoints — use when a straight line would trigger unintended reorders (e.g. cross-container SortableJS: path=[[exitX,targetY]], end=[targetX,targetY] where targetY is the desired insertion row in the target list — the cursor y when entering the target container determines the drop position, not just the release point). Page-interaction target resolution (priority order): `ref` (preferred when `read_page` has been called): DOM-truth, supports closed shadow. `selector` (preferred when user provides a CSS selector explicitly, e.g. \"#submit\"): saves a `read_page` roundtrip; supports open shadow piercing; main frame by default — use `frameId` for sub-frames. `coordinate` (fallback for image regions / pixel-level targets on non-canvas content; for `<canvas>` content use the canvas_* family instead).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "left_click",
+              "right_click",
+              "double_click",
+              "triple_click",
+              "type",
+              "screenshot",
+              "wait",
+              "scroll",
+              "key",
+              "left_click_drag",
+              "zoom",
+              "scroll_to",
+              "hover",
+              "canvas_screenshot",
+              "canvas_click",
+              "canvas_drag",
+              "canvas_draw_path",
+              "canvas_gesture",
+              "canvas_scroll",
+              "canvas_hover",
+              "canvas_keypress",
+              "canvas_pixel",
+              "canvas_pixel_bulk",
+              "canvas_hit_test",
+              "canvas_record"
+            ],
+            "description": "The action to perform"
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "coordinate": {
+            "description": "[x, y] pixel coordinates",
+            "minItems": 2,
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "text": {
+            "description": "Text to type or key(s) to press",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Element ref from read_page (preferred over coordinate for clickable targets). REQUIRED for all canvas_* actions — they only accept ref (the canvas element), not selector/coordinate.",
+            "type": "string"
+          },
+          "selector": {
+            "description": "CSS selector targeting a single element (alternative to ref/coordinate). Supports open shadow piercing; main frame by default — use frameId for sub-frames. Strict mode: multi-match requires selectorIndex. Closed shadow elements require ref instead. Max 1024 chars.",
+            "type": "string"
+          },
+          "selectorIndex": {
+            "description": "Disambiguator (0-indexed) when selector matches multiple elements. Out-of-range raises a [selector] error (no silent clamp).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "start_selector": {
+            "description": "CSS selector for left_click_drag start point (paired with selector or coordinate as end). Same constraints as selector.",
+            "type": "string"
+          },
+          "modifiers": {
+            "description": "Modifier keys held during the action: \"ctrl\", \"shift\", \"alt\", \"cmd\" (aliases: \"control\", \"command\", \"meta\", \"option\"/\"opt\"→alt, \"super\"/\"win\"/\"windows\"→meta), combinable with \"+\" (e.g. \"shift+alt\"). Applies to click actions (left_click/right_click/double_click/triple_click) and to left_click_drag (held for the entire drag). An unrecognized modifier raises an error.",
+            "type": "string"
+          },
+          "submit": {
+            "description": "For action \"type\" only: when true, dispatch a real Enter keydown/keyup after inserting the text (to trigger search buttons / autocomplete that listen for key events). Defaults to false; when omitted the behavior is identical to today (insertText only, no key event).",
+            "type": "boolean"
+          },
+          "scroll_direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right"
+            ]
+          },
+          "scroll_amount": {
+            "description": "Scroll ticks 1-10, default 3",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "duration": {
+            "description": "Wait seconds for wait action",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 30
+          },
+          "start_coordinate": {
+            "description": "Start position for drag",
+            "minItems": 2,
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "path": {
+            "description": "Optional intermediate waypoints for left_click_drag, as [[x1,y1],[x2,y2],...]. The drag moves: mousePressed @ start → through each waypoint → mouseReleased @ end. Use when a direct line would unintentionally trigger elements along the route (e.g. cross-container SortableJS drag: exit the source container horizontally before moving to the target). IMPORTANT for insertion accuracy: most drag libraries (SortableJS, react-dnd) determine the drop position from where the cursor is when it enters the target container — not just the final release point. To control exactly where the item is inserted, set the waypoint y (and the end coordinate y) to the desired insertion position in the target list, not the source element y. Example: dragging from source list item at (200,300) to insert above item at (700,450) in target list → path=[[500,450]], coordinate=[700,450]. This ensures the cursor enters the target container at y=450, placing the item there.",
+            "type": "array",
+            "items": {
+              "minItems": 2,
+              "maxItems": 2,
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "frameId": {
+            "description": "Target frame ID for selector resolve (omit or 0 for the main frame; positive integer for a sub-frame from read_page, e.g. 2 from \"f2::ref_5\"). When frameId > 0, the resolved coordinate is accumulated to top-level viewport via the iframe ancestor chain. Has no effect on ref / coordinate paths (ref carries its own frame prefix; coordinate is always top-level).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "region": {
+            "description": "[x0,y0,x1,y1] viewport CSS coordinates for zoom; crops this region and returns a 2× scaled JPEG screenshot",
+            "minItems": 4,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "repeat": {
+            "description": "Key repeat count (applies to both action \"key\" and action \"canvas_keypress\")",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "downscale": {
+            "description": "canvas_screenshot: downscale large canvases to ≤2MP. Default true",
+            "type": "boolean"
+          },
+          "maxPx": {
+            "description": "canvas_screenshot: explicit pixel cap, clamped to [100000, 8000000]",
+            "type": "number"
+          },
+          "canvasX": {
+            "description": "canvas_click/drag/draw_path/hover/scroll/pixel: bitmap-pixel X inside canvas. Used with canvas_* actions.",
+            "type": "number"
+          },
+          "canvasY": {
+            "description": "canvas_click/drag/draw_path/hover/scroll/pixel: bitmap-pixel Y inside canvas. Used with canvas_* actions.",
+            "type": "number"
+          },
+          "canvasNormalizedX": {
+            "description": "canvas_click/hover: 0..1 normalized X (alternative to canvasX). LLM rough visual targeting.",
+            "type": "number"
+          },
+          "canvasNormalizedY": {
+            "description": "canvas_click/hover: 0..1 normalized Y (alternative to canvasY).",
+            "type": "number"
+          },
+          "coordinateSpace": {
+            "description": "canvas_*: coordinate space. \"bitmap\" (default) = canvas.width/height pixels, \"css\" = CSS pixels",
+            "type": "string",
+            "enum": [
+              "bitmap",
+              "css"
+            ]
+          },
+          "pointerType": {
+            "description": "canvas_click/drag/draw_path/hover: \"mouse\" (default) | \"pen\" | \"touch\" (touch routes via Input.dispatchTouchEvent).",
+            "type": "string",
+            "enum": [
+              "mouse",
+              "pen",
+              "touch"
+            ]
+          },
+          "pressure": {
+            "description": "canvas_click with pointerType=pen: 0..1 pressure value",
+            "type": "number"
+          },
+          "useTouch": {
+            "description": "canvas_click/drag/draw_path: shortcut for pointerType=touch (legacy alias)",
+            "type": "boolean"
+          },
+          "fromX": {
+            "description": "canvas_drag: start X (in coordinateSpace units)",
+            "type": "number"
+          },
+          "fromY": {
+            "description": "canvas_drag: start Y",
+            "type": "number"
+          },
+          "toX": {
+            "description": "canvas_drag: end X",
+            "type": "number"
+          },
+          "toY": {
+            "description": "canvas_drag: end Y",
+            "type": "number"
+          },
+          "steps": {
+            "description": "canvas_drag: number of mouseMoved interpolation steps (default 10, clamped [2,100])",
+            "type": "number"
+          },
+          "holdMs": {
+            "description": "canvas_drag: hold duration before release (ms)",
+            "type": "number"
+          },
+          "points": {
+            "description": "canvas_draw_path: ordered [[x,y],...] points, max 500. canvas_pixel_bulk: max 1000.",
+            "type": "array",
+            "items": {
+              "minItems": 2,
+              "maxItems": 2,
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "pressureCurve": {
+            "description": "canvas_draw_path: per-point pressure curve (parallel to points)",
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "gestureKind": {
+            "description": "canvas_gesture: type of gesture. (Backwards-compatible alias `kind` also accepted in service-worker.)",
+            "type": "string",
+            "enum": [
+              "pinch",
+              "rotate",
+              "swipe"
+            ]
+          },
+          "centerX": {
+            "description": "canvas_gesture: center X (canvas-internal coordinate)",
+            "type": "number"
+          },
+          "centerY": {
+            "description": "canvas_gesture: center Y",
+            "type": "number"
+          },
+          "pinchScale": {
+            "description": "canvas_gesture pinch: scale ratio. >1 spread, <1 pinch",
+            "type": "number"
+          },
+          "rotateDeg": {
+            "description": "canvas_gesture rotate: rotation in degrees",
+            "type": "number"
+          },
+          "swipeDirection": {
+            "description": "canvas_gesture swipe: convenience direction (alternative to dx/dy)",
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right"
+            ]
+          },
+          "dx": {
+            "description": "canvas_gesture swipe / canvas_scroll: delta X",
+            "type": "number"
+          },
+          "dy": {
+            "description": "canvas_gesture swipe / canvas_scroll: delta Y",
+            "type": "number"
+          },
+          "durationMs": {
+            "description": "canvas_gesture: total duration ms (default 300, clamped [50, 5000])",
+            "type": "number"
+          },
+          "frames": {
+            "description": "canvas_gesture: frame count (default 12, clamped [2, 60])",
+            "type": "number"
+          },
+          "deltaX": {
+            "description": "canvas_scroll: wheel deltaX",
+            "type": "number"
+          },
+          "deltaY": {
+            "description": "canvas_scroll: wheel deltaY",
+            "type": "number"
+          },
+          "keys": {
+            "description": "canvas_keypress: keys to press, space-separated chords (e.g. \"v\" or \"ctrl+z\" or \"Escape\").",
+            "type": "string"
+          },
+          "restoreFocus": {
+            "description": "canvas_keypress: restore canvas tabIndex to original after press (default true)",
+            "type": "boolean"
+          },
+          "w": {
+            "description": "canvas_pixel: width of pixel region (default 1)",
+            "type": "number"
+          },
+          "h": {
+            "description": "canvas_pixel: height of pixel region (default 1)",
+            "type": "number"
+          },
+          "imageDataWidth": {
+            "description": "canvas_pixel: explicit raw imageData width override (advanced)",
+            "type": "number"
+          },
+          "imageDataHeight": {
+            "description": "canvas_pixel: explicit raw imageData height override (advanced)",
+            "type": "number"
+          },
+          "library": {
+            "description": "canvas_hit_test: which adapter to use (\"auto\" = first detected). Default \"auto\"",
+            "type": "string",
+            "enum": [
+              "auto",
+              "chartjs",
+              "echarts",
+              "fabric",
+              "konva"
+            ]
+          },
+          "recordDurationMs": {
+            "description": "canvas_record: record duration in ms",
+            "type": "number"
+          },
+          "recordFps": {
+            "description": "canvas_record: frames per second (default 8, clamped [1, 30])",
+            "type": "number"
+          }
+        },
+        "required": [
+          "action",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "screenshot",
+      "description": "Take a screenshot of the current page. Returns the image plus an imageId that can be passed to upload_image.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "navigate",
+      "description": "Navigate to a URL or use \"back\"/\"forward\" for history navigation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to navigate to. Use \"forward\" or \"back\" for history navigation. Only http(s) URLs are allowed; non-http(s) protocols (file://, javascript:, data:, about:, ftp:, ...) will be rejected."
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "force": {
+            "description": "If the page shows a \"Leave site?\" dialog because of unsaved changes, discard those changes and navigate anyway. Defaults to false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "get_page_text",
+      "description": "Extract the text content of the page as plain text (no HTML), prioritizing article/main content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "max_chars": {
+            "description": "Maximum characters for output. Default: 50000",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "find",
+      "description": "Search for elements on the page by text content, aria-label, placeholder, or role (with keyword synonym expansion). Returns up to 20 matching element refs. Broad keywords may also match ancestor containers (e.g. <body>) whose text contains the query — when several refs come back, confirm the interactive one with read_page before acting.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Text to search for in page elements (searches text content, aria-label, placeholder, role)"
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          }
+        },
+        "required": [
+          "query",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "form_input",
+      "description": "Set the value of a form element (input, textarea, select, checkbox, contenteditable) by ref. For rich text editors with their own data model (Notion, Slate, ProseMirror, Lexical), prefer `computer.click` + `computer.type` instead — `form_input` only sets the DOM directly, which the editor may revert on its next render.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Element ref from read_page or find"
+          },
+          "value": {
+            "description": "Value to set. String for text inputs, boolean for checkboxes, number for numeric inputs.",
+            "type": [
+              "string",
+              "boolean",
+              "number"
+            ]
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          }
+        },
+        "required": [
+          "ref",
+          "value",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "resize_window",
+      "description": "Resize the browser window containing the specified tab. Resizing after a screenshot may invalidate coordinates captured earlier — re-screenshot before using coordinate-based actions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "width": {
+            "type": "number",
+            "description": "Window width in pixels"
+          },
+          "height": {
+            "type": "number",
+            "description": "Window height in pixels"
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "tabs_close",
+      "description": "Close a tab by tab ID. If the tab is not closeable in the current workspace the call returns an error — read the error message for the reason.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "sessionId": {
+            "description": "MCP session ID. Defaults to 'default'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "tabs_create",
+      "description": "Open a new tab in the current workspace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "description": "MCP session ID. Defaults to 'default'. Tab will be added to this session's tab group.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "upload_image",
+      "description": "Upload a previously captured screenshot (by imageId, as returned by the screenshot tool) to a file input element on the page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "imageId": {
+            "type": "string",
+            "description": "ID of a previously captured screenshot"
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "ref": {
+            "description": "File input element ref",
+            "type": "string"
+          },
+          "coordinate": {
+            "description": "[x, y] drop coordinates",
+            "minItems": 2,
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "filename": {
+            "description": "Filename for the uploaded image. Default: image.png",
+            "type": "string"
+          }
+        },
+        "required": [
+          "imageId",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "gif_creator",
+      "description": "Record browser actions as an animated GIF. Start recording, perform actions, then export. Frame buffer is a rolling window — at most the most recent 120 frames are retained; long or high-FPS recordings simply drop older frames (no error is raised). Export runs gif.js in an offscreen document with a 60-second encoding timeout; if export times out, segment long sessions: stop_recording → export sooner, then start_recording again for the next segment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start_recording",
+              "stop_recording",
+              "export",
+              "clear"
+            ],
+            "description": "GIF recording action"
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "filename": {
+            "description": "Filename for exported GIF",
+            "type": "string"
+          },
+          "download": {
+            "description": "Whether to trigger a browser download",
+            "type": "boolean"
+          },
+          "options": {
+            "description": "GIF generation options",
+            "type": "object",
+            "properties": {
+              "showClickIndicators": {
+                "description": "Overlay click ripples on captured frames. Default: true",
+                "type": "boolean"
+              },
+              "showDragPaths": {
+                "description": "Draw drag trajectories as overlays. Default: true",
+                "type": "boolean"
+              },
+              "showActionLabels": {
+                "description": "Render textual action labels on each frame. Default: true",
+                "type": "boolean"
+              },
+              "showProgressBar": {
+                "description": "Render a progress bar across the bottom of each frame. Default: false",
+                "type": "boolean"
+              },
+              "showWatermark": {
+                "description": "Stamp a corner watermark on each frame. Default: false",
+                "type": "boolean"
+              },
+              "quality": {
+                "description": "GIF encoding quality. Lower is better; typical 1-30. Default: 10",
+                "type": "number"
+              }
+            }
+          }
+        },
+        "required": [
+          "action",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "tabs_context",
+      "description": "List the tabs available in the current workspace, including their IDs for use with other tools. Set createIfEmpty=true to open a new window with a blank tab if no tabs are available. Each tab includes debuggerAttached (devbridge|other|none|unknown): 'other' means another extension or DevTools holds the debugger — tab-level CDP tools (cdp_command/read_network/cdp_subscribe) will fail there; disable the conflicting extension (look it up by debuggerAttachedBy id at chrome://extensions) or pick a 'none'/'devbridge' tab. An 'other' tab may also carry maybeSelfStale: true — a heuristic hint that this is most likely DevBridge's own zombie session left over after a service-worker restart (not a real conflict). Just issue a tab-level CDP call: it usually recovers the session transparently with no user action needed; if it instead errors, the tab really is held by another extension.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "createIfEmpty": {
+            "description": "If no tabs are available in the workspace, open a new window with a blank tab. Default: false.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "file_upload",
+      "description": "Upload local filesystem files to a file input element on the page using CDP DOM.setFileInputFiles.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Absolute paths to files to upload. Can be single or multiple files."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Element reference ID of the file input (e.g., \"ref_1\")."
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          }
+        },
+        "required": [
+          "paths",
+          "ref",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "reset_session",
+      "description": "Reset MCP session boundary: clear per-turn permission grants (turnApprovedDomains), hide all visual indicators, drain in-flight requests (≤5s) + 50ms IPC flush buffer, then reconnect the native host. Call when starting a new AI debugging session or when permission/indicator state may be stale.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "cdp_command",
+      "description": "Execute any CDP method (escape hatch); prefer dedicated tools first. _help lists domains; {domain:'X'} methods; {method:'X.y'} returns the full parameter signature (name, type, optional) + docUrl — no external doc fetch needed. Names are PascalCase.camelCase; tabId required. ⚠️ Browser.*/Target.* are NOT callable via the tab debugger; use extension_call or pass cdpSessionId from Target.attachToBrowserTarget. Fetch.*/Debugger.enable are sticky. If a call reports 'attached by another extension', a debugger-using extension (DevTools / Recorder / another AI assistant) holds the tab — disable it, then reset_session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "CDP method name in camelCase (e.g. \"Fetch.enable\", \"Network.getCookies\"). Pass \"_help\" with no other args to list domains; \"_help\" with `{ domain }` lists methods; \"_help\" with `{ method }` returns the full parameter signature (name, type, optional) plus docUrl — no need to fetch external docs. CDP names are camelCase — \"Fetch.Enable\" is wrong. Note: \"Target.getTargets\" is a special case — it does not require tabId and will be handled directly via chrome.debugger.getTargets()."
+          },
+          "params": {
+            "description": "Parameters object for the CDP method (passes through verbatim).",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "cdpSessionId": {
+            "description": "Optional CDP session ID for OOPIF / sub-target routing (from Target.attachToBrowserTarget etc.). Omit for the main target. Distinct from the internal routing sessionId.",
+            "type": "string"
+          },
+          "timeoutMs": {
+            "description": "Per-call timeout in ms (max 30000). On timeout the debugger is automatically detached and an error is thrown — re-issue the command after re-attaching.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 30000
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "cdp_subscribe",
+      "description": "⚠️ For AI-automated flows, prefer cdp_events_read (always-on ring buffer). Subscribe to CDP events for N ms (max 25000). tabId is REQUIRED (from tabs_context). Suits Fetch.requestPaused / Debugger.paused / dialog flows. Two-step (MUST be separate, non-parallel tool calls): (1) cdp_subscribe FIRST to arm it; (2) in a LATER call trigger the action. This call BLOCKS until its window closes, so a trigger issued in the same call/batch only runs after capture has ended and is always missed — for AI-driven triggers, use cdp_events_read. Pass `until` for early-exit. Returns { events, durationMs }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "type": "string",
+            "description": "CDP event name (e.g. \"Fetch.requestPaused\", \"Page.javascriptDialogOpening\"). The matching domain must be enabled (e.g. call cdp_command('Fetch.enable', ...) first). ⚠️ Pre-arm before triggering: subscribe first, then perform the action that produces the event."
+          },
+          "durationMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 25000,
+            "description": "Subscription window in ms (max 25000 to stay under SW 30s idle reclaim)."
+          },
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "cdpSessionId": {
+            "description": "Optional CDP session ID for OOPIF / sub-target filtering (from Target.attachToBrowserTarget etc.). Omit for the main target. Distinct from the internal routing sessionId.",
+            "type": "string"
+          },
+          "until": {
+            "type": "object",
+            "properties": {
+              "firstMatch": {
+                "description": "Return as soon as any event arrives.",
+                "type": "boolean"
+              },
+              "matchArgs": {
+                "description": "Subset deep-match against the first listener arg / CDP params (lodash _.isMatch semantics). Example: { state: { current: \"complete\" } } matches { id, state: { current: \"complete\", ... } }. Example 2 (chrome.tabs.onUpdated): { status: \"complete\" } matches when changeInfo arg has status===complete. Does not support predicate functions / regex / wildcards in v1.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "count": {
+                "description": "Return after collecting N matching events. Default: 1.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "matchEvent": {
+                "description": "Return when an event with this CDP method name fires (use with multi-event subscriptions).",
+                "type": "string"
+              }
+            },
+            "description": "Optional early-exit predicate; subscription resolves immediately on match instead of waiting for durationMs."
+          }
+        },
+        "required": [
+          "event",
+          "durationMs",
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "extension_call",
+      "description": "Call chrome.<namespace>.<method>(...args) via structured RPC (escape hatch). Path format: 'storage.local.get'. extension_call('_help') lists allowed namespaces + method/event names with full parameter signatures (name, type, optional) + docUrl — no external doc fetch needed. Blocked (v1): debugger (use cdp_command), enterprise, identity, management, nativeMessaging. Args is an array of method params; returns the result. Void methods → { success: true, void: true }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "Path \"<namespace>.<method>\" (omit `chrome.` prefix), e.g. \"storage.local.get\", \"cookies.getAll\". Pass \"_help\" with no args to list allowed namespaces; \"_help\" with `{ namespace }` lists methods/events."
+          },
+          "args": {
+            "description": "Positional arguments passed verbatim to the chrome.* method. Default: [].",
+            "type": "array",
+            "items": {}
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "extension_subscribe",
+      "description": "⚠️ MUST be a separate, non-parallel call placed BEFORE the trigger — this call BLOCKS until its window closes, so a same-turn/parallel trigger only runs after capture has ended and is always missed; for AI-automated flows use extension_events_read instead. Subscribe to chrome.<namespace>.<event>.addListener for N ms (max 25000). Path format: 'tabs.onUpdated'. Same namespace whitelist as extension_call. Pass `until` for early-exit; optional tabFilter keeps only events whose first arg matches a tabId. Returns { events:[{ args, timestamp }], durationMs, truncated? }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "type": "string",
+            "description": "⚠️ Subscribe BEFORE triggering the event — chrome.* events do not replay. Path \"<namespace>.<event>\" (omit `chrome.` prefix), e.g. \"downloads.onChanged\", \"tabs.onUpdated\". Same namespace whitelist as extension_call."
+          },
+          "durationMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 25000,
+            "description": "Subscription window in ms (max 25000 to stay under SW 30s idle reclaim)."
+          },
+          "tabFilter": {
+            "description": "Optional tabId filter. Events whose first listener arg equals tabFilter are kept; others are dropped early. Useful for chrome.tabs.* events that take (tabId, ...) signatures.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "until": {
+            "type": "object",
+            "properties": {
+              "firstMatch": {
+                "description": "Return as soon as any event arrives.",
+                "type": "boolean"
+              },
+              "matchArgs": {
+                "description": "Subset deep-match against the first listener arg / CDP params (lodash _.isMatch semantics). Example: { state: { current: \"complete\" } } matches { id, state: { current: \"complete\", ... } }. Example 2 (chrome.tabs.onUpdated): { status: \"complete\" } matches when changeInfo arg has status===complete. Does not support predicate functions / regex / wildcards in v1.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "count": {
+                "description": "Return after collecting N matching events. Default: 1.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false,
+            "description": "Optional early-exit predicate; subscription resolves immediately on match instead of waiting for durationMs."
+          }
+        },
+        "required": [
+          "event",
+          "durationMs"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "cdp_events_read",
+      "description": "Read CDP events from the always-on ring buffer (per-tab, per-method, 500 events/method). No subscribe step needed — events are captured once the DevBridge debugger is attached to the tab. If another extension holds the debugger (or it was never attached), the buffer is empty; call screenshot or any attaching tool first to ensure attachment. Use `since` cursor for incremental reads: first call returns nextSince, next call passes it as since. Returns { events:[{ method, params, timestamp }], nextSince, truncated?, droppedCount? }. Caveat: cross-document navigation auto-detaches the debugger and clears this buffer — use cdp_subscribe for navigate-triggered events. For user-initiated browser actions (dialogs, downloads) where you need to react while the action is pending, cdp_subscribe is still appropriate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "event": {
+            "description": "CDP method name filter, e.g. 'Page.loadEventFired'. Omit to return all methods.",
+            "type": "string"
+          },
+          "since": {
+            "description": "Timestamp cursor (ms). Return only events with timestamp > since. Omit to return all buffered events.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "description": "Max events to return. Default: 200, max: 500.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 500
+          },
+          "clear": {
+            "description": "Clear matched entries from buffer after reading. Default: false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "extension_events_read",
+      "description": "⚠️ CALL THIS ONCE BEFORE triggering any action you want to monitor — the listener is LAZILY registered on first read, so events before the first call are NOT captured. Then perform actions, then call again with since to read them. Reads chrome.* events from a ring buffer (global, per-event, 500 events/key). Use since cursor for incremental reads; tabFilter to limit to a tab. Returns { events:[{ args, timestamp }], nextSince, truncated?, droppedCount? }. For user-initiated browser actions where you need to react while the action is pending, extension_subscribe is still appropriate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "type": "string",
+            "description": "chrome.* event path, e.g. 'tabs.onUpdated'. Listener is lazily registered on first read — events before this call are NOT captured."
+          },
+          "since": {
+            "description": "Timestamp cursor (ms). Return only events with timestamp > since. Omit to return all buffered events.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "description": "Max events to return. Default: 200, max: 500.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 500
+          },
+          "tabFilter": {
+            "description": "Keep only events whose first arg matches this tabId (e.g. chrome.tabs.* events).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "clear": {
+            "description": "Clear matched entries from buffer after reading. Default: false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "read_realtime",
+      "description": "Read realtime streaming events (WebSocket frames + SSE events) tracked via CDP. Complements read_network: shares CDP requestId so you can pivot between request metadata and live frame/event flow. Tracking is always-on (no first-call activation). Storage: up to 50 connections per tab, 5000 events per connection (ring buffer), closed connections retained 5 min then evicted.\n\n**Two modes (mutually exclusive):**\n- **Bulk mode** (no requestId): lists active WS + SSE connections with metadata (state, lastEventAt, eventCountSinceLastRead) and a preview of the most recent 5 events each. Filter via `protocol` and `urlPattern`; `limit` caps connection count; `clear` drops closed connections after read.\n- **Detail mode** (pass requestId): full event sequence for a single connection. Use `since` (ms timestamp cursor) for incremental tail-f style reads, `eventLimit` to cap per-call event count, `includeBinary:true` to include base64 of WS binary frames in `dataBase64`. Response is sliced by BODY_CHUNK_SOFT_CAP (~900KB) on event boundaries; returns `nextSince` cursor when more events remain.\n\n**Error codes:** all prefixed `[read_realtime]`. PROTOCOL_MISMATCH when requestId kind disagrees with protocol filter. CONNECTION_NOT_FOUND / CONNECTION_EVICTED for stale or closed connections. MUTEX_BULK_PARAMS / MUTEX_INCLUDE_BINARY / MUTEX_SINCE when bulk-only and detail-only params are mixed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "number",
+            "description": "Tab ID. Get available IDs from tabs_context."
+          },
+          "protocol": {
+            "description": "Filter by protocol. Default: 'all'. Use 'websocket' for WS frames only, 'sse' for SSE events only.",
+            "type": "string",
+            "enum": [
+              "websocket",
+              "sse",
+              "all"
+            ]
+          },
+          "urlPattern": {
+            "description": "URL substring filter (bulk mode only; mutually exclusive with requestId).",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max connections to return in bulk mode. Default: 100, max 500. (bulk mode only)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 500
+          },
+          "clear": {
+            "description": "Clear ALL closed connections from buffer after read (NOT filtered by urlPattern). Active connections preserved. Default: false. (bulk mode only)",
+            "type": "boolean"
+          },
+          "requestId": {
+            "description": "Target a single connection by CDP requestId for detail mode. Mutually exclusive with urlPattern/limit/clear.",
+            "type": "string"
+          },
+          "since": {
+            "description": "Timestamp (ms) cursor for incremental detail read. Use nextSince from previous response. (detail mode only)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "eventLimit": {
+            "description": "Max events per detail call. Default: 100, max 5000. (detail mode only)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 5000
+          },
+          "includeBinary": {
+            "description": "Include base64 of binary WS frames in dataBase64 field. Default: false. (detail mode only)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tabId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "devbridge",
+    "version": "0.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 7369,
+  "stderr": "[Hub] manifest installed, please reload Chrome Extension to activate DevBridge\n[Hub] state: idle → acquiring_lock (pid=1)\n[Hub] state: acquiring_lock → hosting (pid=1)\n2026-10-15T01:34:01.435Z [error] [mcp] [DevBridge] MCP server started (stdio)\n[Hub] stdin closed, stopping host\n[Hub] state: hosting → releasing (pid=1)\n[Hub] state: hosting → terminated (pid=1)\n"
+}

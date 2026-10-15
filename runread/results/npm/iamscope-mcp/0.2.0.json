@@ -1,0 +1,393 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "iamscope-mcp",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha512-SAqH5y9HLAr27MhLUROUQN0Md7ay9tNoewWcRylU6VYh4rsEUSarMczFFcz9Tlq6YLoUqWKlRLduDuK689nurA==",
+    "installed": "sha512-SAqH5y9HLAr27MhLUROUQN0Md7ay9tNoewWcRylU6VYh4rsEUSarMczFFcz9Tlq6YLoUqWKlRLduDuK689nurA=="
+  },
+  "bin": "node_modules/iamscope-mcp/dist/server.mjs",
+  "main": "dist/server.mjs",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-15T03:47:19.869Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "search_roles",
+      "description": "Busca por termo entre as 4.640 roles das seis plataformas (Entra ID, Azure RBAC, AWS IAM, GCP IAM, Google Workspace, IBM Cloud). Aceita a tarefa em linguagem natural — \"resetar senha sem dar global admin\", \"kubernetes sem billing\" — e entende exclusão (\"sem\", \"não quero\") e escopo de plataforma (\"no Azure\"). NÃO é busca semântica: não há modelo nem embedding, é BM25F sobre nome, descrição e permissões. Devolve um \"plan\" com os termos que entendeu e o que não casou — leia-o antes de concluir que algo não existe. Use esta ferramenta antes de citar qualquer nome de role.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A tarefa em linguagem natural, ou o termo. Português ou inglês."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "all",
+              "entraId",
+              "azureRbac",
+              "aws",
+              "gcp",
+              "googleWorkspace",
+              "ibmCloud"
+            ],
+            "default": "all",
+            "description": "Restringe a uma plataforma. Deixe \"all\" — a busca deduz o escopo do próprio texto."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "Máximo de resultados."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_permissions",
+      "description": "Dada uma permissão, devolve as roles/policies que a concedem — e as que a NEGAM explicitamente. Cobre AWS IAM actions, permissões do GCP, role actions do Entra ID e privilégios do Google Workspace. Expande wildcard quando o texto parece uma action completa: buscar \"iam:CreateUser\" encontra a AdministratorAccess, que concede \"*\". O campo deniedBy é o mais acionável do retorno — uma policy que nega a action responde à pergunta tanto quanto uma que concede. Azure RBAC fica de fora deste índice: as permissões dele vivem em arquivos separados que não entram neste pacote.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "permission": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A permissão. Ex.: \"iam:CreateUser\", \"storage.buckets.delete\", \"listKeys\"."
+          },
+          "limitPerCloud": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "Teto por nuvem, para uma não afogar as outras."
+          },
+          "includeWildcard": {
+            "type": "boolean",
+            "default": true,
+            "description": "Expandir padrões com \"*\". Só age quando o texto parece uma action completa."
+          }
+        },
+        "required": [
+          "permission"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compare_equivalent_roles",
+      "description": "Dada uma função administrativa — ou uma role concreta de qualquer plataforma — devolve a role equivalente em cada uma das seis nuvens, com risco, permissões-chave e mitigações. 29 funções mapeadas. É a resposta para \"qual o equivalente a Owner no GCP\" ou \"quem é o Global Administrator na AWS\". O mapeamento inteiro é curadoria do IAM Scope: os provedores não publicam correspondência entre si, e a equivalência é aproximada por desenho — os modelos de permissão não são isomórficos.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Função (\"global admin\", \"billing\"), ou uma role concreta (\"Owner\", \"Global Administrator\", \"AdministratorAccess\")."
+          },
+          "clouds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "entraId",
+                "azureRbac",
+                "aws",
+                "gcp",
+                "googleWorkspace",
+                "ibmCloud"
+              ]
+            },
+            "description": "Restringe as nuvens do retorno. Omita para receber as seis."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_role_conflicts",
+      "description": "Todas as regras de segregação de funções (SoD) em que a role aparece. 190 regras curadas em cinco plataformas, com severidade e frameworks (SOX, ISO 27001, PCI-DSS, LGPD/GDPR). Nome que não existe no catálogo devolve ERRO, não lista vazia — \"nenhum conflito\" sobre uma role inventada é um atestado de saúde falso. NENHUMA regra cruza provedores: acumular AdministratorAccess na AWS e Global Administrator no Entra ID é fato de governança, não conflito de segregação. As regras e as severidades são curadoria do IAM Scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Nome exato da role/policy, como aparece na plataforma."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "entra-id",
+              "azure-rbac",
+              "aws",
+              "gcp",
+              "google-workspace"
+            ],
+            "description": "Plataforma da role. IBM Cloud está fora do escopo de SoD por decisão de produto."
+          }
+        },
+        "required": [
+          "role",
+          "platform"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "evaluate_user_roles",
+      "description": "Cruza todos os pares de uma lista de roles contra as 190 regras de SoD e devolve o nível de risco. Roles que não resolvem saem em rolesNotFound e SUSPENDEM o veredito: um \"aprovado\" calculado sobre nomes que não existem não é uma avaliação. Se a lista misturar provedores, lembre na resposta que nenhuma regra cruza entre eles.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 200,
+            "description": "Nomes das roles atribuídas ao usuário."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "microsoft",
+              "aws",
+              "google",
+              "entra-id",
+              "azure-rbac",
+              "aws",
+              "gcp",
+              "google-workspace"
+            ],
+            "default": "all",
+            "description": "Restringe a resolução a um provedor ou plataforma."
+          }
+        },
+        "required": [
+          "roles"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "evaluate_role_json",
+      "description": "Recebe o JSON de uma role/policy exportado de qualquer uma das seis plataformas, detecta a nuvem sozinho, e devolve a classificação de risco cruzando com o catálogo. Aceita a resposta bruta da API, um objeto único ou uma lista. O JSON é processado inteiramente na máquina de quem chama e não sai para lugar nenhum.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "json": {
+            "type": "string",
+            "minLength": 1,
+            "description": "O JSON da role, como texto."
+          },
+          "cloud": {
+            "type": "string",
+            "enum": [
+              "entraId",
+              "azureRbac",
+              "aws",
+              "gcp",
+              "googleWorkspace",
+              "ibmCloud"
+            ],
+            "description": "Força a nuvem, quando a detecção automática errar."
+          }
+        },
+        "required": [
+          "json"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_role_names",
+      "description": "Confere uma lista de nomes contra o catálogo inteiro — nome de exibição, slug e identificador nativo (roleId do GCP, ARN da AWS, GUID do Entra e do Azure). Devolve IN_CATALOG ou NOT_IN_CATALOG por nome. CHAME ANTES DE ESCREVER qualquer nome de role que não tenha vindo de outra ferramenta deste servidor. Nome com veredito NOT_IN_CATALOG não entra na resposta: as sugestões em didYouMean são pistas para nova busca, nunca substitutos para citar no lugar.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Os nomes ou identificadores a verificar."
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "entraId",
+              "azureRbac",
+              "aws",
+              "gcp",
+              "googleWorkspace",
+              "ibmCloud"
+            ],
+            "description": "Restringe a verificação a uma plataforma."
+          }
+        },
+        "required": [
+          "names"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_azure_providers",
+      "description": "Lista os 151 resource providers do Azure com quantas acoes cada um tem, quebradas por verbo (read/write/delete/action). E o ponto de partida para escrever uma custom role: primeiro se descobre em que provider a capacidade mora, depois se busca a acao dentro dele. Sao 151 e nao 158 porque 14 chaves sao a mesma acao escrita em dois cases.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contains": {
+            "type": "string",
+            "description": "Filtra por trecho do nome. Ex.: \"storage\", \"compute\", \"authorization\"."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 151,
+            "default": 30,
+            "description": "Maximo de providers."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_azure_actions",
+      "description": "Busca nas 17.591 acoes documentadas do Azure, por trecho do identificador ou pela descricao. Aceita filtro por provider e por verbo. Devolve a descricao oficial, o plano (control/data) e QUAIS ROLES BUILT-IN ja concedem a acao. Use antes de escrever qualquer Actions[] de custom role: e assim que se descobre que a acao de reiniciar VM e Microsoft.Compute/virtualMachines/restart/action, em vez de adivinhar. O campo grantedBy responde \"ja existe built-in que faz isso?\" antes de a custom role existir.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Trecho do identificador ou da descricao. Ex.: \"restart\", \"listKeys\", \"reiniciar maquina virtual\"."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Restringe a um provider. Ex.: \"Microsoft.Compute\"."
+          },
+          "verb": {
+            "type": "string",
+            "enum": [
+              "read",
+              "write",
+              "delete",
+              "action"
+            ],
+            "description": "Ultimo segmento da acao."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "default": 20
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "expand_azure_wildcard",
+      "description": "Dado um ou mais padroes do Azure (com ou sem `*`), diz exatamente quantas e quais acoes eles cobrem contra o universo de 17.591. CHAME ANTES de colocar um wildcard numa custom role. Ninguem expande `Microsoft.Compute/*/read` de cabeca, e o erro aqui e sempre na direcao de conceder demais. Atencao a semantica: no Azure o `*` ATRAVESSA a barra — `Microsoft.Storage/*` cobre tambem `Microsoft.Storage/a/b/c/read`, nao so um nivel. Padrao literal que nao existe no universo volta em \"inexistentes\": e o erro que so apareceria no `az role definition create`, com uma mensagem que nao diz qual linha esta errada.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Os padroes. Ex.: [\"Microsoft.Compute/*/read\", \"Microsoft.Storage/storageAccounts/listKeys/action\"]."
+          },
+          "sample": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 200,
+            "default": 15,
+            "description": "Quantas acoes cobertas listar por inteiro."
+          }
+        },
+        "required": [
+          "patterns"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_azure_custom_role",
+      "description": "Recebe o JSON de uma role definition do Azure (Actions, NotActions, DataActions, NotDataActions) e responde cinco coisas que so se descobrem contra o universo: (1) acoes que NAO EXISTEM; (2) quantas acoes o conjunto realmente concede depois de subtrair NotActions; (3) NotActions que nao subtraem nada — quase sempre erro de digitacao, e a pessoa acha que fechou um buraco que continua aberto; (4) se o efetivo inclui acao de ESCALADA DE PRIVILEGIO, como roleAssignments/write, que faz a role parecer estreita sendo equivalente a Owner; (5) se algum built-in ja cobre tudo isso, caso em que a custom role nao precisa existir. CHAME DEPOIS de rascunhar a role e ANTES de mostra-la a quem pediu. Aceita o formato do Portal, do Azure CLI e do ARM/Bicep (properties.permissions[0]).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roleDefinition": {
+            "type": "string",
+            "minLength": 2,
+            "description": "O JSON da role definition, como texto."
+          }
+        },
+        "required": [
+          "roleDefinition"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "iamscope",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Este servidor responde sobre controle de acesso em seis nuvens — Entra ID, Azure RBAC, AWS IAM,\nGCP IAM, Google Workspace e IBM Cloud — a partir de um catálogo que roda inteiro na máquina de\nquem pergunta. Nada do que passa por aqui sai para a rede.\n\nREGRA QUE NÃO TEM EXCEÇÃO\n  Toda role, policy ou permissão que você citar tem de ter vindo do retorno de uma ferramenta\n  deste servidor, nesta conversa. Você não sabe de cor os nomes de role destas plataformas: são\n  4.603 roles e mais de 32 mil permissões, e nomes plausíveis que não existem — roles/bigquery.readOnly\n  é o exemplo canônico — são exatamente o tipo de coisa que se inventa sem perceber.\n\n  Antes de escrever um nome que não veio de uma chamada, passe por verify_role_names. Se voltar\n  NOT_IN_CATALOG, o nome não entra na resposta.\n\nO QUE É CURADORIA, E PRECISA SAIR DITO\n  tier, eamLevel, category, isPrivileged, severity e as regras de SoD são classificação editorial\n  do IAM Scope (CC BY 4.0). Nenhum provedor publica isso. Ao usá-los, diga de onde vêm — não os\n  apresente como posição oficial da Microsoft, AWS, Google ou IBM. Nome, identificador, ação e\n  descrição oficial, esses sim são fato do provedor.\n\nESCREVER CUSTOM ROLE DO AZURE\n  Existe um caminho proprio para isso, e ele nao passa por adivinhacao: descubra o provider com\n  list_azure_providers, ache a acao com search_azure_actions, confira o que cada wildcard cobre com\n  expand_azure_wildcard, e passe o JSON rascunhado por check_azure_custom_role ANTES de mostra-lo.\n\n  Duas coisas que so aparecem nessa conferencia: acao que nao existe (o comando az role\n  definition create falha sem dizer qual linha), e NotActions que nao subtrai nada — a pessoa acha que fechou um\n  buraco que continua aberto. E se um built-in ja cobrir tudo, diga isso: custom role tem custo\n  permanente.\n\nQUANDO A BUSCA NÃO ACHA\n  search_roles devolve um campo \"plan\" com os termos que entendeu, o escopo que deduziu, o que\n  excluiu e o que não casou com nada. Quando o resultado vier fraco, leia o plan e diga o que\n  não casou, em vez de preencher a lacuna com o que parece razoável.",
+  "durationMs": 5426,
+  "stderr": "[iamscope-mcp] v0.2.0 pronto — 11 ferramentas, catálogo local, sem rede.\n"
+}

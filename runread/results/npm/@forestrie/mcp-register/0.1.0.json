@@ -1,0 +1,386 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@forestrie/mcp-register",
+  "version": "0.1.0",
+  "integrity": {
+    "dist": "sha512-Twe1NTlfU6TCvEYVuJ7IRv7JiEMwlm1FvQcBOORzxIzpH/hU8L3RZ3vTVNwRGBvGM10fEDLyPMeax/ZB4prjqA==",
+    "installed": "sha512-Twe1NTlfU6TCvEYVuJ7IRv7JiEMwlm1FvQcBOORzxIzpH/hU8L3RZ3vTVNwRGBvGM10fEDLyPMeax/ZB4prjqA=="
+  },
+  "bin": "node_modules/@forestrie/mcp-register/./bin/mcp-register.mjs",
+  "main": "./dist/core/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.30.0",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-14T14:07:22.958Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_log_key",
+      "description": "Return the public half of one of this server's keys (ES256, 64 bytes x‖y, as hex, base64 and an SPKI PEM) and where it lives, creating it on first use. which: \"log\" (the default) is the key that owns your data log: a grant issuer names it in the grant's grantData, and a grant naming any other key cannot carry statements this server signs. which: \"authority\" is the requester's key that owns your authority log and signs the grants issue_grant makes. Never returns private key material.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "which": {
+            "description": "which key: \"log\" (default), the key that owns your data log and signs statements; or \"authority\", the requester's key that owns an authority log and signs the child grants issue_grant makes",
+            "type": "string",
+            "enum": [
+              "log",
+              "authority"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "register_statement",
+      "description": "Sign a payload with the log key and register it under your Forestrie-Grant. Takes the payload bytes (inline base64 or a file path, up to canopy's 4 MiB statement limit) and its content type. The signed statement is saved before it is sent, so the returned content hash always names it, even if the request fails. A payload path may not point at the log key or inside this server's home. Registration is accepted, not yet sequenced: call check_registration next.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "b64": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "b64"
+                ],
+                "description": "standard base64"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "base64": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "base64"
+                ],
+                "description": "standard base64 (alias of b64)"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "description": "filesystem path, read by the stdio adapter"
+              }
+            ],
+            "description": "the payload to sign and register, up to 4 MiB — { b64 } | { base64 } | { path }"
+          },
+          "contentType": {
+            "type": "string",
+            "minLength": 1,
+            "description": "the payload's media type, e.g. application/json"
+          },
+          "grant": {
+            "type": "string",
+            "minLength": 1,
+            "description": "the Forestrie-Grant: base64 (standard or URL-safe) of the completed grant, or a path to a file holding it as raw bytes or base64 text; falls back to FORESTRIE_GRANT"
+          },
+          "baseUrl": {
+            "type": "string",
+            "minLength": 1,
+            "description": "the canopy SCRAPI base URL; falls back to FORESTRIE_BASE_URL — never defaulted by the package itself"
+          },
+          "rootLogId": {
+            "description": "the forest's root log id (R in /register/{R}/entries); falls back to FORESTRIE_ROOT_LOG_ID",
+            "type": "string",
+            "minLength": 1
+          },
+          "subject": {
+            "description": "CWT sub; defaults to sha-256:<hex of the payload>",
+            "type": "string",
+            "minLength": 1
+          },
+          "issuer": {
+            "description": "CWT iss; defaults to the hex of the key id",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "payload",
+          "contentType"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "check_registration",
+      "description": "One status check for a registration, by its content hash: pending (not yet sequenced; retry after the given seconds), awaiting_seal (sequenced, entry id known, receipt not yet sealed — sealing takes minutes, and never happens until delegate_sealing has run for the log), or sealed (the receipt is saved and its path returned). Any other answer from canopy is reported as a problem with its reason. canopy answers a statement it never received exactly like a pending one, so after ten minutes of pending this says so. Does not sleep; pace the retries yourself.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contentHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "the content hash register_statement returned (64 lowercase hex)"
+          }
+        },
+        "required": [
+          "contentHash"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "verify_registration",
+      "description": "Verify a sealed registration's receipt over the statement you registered, with @forestrie/mcp-verify's verifier, and return its four-question answers unaltered. By default the trust root is this server's own log key, the root of your data log; verifying never creates a key. Pass a known accumulator (from @forestrie/mcp-resolve's fetch_accumulator) to use a root that can also answer split-view.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contentHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "the content hash register_statement returned (64 lowercase hex)"
+          },
+          "knownAccumulator": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "b64": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "b64"
+                ],
+                "description": "standard base64"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "base64": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "base64"
+                ],
+                "description": "standard base64 (alias of b64)"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "description": "filesystem path, read by the stdio adapter"
+              }
+            ],
+            "description": "optional: a known accumulator (e.g. from @forestrie/mcp-resolve's fetch_accumulator) to verify against instead of this server's own log key — { b64 } | { base64 } | { path }"
+          }
+        },
+        "required": [
+          "contentHash"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "delegate_sealing",
+      "description": "Authorise the operator's sealer to publish checkpoints for your data log, signed with the log key. Without it entries sequence but are never sealed. If the coordinator has not learned the log's public root, this calls canopy's prepare with the same grant first. Run once per log; the delegation lasts until the returned expiresAt. With as: \"authority\" it does the same for your authority log, signed with the authority key, so the child grants you register there get sealed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grant": {
+            "type": "string",
+            "minLength": 1,
+            "description": "the Forestrie-Grant: base64 (standard or URL-safe) of the completed grant, or a path to a file holding it as raw bytes or base64 text; falls back to FORESTRIE_GRANT"
+          },
+          "baseUrl": {
+            "type": "string",
+            "minLength": 1,
+            "description": "the canopy SCRAPI base URL; falls back to FORESTRIE_BASE_URL — never defaulted by the package itself"
+          },
+          "coordinatorUrl": {
+            "description": "the delegation coordinator base URL; falls back to FORESTRIE_COORDINATOR_URL",
+            "type": "string",
+            "minLength": 1
+          },
+          "knownSealerKey": {
+            "description": "the registrar's voucher key, base64 of 64 bytes x‖y, as the operator publishes it; falls back to FORESTRIE_KNOWN_SEALER_KEY",
+            "type": "string",
+            "minLength": 1
+          },
+          "ttlSeconds": {
+            "description": "how long the delegation lasts; defaults to the coordinator's suggestion",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "as": {
+            "description": "which key owns the log: \"log\" (default) for your data log, under the grant you register statements with; \"authority\" for your authority log, under its creation grant (FORESTRIE_AUTHORITY_GRANT), so the child grants register_grant sequences there get sealed",
+            "type": "string",
+            "enum": [
+              "log",
+              "authority"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "issue_grant",
+      "description": "As the requester, sign a child grant with this server's authority key: a data-log creation grant under your authority log (named by your authority grant, FORESTRIE_AUTHORITY_GRANT), naming the performer's log key (by default this server's own) and sized with maxHeight, the batch ceiling canopy prices it by. Saves the grant under a fresh child log id; nothing is sent. Call register_grant next.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxHeight": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "the grant's batch ceiling. canopy prices a payment-gated child grant as its unit price × maxHeight, so size it to the work it is for"
+          },
+          "parentGrant": {
+            "type": "string",
+            "minLength": 1,
+            "description": "your authority grant: the completed grant that created your authority log and names this server's authority key, as base64 or a file path; falls back to FORESTRIE_AUTHORITY_GRANT"
+          },
+          "grantee": {
+            "description": "base64 of the 64-byte x‖y the grant names (the performer's log key); defaults to this server's own log key, for a self-purchase",
+            "type": "string",
+            "minLength": 1
+          },
+          "logId": {
+            "description": "the child data log to create; a fresh random UUID by default",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        "required": [
+          "maxHeight"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "register_grant",
+      "description": "Register a child grant with canopy (POST /register/{R}/grants, your authority grant as the parent) and follow it to its receipt; call it again with the same logId to resume until it reports complete. If canopy answers 402 and a payer is configured, it pays within the server's hard caps (per call, per UTC day, one network and asset, testnet only by default) and reports any cap that refuses. With no payer it returns the payment requirements: pay them from your own x402 wallet and call again with payment set to the X-PAYMENT value. Every payment for a grant carries a nonce derived from that grant, so retries and overlapping calls can never pay for it twice. When complete it returns the completed grant for delegate_sealing and register_statement.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "logId": {
+            "description": "the child log id issue_grant returned: register_grant resumes that grant from wherever the last call reached",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "grant": {
+            "description": "a child grant signed elsewhere (base64 or a file path), instead of logId",
+            "type": "string",
+            "minLength": 1
+          },
+          "parentGrant": {
+            "type": "string",
+            "minLength": 1,
+            "description": "your authority grant: the completed grant that created your authority log and names this server's authority key, as base64 or a file path; falls back to FORESTRIE_AUTHORITY_GRANT"
+          },
+          "payment": {
+            "description": "relay mode: the X-PAYMENT header value your own x402 wallet produced for the payment requirements register_grant returned",
+            "type": "string",
+            "minLength": 1
+          },
+          "baseUrl": {
+            "type": "string",
+            "minLength": 1,
+            "description": "the canopy SCRAPI base URL; falls back to FORESTRIE_BASE_URL — never defaulted by the package itself"
+          },
+          "rootLogId": {
+            "description": "the forest's root log id (R in /register/{R}/grants); falls back to FORESTRIE_ROOT_LOG_ID",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "forestrie-mcp-register",
+    "version": "0.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": "@forestrie/mcp-register is the write path of the Forestrie MCP trio. It signs statements with a log key it holds (ES256, behind a signer backend; by default a local key file it creates), registers them on a Forestrie transparency log under a Forestrie-Grant, delegates sealing for your data log, and checks the receipt with @forestrie/mcp-verify's verifier through @forestrie/mcp-resolve.\n\nIt can also act as a requester that is its own grant issuer: issue_grant signs a child grant with a separate authority key, and register_grant registers it with canopy, paying canopy's x402 402 from a configured payer within hard caps, or handing you the payment requirements to pay from your own wallet (relay mode). Forestrie runs no grant issuer.\n\nYou never handle signature bytes or keys: you pass the payload, the server signs; the payer key never crosses this boundary, and the spending caps are configuration, not arguments.\n\nThe loop with a grant you hold: get_log_key → delegate_sealing once per log → register_statement → check_registration until sealed → verify_registration (the \"register\" prompt). Buying the grant first: issue_grant → register_grant until complete (the \"issue-and-pay\" prompt). The \"audit\" prompt explains what a verified receipt does and does not prove.\n\nConfiguration, each overridable per call: FORESTRIE_BASE_URL (the canopy SCRAPI base URL), FORESTRIE_ROOT_LOG_ID (the forest's root log id, R), FORESTRIE_GRANT (the grant, as base64 or a file path), FORESTRIE_AUTHORITY_GRANT (your authority log's grant, for issue_grant), FORESTRIE_COORDINATOR_URL and FORESTRIE_KNOWN_SEALER_KEY (for delegate_sealing; the operator publishes both). Payment, never overridable per call: MCP_REGISTER_PAYER_KEY_FILE and the MCP_REGISTER_PAY_* caps. MCP_REGISTER_HOME holds the key files, the grants, the registrations and the spend ledger.",
+  "durationMs": 19404,
+  "stderr": ""
+}

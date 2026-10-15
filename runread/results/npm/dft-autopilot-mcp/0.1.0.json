@@ -1,0 +1,1117 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "dft-autopilot-mcp",
+  "version": "0.1.0",
+  "integrity": {
+    "dist": "sha512-WtFblStKe6EZbsJhObcM6ECPahC/Y4ul2nnHooK+hj0ryoSFM+/E6A+zRwM25onKNRCxPgYSzLWSyQR5b/mALA==",
+    "installed": "sha512-WtFblStKe6EZbsJhObcM6ECPahC/Y4ul2nnHooK+hj0ryoSFM+/E6A+zRwM25onKNRCxPgYSzLWSyQR5b/mALA=="
+  },
+  "bin": "node_modules/dft-autopilot-mcp/./dist/mcp-server.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-15T01:36:14.750Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "create_qe_input",
+      "description": "根据参数生成 QE 输入文件。工具自动处理 nat/ntyp/赝势匹配/原子坐标/HUBBARD 卡。\n\n**参数审计机制**：control / system / electrons / hubbard 中每个物理参数，\n都必须在同一 dict 的 `_reasons` 子字典中有对应条目，否则工具拒绝生成。\n`_reasons` 不会出现在 QE 输入文件中，仅用于审计。\n\n调用示例：\n```\ncreate_qe_input(\n  calc_type='relax',\n  structure_data=...,\n  kpoints=[3,3,1],\n  kpoints_reason='a≈9.84Å → k_spacing=1/(9.84×3)≈0.034 1/Å < 0.04 阈值',\n  system={\n    'ecutwfc': 50, 'ecutrho': 400, 'nspin': 2,\n    'assume_isolated': '2D', 'vdw_corr': 'dft-d3',\n    '_reasons': {\n      'ecutwfc': 'SSSP efficiency Co PAW 45 Ry + N rrkjus 余量 → 50',\n      'ecutrho': '8x ecutwfc (PAW 标准)',\n      'nspin': 'Co²⁺ d⁷ 有未配对电子',\n      'assume_isolated': '2D 库仑截断消除镜像偶极',\n      'vdw_corr': 'DFT-D3(BJ) Grimme 2010, 石墨烯 vdW 必需'\n    }\n  },\n  control={'forc_conv_thr': 0.001, '_reasons': {'forc_conv_thr': 'relax 标准阈值'}},\n  electrons={'mixing_beta': 0.3, '_reasons': {'mixing_beta': '磁性体系需保守值 ≤0.3'}},\n  hubbard={'U': {'Co-3d': 3.32}, '_reasons': {'U_Co-3d': 'Wang PRB 2006'}}\n)\n```\n注意：ibrav/nat/ntyp/calculation 由工具自动推导，不需要 _reasons。\npseudo_dir/outdir/prefix/ion_dynamics/cell_dynamics 有默认值，Agent 可按需覆盖并提供 _reasons。\n\n**选择性动力学（Slab 固定底层原子）**：\n在 atoms 数组中设置 `fixed: true`（完全固定 0 0 0）或 `if_pos: [0, 1, 0]`（精细控制各方向）。\n例如 Pt(111) slab 计算：底层 2 层固定，表面 2 层弛豫。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calc_type": {
+            "type": "string",
+            "enum": [
+              "scf",
+              "relax",
+              "vc-relax",
+              "nscf",
+              "bands",
+              "dos",
+              "projwfc",
+              "pp-charge",
+              "dos-post",
+              "bands-post",
+              "phonon",
+              "hp",
+              "epsilon",
+              "neb"
+            ],
+            "description": "计算类型。pw.x 系列: scf/relax/vc-relax/nscf/bands/dos（需要 structure_data）。\n后处理系列: projwfc(pDOS)/pp-charge(电荷密度)/dos-post(dos.x)/bands-post(bands.x)/phonon(ph.x)/hp(hp.x)/epsilon(epsilon.x)（不需要 structure_data，参数通过 post_process 传入）。\nNEB 过渡态: neb（需要 structure_data + structure_data_final 两套结构）。"
+          },
+          "structure_data": {
+            "type": "object",
+            "description": "结构数据。必须包含 atoms 数组和 cell_parameters 矩阵。\natoms[].element: 元素符号或自定义 species 标签（Ni1/Ni2），工具自动提取纯元素符号匹配赝势。\natoms[].position: [x, y, z] 坐标数组。\ncell_parameters: 3×3 晶胞矩阵 [[a1,a2,a3],[b1,b2,b3],[c1,c2,c3]]（Å）。也可用 lattice 字段。\ncoords_are_cartesian: 布尔值。true=笛卡尔坐标(Å)，false=分数坐标。默认 true。\nposition_units: 字符串替代方式，'crystal'=分数坐标，'angstrom'=笛卡尔坐标。\n示例: {atoms:[{element:'Si',position:[0,0,0]},{element:'Si',position:[0.25,0.25,0.25]}],cell_parameters:[[5.43,0,0],[0,5.43,0],[0,0,5.43]], coords_are_cartesian:false}"
+          },
+          "kpoints": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "K 网格 [k1,k2,k3] 或含偏移 [k1,k2,k3,s1,s2,s3]，默认偏移为 0 0 0"
+          },
+          "kpoints_reason": {
+            "type": "string",
+            "description": "K 网格选择理由。必须包含 k_spacing 计算过程：\n例: 'a≈9.84 Å → k_spacing = 1/(9.84×3) ≈ 0.034 1/Å < 0.04 阈值'"
+          },
+          "control": {
+            "type": "object",
+            "description": "&CONTROL 参数。必须包含 _reasons 字典，键为参数名，值为该参数的选择依据。"
+          },
+          "system": {
+            "type": "object",
+            "description": "&SYSTEM 参数。必须包含 _reasons 字典，为每个物理参数逐一论证。"
+          },
+          "electrons": {
+            "type": "object",
+            "description": "&ELECTRONS 参数。必须包含 _reasons 字典。"
+          },
+          "ions": {
+            "type": "object",
+            "description": "&IONS 参数（可不含 _reasons）"
+          },
+          "cell": {
+            "type": "object",
+            "description": "&CELL 参数（可不含 _reasons）"
+          },
+          "hubbard": {
+            "type": "object",
+            "description": "HUBBARD 卡片参数。必须包含 _reasons 字典。"
+          },
+          "pseudo_map": {
+            "type": "object",
+            "description": "自定义 species→赝势文件映射。AFM 体系中磁不等价原子共用同一赝势时必须提供。\n示例: { \"Ni1\": \"Ni.pbe-spn-kjpaw_psl.1.0.0.UPF\", \"Ni2\": \"Ni.pbe-spn-kjpaw_psl.1.0.0.UPF\" }"
+          },
+          "mass_map": {
+            "type": "object",
+            "description": "自定义 species→原子质量映射。\n示例: { \"Ni1\": 58.693, \"Ni2\": 58.693 }"
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "输出目录（相对于 workspace）。如 'NiO_AFM_U/01_vcrelax'，文件将写入该子目录。"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "可选。CONSTRAINTS 卡片原始内容（不含 CONSTRAINTS 标题行）。\n格式: 第一行 'nconstr constr_tol'，后续每行一个约束。\n示例: '1 0.01\n'distance' 1 2 2.5'"
+          },
+          "occupations_card": {
+            "type": "string",
+            "description": "可选。OCCUPATIONS 卡片原始内容（不含 OCCUPATIONS 标题行）。\n仅当 system.occupations='from_input' 时使用。\n每行为一个 k 点的占据数列表。"
+          },
+          "atomic_forces": {
+            "type": "string",
+            "description": "可选。ATOMIC_FORCES 卡片原始内容（不含 ATOMIC_FORCES 标题行）。\n格式: 每行 'Element fx fy fz'（单位 Ry/au）。"
+          },
+          "post_process": {
+            "type": "object",
+            "description": "后处理/非 pw.x 类型的专用参数。所有后处理类型均可在此传入 prefix 和 outdir（优先于 control 中的值）。\n各类型可用参数：\nprojwfc: {prefix, outdir, degauss, Emin, Emax, DeltaE, filpdos}\npp-charge: {prefix, outdir, plot_num, filplot, iflag, output_format, fileout}\ndos-post: {prefix, outdir, fildos, degauss, Emin, Emax, DeltaE}\nbands-post: {prefix, outdir, filband, lsym, spin_component}\nphonon: {prefix, outdir, tr2_ph, ldisp, nq1, nq2, nq3, fildyn, alpha_mix, niter_ph, recover}\nhp: {prefix, outdir, nq1, nq2, nq3, conv_thr_chi, find_atpert}\nepsilon: {prefix, outdir, calculation('eps'/'jdos'/'offdiag'), broadening, nw, wmin, wmax}\n示例: {plot_num: 17} 使用 PAW 全电子密度重构（Bader 分析必须）"
+          },
+          "structure_data_final": {
+            "type": "object",
+            "description": "NEB 终态结构数据（仅 neb 类型必须）。格式与 structure_data 完全一致。\nNEB 需要初始态（structure_data）和终态（structure_data_final）两套原子坐标。"
+          },
+          "neb_path": {
+            "type": "object",
+            "description": "NEB &PATH namelist 参数（仅 neb 类型使用）。\n可用参数: {string_method, nstep_path, num_of_images, CI_scheme, opt_scheme, ds, path_thr, first_last_opt}\n示例: {num_of_images: 7, CI_scheme: 'auto', nstep_path: 50}"
+          },
+          "description": {
+            "type": "string",
+            "description": "整体计算科学目的（不是参数论证，参数论证在各 _reasons 中）"
+          },
+          "kpath": {
+            "type": "array",
+            "description": "能带计算高对称 K 路径（仅 calc_type='bands' 必须）。\n数组中每个元素: {point: [kx,ky,kz], label: 'G', npts: 40}\n其中 npts 为该段到下一个高对称点之间的采样点数（最后一个点的 npts 设为 0）。\n示例: [{point:[0,0,0], label:'G', npts:40}, {point:[0.5,0,0.5], label:'X', npts:40}, {point:[0.5,0.25,0.75], label:'W', npts:0}]",
+            "items": {
+              "type": "object",
+              "properties": {
+                "point": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "label": {
+                  "type": "string"
+                },
+                "npts": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "calc_type"
+        ]
+      }
+    },
+    {
+      "name": "extract_dft_results",
+      "description": "从 QE 输出文件中提取结构化结果。自动解析能量、收敛性、磁矩、Hubbard 占据、最终结构等关键数据，避免 Agent 直接读取万行输出。\n支持: scf, relax, bands, dos, pdos, bader, workfunction, neb, optical, phonon\nrelax 模式会返回 structure_data，可直接用于 create_qe_input。\n\n**智能数据源定位**：\n- bands 模式：可传入 bands.out 或 .dat.gnu 文件。若传 .out 且解析为空，自动搜索同目录 .dat.gnu 文件，并自动计算 VBM/CBM/带隙及类型（直接/间接）。返回 auto_source 标记数据来源。\n- dos 模式：可传入 dos_post.out 或 .dos 数据文件。若传 .out 且解析为空，自动搜索同目录 .dos 文件。返回 auto_source 标记数据来源。\n- pdos 模式：自动扫描 work_dir 下 .pdos_atm* 文件，按元素+轨道聚合。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "QE 输出文件路径"
+          },
+          "result_type": {
+            "type": "string",
+            "enum": [
+              "scf",
+              "relax",
+              "bands",
+              "dos",
+              "pdos",
+              "bader",
+              "workfunction",
+              "neb",
+              "optical",
+              "phonon"
+            ],
+            "description": "结果类型。不确定时可不传，工具会自动检测。"
+          },
+          "work_dir": {
+            "type": "string",
+            "description": "工作目录（pdos/bader 需要读取多个文件时使用）"
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      }
+    },
+    {
+      "name": "lookup_pseudopotential",
+      "description": "查询指定元素的 SSSP 推荐赝势信息。返回赝势文件名、推荐 ecutwfc 和 ecutrho 截断能。可查询单个元素或多个元素（自动取最大截断能）。在创建 QE 输入文件之前必须先查询。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "elements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "元素符号列表，如 ['Co', 'N', 'C']"
+          }
+        },
+        "required": [
+          "elements"
+        ]
+      }
+    },
+    {
+      "name": "lookup_hubbard_u",
+      "description": "查询 DFT 计算推荐参数。支持三种查询类型：\n1. hubbard_u — 查询元素的推荐 Hubbard U 值\n2. vdw_recommendation — 根据体系类型推荐 vdW 校正方法\n3. ecutwfc — 查询元素的 SSSP 推荐截断能\n参数选择时必须使用此工具查询。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "element": {
+            "type": "string",
+            "description": "元素符号（hubbard_u/ecutwfc 用），多元素逗号分隔"
+          },
+          "query_type": {
+            "type": "string",
+            "enum": [
+              "hubbard_u",
+              "vdw_recommendation",
+              "ecutwfc"
+            ],
+            "description": "查询类型，默认 hubbard_u"
+          },
+          "system_type": {
+            "type": "string",
+            "enum": [
+              "adsorption",
+              "surface",
+              "layered",
+              "molecular",
+              "bulk_metal"
+            ],
+            "description": "体系类型（vdw_recommendation 用）"
+          }
+        },
+        "required": [
+          "element"
+        ]
+      }
+    },
+    {
+      "name": "import_structure",
+      "description": "从结构文件导入晶体结构数据。支持格式: CIF, POSCAR, XYZ, PDB。自动检测文件格式，转换为可用于 create_qe_input 的结构。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "结构文件路径（.cif/.vasp/.poscar/.xyz/.pdb）"
+          },
+          "file_format": {
+            "type": "string",
+            "enum": [
+              "cif",
+              "poscar",
+              "xyz",
+              "pdb"
+            ],
+            "description": "文件格式（可选，默认自动检测）"
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      }
+    },
+    {
+      "name": "create_vasp_input",
+      "description": "生成 VASP 计算输入文件（INCAR + POSCAR + KPOINTS）。\nPOTCAR 由系统在超算上自动从赝势库拼接，无需手动处理。\n每个物理参数必须在 _reasons 中提供选择依据。\n\n**选择性动力学（Slab 固定底层原子）**：\n在 atoms 数组中设置 `fixed: true`（完全固定 F F F）或 `if_pos: [true, false, true]`（精细控制各方向）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calc_type": {
+            "type": "string",
+            "enum": [
+              "scf",
+              "relax",
+              "band",
+              "dos",
+              "md",
+              "neb"
+            ],
+            "description": "计算类型。neb = NEB 过渡态搜索（需要 structure_data_final）"
+          },
+          "structure_data": {
+            "type": "object",
+            "description": "结构数据",
+            "properties": {
+              "atoms": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "element": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "fixed": {
+                      "type": "boolean",
+                      "description": "完全固定（Selective Dynamics F F F）"
+                    },
+                    "if_pos": {
+                      "type": "array",
+                      "description": "各方向可动性 [x, y, z]，true/1=可动 false/0=固定"
+                    }
+                  },
+                  "required": [
+                    "element",
+                    "position"
+                  ]
+                }
+              },
+              "cell_parameters": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "description": "3×3 晶胞矩阵（Å）"
+              },
+              "coords_are_cartesian": {
+                "type": "boolean",
+                "description": "坐标是否为笛卡尔坐标（默认 false = 分数坐标）"
+              }
+            },
+            "required": [
+              "atoms",
+              "cell_parameters"
+            ]
+          },
+          "incar": {
+            "type": "object",
+            "description": "INCAR 参数字典（key=参数名, value=参数值）"
+          },
+          "kpoints": {
+            "type": "object",
+            "description": "K 点设置",
+            "properties": {
+              "grid": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "Monkhorst-Pack 网格 [k1, k2, k3]"
+              },
+              "shift": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "K 点平移 [s1, s2, s3]"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "monkhorst-pack",
+                  "gamma",
+                  "line"
+                ],
+                "description": "K 点模式"
+              },
+              "kpath": {
+                "type": "array",
+                "description": "能带 K 路径（仅 line 模式）。每个元素是一个高对称点对象 {label, coords}，工具按相邻两点连成一段路径。示例：[{\"label\":\"GAMMA\",\"coords\":[0,0,0]},{\"label\":\"X\",\"coords\":[0.5,0,0.5]}]。字段名是 coords（倒易空间分数坐标），不是 point。可用 run_pymatgen 调 HighSymmKpath 自动生成标准路径。",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "description": "高对称点标签（如 GAMMA, X, L, W, K）"
+                    },
+                    "coords": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "description": "倒易空间分数坐标 [k1, k2, k3]"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "coords"
+                  ]
+                }
+              },
+              "npoints": {
+                "type": "number",
+                "description": "K 路径每段采样点数（默认 20）"
+              }
+            }
+          },
+          "potcar_variants": {
+            "type": "object",
+            "description": "元素 → POTCAR 变体映射（如 {Fe: 'Fe_pv'}），未指定的元素使用推荐默认值"
+          },
+          "structure_data_final": {
+            "type": "object",
+            "description": "NEB 终态结构（仅 neb 类型必须）。格式与 structure_data 完全一致。\n初态和终态的原子数、元素种类和顺序必须完全一致。",
+            "properties": {
+              "atoms": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "element": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "required": [
+                    "element",
+                    "position"
+                  ]
+                }
+              },
+              "cell_parameters": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "description": "3×3 晶胞矩阵（Å）— 应与初态一致"
+              },
+              "coords_are_cartesian": {
+                "type": "boolean",
+                "description": "坐标是否为笛卡尔坐标（默认 false）"
+              }
+            },
+            "required": [
+              "atoms",
+              "cell_parameters"
+            ]
+          },
+          "neb_images": {
+            "type": "integer",
+            "description": "NEB 中间 image 数量（默认 4，通常 4-8）。不含初态和终态。"
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "输出目录（支持绝对路径或相对于 workspace 的相对路径）"
+          },
+          "system_name": {
+            "type": "string",
+            "description": "体系名称（用于 POSCAR 注释行）"
+          },
+          "_reasons": {
+            "type": "object",
+            "description": "参数选择理由（key=参数名, value=理由）。ENCUT/ISPIN/ISMEAR 等关键参数必须覆盖。"
+          }
+        },
+        "required": [
+          "calc_type",
+          "structure_data",
+          "incar",
+          "kpoints",
+          "output_dir",
+          "_reasons"
+        ]
+      }
+    },
+    {
+      "name": "extract_vasp_results",
+      "description": "从 VASP 输出文件（OUTCAR/OSZICAR/CONTCAR 等）提取结构化计算结果。\n支持 result_type: scf / relax / band / dos / md / neb。\nNEB 类型时 file_path 传 NEB 根目录（包含 00/ 01/ ... 子目录），返回：\n  每 image 的能量/ΔE/最大力/磁矩/是否力收敛、climbing image、band 最大力、\n  converged(全 image 力达标)、nsw_limit_reached、Hammond 自洽性 + TS 几何 sanity 警告。\n  ⚠️ warnings 非空时务必先核查：未收敛或几何假象的 barrier 不可写入结论。\nrelax 类型返回 force_converged / nsw_limit_reached 及 CONTCAR vs XDATCAR 警示。\n不指定 result_type 时自动检测。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "输出文件路径（OUTCAR 或计算目录路径）"
+          },
+          "result_type": {
+            "type": "string",
+            "enum": [
+              "scf",
+              "relax",
+              "band",
+              "dos",
+              "md",
+              "neb"
+            ],
+            "description": "结果类型（可选，不传则自动检测）"
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      }
+    },
+    {
+      "name": "create_gaussian_input",
+      "description": "生成 Gaussian 16 输入文件（.gjf）。\n支持 calc_type: sp / opt / freq / opt_freq / ts / irc / scan / td。\n每个关键选择必须在 _reasons 中提供依据。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "calc_type": {
+            "type": "string",
+            "enum": [
+              "sp",
+              "opt",
+              "freq",
+              "opt_freq",
+              "ts",
+              "irc",
+              "scan",
+              "td"
+            ],
+            "description": "计算类型"
+          },
+          "method": {
+            "type": "string",
+            "description": "计算方法（如 B3LYP, M06-2X, wB97XD）"
+          },
+          "basis_set": {
+            "type": "string",
+            "description": "基组（如 6-311+G(d,p), def2-TZVP）"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "额外关键字（如 EmpiricalDispersion=GD3BJ）"
+          },
+          "structure_data": {
+            "type": "object",
+            "properties": {
+              "atoms": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "element": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "required": [
+                    "element",
+                    "position"
+                  ]
+                }
+              },
+              "charge": {
+                "type": "number",
+                "description": "体系总电荷"
+              },
+              "multiplicity": {
+                "type": "number",
+                "description": "自旋多重度"
+              }
+            },
+            "required": [
+              "atoms",
+              "charge",
+              "multiplicity"
+            ]
+          },
+          "nproc": {
+            "type": "number",
+            "description": "CPU 核数（默认 8）"
+          },
+          "mem": {
+            "type": "string",
+            "description": "内存（默认 8GB）"
+          },
+          "title": {
+            "type": "string",
+            "description": "计算标题"
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "输出目录"
+          },
+          "file_name": {
+            "type": "string",
+            "description": "文件名（默认 calc_type.gjf）"
+          },
+          "additional_input": {
+            "type": "string",
+            "description": "额外输入段（如 ModRedundant 坐标扫描）"
+          },
+          "_reasons": {
+            "type": "object",
+            "description": "参数选择理由"
+          }
+        },
+        "required": [
+          "calc_type",
+          "method",
+          "basis_set",
+          "structure_data",
+          "output_dir",
+          "_reasons"
+        ]
+      }
+    },
+    {
+      "name": "extract_gaussian_results",
+      "description": "从 Gaussian 16 输出文件（.log）提取结构化计算结果。\n支持 result_type: sp / opt / freq / td / irc / scan / pop。\n不指定 result_type 时自动检测。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": ".log 输出文件的完整路径"
+          },
+          "result_type": {
+            "type": "string",
+            "enum": [
+              "sp",
+              "opt",
+              "freq",
+              "td",
+              "irc",
+              "scan",
+              "pop"
+            ],
+            "description": "结果类型（可选，不传则自动检测）"
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      }
+    },
+    {
+      "name": "run_pymatgen",
+      "description": "执行自定义 pymatgen/ASE 建模代码。适用于 build_structure 无法覆盖的复杂场景。\n\n使用方式：\n1. 在 code 中编写核心建模逻辑（无需 import，环境已预装）\n2. 将最终结构赋值给 `result` 变量\n3. 如需输入结构，通过 structure_data 传入（自动注入为 `structure` 变量）\n\n预装模块：pymatgen.core, SlabGenerator, ASE (Atoms, build), numpy\n预装工具函数：dict_to_structure, structure_to_dict, pmg_to_ase, ase_to_dict, ase_to_pmg\n\n示例：\n```python\n# 构建 TiO2 rutile 110 面 slab\nfrom pymatgen.ext.matproj import MPRester  # 需要额外 import 可直接写\nslab = SlabGenerator(structure, [1,1,0], 10, 15).get_slabs()[0]\nslab.make_supercell([2,2,1])\nresult = slab\n```\n\n**返回值说明**：\n- `structure_data`: 可直接传入 create_qe_input 的结构数据\n- `stdout`: 代码执行期间的 print() 输出（截断前 2000 字符），可用于调试和验证中间结果",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Python 建模代码。无需 import 常用模块（已预装）。必须将最终结构赋值给 `result` 变量。支持的 result 类型：pymatgen Structure、ASE Atoms、dict。"
+          },
+          "structure_data": {
+            "type": "object",
+            "description": "可选。输入结构数据，自动注入为 `structure` 变量（pymatgen Structure 对象）。"
+          },
+          "extra_imports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "可选。额外的 import 语句列表。例: ['from pymatgen.analysis.interfaces import CoherentInterfaceBuilder']"
+          },
+          "description": {
+            "type": "string",
+            "description": "建模操作的科学目的说明"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      }
+    },
+    {
+      "name": "plot_chart",
+      "description": "生成 DFT 计算的学术级图表（matplotlib 后端）。\n\n支持图表类型：\n- **bands**: 能带结构图（k 路径 vs E）\n- **dos**: 态密度图（自动检测 spin-polarized 数据并生成 spin-up/down 镜像图）\n- **pdos**: 投影态密度图（按元素/轨道分色，自动检测 nspin=2 并分 spin 通道镜像显示）\n- **convergence**: SCF 能量收敛曲线\n- **gibbs**: 自由能台阶图（ORR/HER/OER 催化反应路径，水平阶梯 + ΔG 标注）\n- **bands_dos**: 能带+DOS 联合图（左右并排，共享 Y 轴，PRL/Nature 标准格式）\n\n数据源（三选一，推荐优先用 data_file 避免大数据 JSON 截断）：\n1. `data_file`: 直接传 QE 输出文件路径（.dat.gnu / .dos / .out）— **推荐**\n2. `data`: 传 extract_dft_results 的返回数据对象\n3. `work_dir`: pdos 模式下传目录，自动扫描 pdos_atm* 文件\n4. `steps`: gibbs 模式下传反应路径数据 [{label, energy}]\n\n配色预设：nature（默认）、aps、acs、dark\n输出：300dpi PNG（默认），可选 SVG/PDF。图片保存到 workspace/figures/ 并返回 base64。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chart_type": {
+            "type": "string",
+            "enum": [
+              "bands",
+              "dos",
+              "pdos",
+              "convergence",
+              "gibbs",
+              "bands_dos"
+            ],
+            "description": "图表类型"
+          },
+          "data_file": {
+            "type": "string",
+            "description": "QE 输出数据文件路径（bands.dat.gnu / nio.dos 等）"
+          },
+          "data": {
+            "type": "object",
+            "description": "extract_dft_results 返回的结构化数据"
+          },
+          "work_dir": {
+            "type": "string",
+            "description": "pdos 模式下的工作目录（自动扫描 pdos_atm* 文件）"
+          },
+          "fermi_energy": {
+            "type": "number",
+            "description": "费米能级 (eV)。未提供时自动从同目录 scf.out 获取"
+          },
+          "energy_range": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "能量窗口 [min, max] (eV)，默认 [-6, 6]"
+          },
+          "elements_filter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "pdos 模式下的元素过滤器"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "nature",
+              "aps",
+              "acs",
+              "dark"
+            ],
+            "description": "配色预设，默认 nature"
+          },
+          "figsize": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "图片尺寸 [width, height] (inches)"
+          },
+          "dpi": {
+            "type": "number",
+            "description": "分辨率，默认 300"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "svg",
+              "pdf"
+            ],
+            "description": "输出格式，默认 png"
+          },
+          "output_path": {
+            "type": "string",
+            "description": "保存路径。未提供时自动保存到 workspace/figures/"
+          },
+          "title": {
+            "type": "string",
+            "description": "图表标题"
+          },
+          "k_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "能带图的 K 路径标签（如 ['Γ', 'X', 'M', 'Γ']）"
+          },
+          "k_positions": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "能带图的 K 路径标签位置（对应 k_labels）"
+          },
+          "spin_resolved": {
+            "type": "boolean",
+            "description": "是否分 spin 通道显示。true=强制分 spin 镜像，false=强制合并，不传=自动检测"
+          },
+          "orbital_filter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "pdos 模式下按轨道类型过滤，如 ['d', 'p'] 只画 d 和 p 轨道。不传则显示全部。"
+          },
+          "auto_filter": {
+            "type": "boolean",
+            "description": "pdos 模式下是否自动过滤掉峰值 < 0.05 states/eV 的轨道。默认 false。"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "energy": {
+                  "type": "number"
+                }
+              }
+            },
+            "description": "gibbs 模式：反应路径各步数据 [{label: 'O₂ + *', energy: 0.0}, ...]"
+          },
+          "reference_potential": {
+            "type": "number",
+            "description": "gibbs 模式：可选平衡电位（V），将画一条水平虚线标注"
+          },
+          "bands_data_file": {
+            "type": "string",
+            "description": "bands_dos 模式：能带 .dat.gnu 文件路径"
+          },
+          "dos_data_file": {
+            "type": "string",
+            "description": "bands_dos 模式：DOS 数据文件路径（.dos 格式）"
+          }
+        },
+        "required": [
+          "chart_type"
+        ]
+      }
+    },
+    {
+      "name": "write_report",
+      "description": "生成结构化 Markdown 报告文件。\n\n**使用方式**：先在回复正文中用 Markdown 写完整的报告内容，然后调用此工具，只需传 title 和 output_path 即可（content 参数可省略，工具会自动从你的回复正文中提取报告内容）。\n\n**可选增强**：\n- `methodology`: 传入参数自动生成学术级\"计算方法\"段落（中英双语），会追加到正文前\n- `comparison_table`: 传入列名和数据行，自动生成格式化对比表，会追加到正文前\n- `export_format`: 导出格式 md/pdf/docx/all\n\n示例：\nwrite_report(title='Si 能带结构计算报告', output_path='Si_bulk/report.md')",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "报告标题"
+          },
+          "output_path": {
+            "type": "string",
+            "description": "输出文件路径（.md）"
+          },
+          "content": {
+            "type": "string",
+            "description": "报告正文（Markdown 格式）。可省略——如果你已在回复正文中输出报告，工具会自动提取。不需要包含标题行（工具会自动加 # title）。"
+          },
+          "methodology": {
+            "type": "object",
+            "description": "可选。计算方法模板参数，自动生成学术级 Methodology 段落。\n包含：functional, software, ecutwfc, ecutrho, kpoints_info, basis_type, pseudopotential_library, convergence_criteria, custom_notes, language (cn/en/bilingual)"
+          },
+          "comparison_table": {
+            "type": "object",
+            "properties": {
+              "caption": {
+                "type": "string",
+                "description": "表格标题"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "列名，如 ['体系', '带隙/eV', '磁矩/μB', '方法']"
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {}
+                },
+                "description": "每行数据，如 [['Si', 1.12, 0, 'PBE'], ['GaAs', 1.42, 0, 'PBE']]"
+              }
+            },
+            "description": "可选。多体系对比表，自动生成格式化 Markdown 表格"
+          },
+          "export_format": {
+            "type": "string",
+            "enum": [
+              "md",
+              "pdf",
+              "docx",
+              "all"
+            ],
+            "description": "导出格式。默认 md。docx 为 Word 格式。all = md + docx + pdf"
+          }
+        },
+        "required": [
+          "title",
+          "output_path"
+        ]
+      }
+    },
+    {
+      "name": "search_literature",
+      "description": "搜索学术论文/科学文献，查找特定体系的 DFT 计算参数、方法学推荐或对比数据。数据源: Semantic Scholar + OpenAlex + CrossRef（2 亿+ 论文，三级降级）。适用场景：查找 Hubbard U 值文献来源、对比实验/计算结果、确认计算方法学选择等。返回论文标题、摘要、引用数和 DOI。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索查询，如 'Co-N4 SAC DFT+U value'、'ORR adsorption energy benchmark PBE'、'transition metal oxide band gap hybrid functional'"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "最大返回结果数（默认 5，最大 10）"
+          },
+          "year_min": {
+            "type": "integer",
+            "description": "最早发表年份过滤（如 2018），仅搜索该年之后的论文"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "search_materials",
+      "description": "在材料科学数据库中搜索已有的 DFT 计算结果。数据源: Materials Project + AFLOW + OQMD（三级降级，覆盖数百万材料）。可获取：晶体结构、能带间隙、形成能、磁矩、空间群等。适用场景：获取参考结构、验证计算结果、查找已知材料的性质数据。支持按化学式或化学体系（元素组合）搜索。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "formula": {
+            "type": "string",
+            "description": "化学式搜索，如 'CoN4'、'Fe2O3'、'LiFePO4'。也支持通配符如 'Co*N*' 用于模糊匹配。"
+          },
+          "chemsys": {
+            "type": "string",
+            "description": "化学体系搜索（元素组合，用 '-' 分隔），如 'Co-N-C'、'Li-Fe-P-O'。搜索该元素组合下的所有已知材料。与 formula 二选一。"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "最大返回数量（默认 5，最大 10）"
+          },
+          "band_gap_max": {
+            "type": "number",
+            "description": "能带间隙上限过滤（eV），用于筛选金属/半导体"
+          },
+          "is_stable": {
+            "type": "boolean",
+            "description": "仅返回热力学稳定的材料（位于凸包上）"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "submit_compute_job",
+      "description": "将 DFT 计算作业提交到已配置的算力后端（COMPUTE_PROVIDER: scnet / slurm / local）。\n支持 QE (pw.x, ph.x 等)、VASP (vasp_std 等)、Gaussian (g16) 三种引擎。\n提交后返回 task_id 和 job_id，通过 check_job_status 查询进度，\n完成后通过 download_job_results 下载结果。\n\n示例：\nsubmit_compute_job(command='mpirun -np 16 pw.x -i scf.in > scf.out', cwd='my_project/03_mol_H2')\n\n⚠️ **cwd 必须设为存放输入文件的那个叶子目录**（与 create_*_input 的 output_dir 完全一致）。支持绝对路径或相对于 workspace 的相对路径。\n⚠️ **不要在 command 里写 `cd 子目录 && ...` 来切换工作目录**：系统已在 cwd 中运行，且会剥除命令开头的 `cd X &&` 前缀；若用它指向子目录，mpirun 会在 cwd 根目录跑、找不到输入文件。正确做法是把 cwd 直接设到该子目录，command 里只写计算命令（如 `mpirun -np 32 vasp_std`）。\n⚠️ 提交前必须确保输入文件已通过 create_qe_input / create_vasp_input 生成。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "DFT 计算命令。格式：mpirun -np <核数> <可执行文件> -i <输入文件> > <输出文件>\n支持 cd /path && 命令 格式指定工作目录"
+          },
+          "cwd": {
+            "type": "string",
+            "description": "工作目录（包含输入文件）。支持绝对路径或相对于 workspace 的相对路径。\n示例: 'my_project/03_mol_H2'（相对 workspace）或一个绝对路径"
+          },
+          "nproc": {
+            "type": "integer",
+            "description": "并行核数（可选）。不指定则按体系大小自动选择或从命令中的 -np 解析。"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "会话 ID（可选）。同一会话内的作业共享 outdir，支持分步计算（SCF → NSCF → DOS）。"
+          }
+        },
+        "required": [
+          "command",
+          "cwd"
+        ]
+      }
+    },
+    {
+      "name": "check_job_status",
+      "description": "查询算力后端作业的运行状态。\n支持通过 task_id（submit 返回）或 job_id 查询。\n也可以不传参数，列出最近的作业。\n\n返回状态：\n- statPD: 排队中\n- statR: 运行中\n- statC: 已完成 → 下一步调用 download_job_results\n- statE: 错误\n\n⚠️ 此工具只返回调度状态，不含 DFT 计算数据。\n要查看能量、收敛、力等计算进度，请配合 preview_remote_file 读取输出文件：\n- VASP: preview_remote_file(task_id='xxx', filename='OSZICAR')\n- QE: preview_remote_file(task_id='xxx', filename='scf.out')\n\n示例：check_job_status(task_id='a1b2c3d4')",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "任务 ID（submit_compute_job 返回的 task_id）"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "作业 ID（submit_compute_job 返回的 job_id）"
+          },
+          "list_recent": {
+            "type": "boolean",
+            "description": "列出最近的作业（默认 false）。设为 true 时忽略 task_id/job_id"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "列出作业的数量限制（默认 10）"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "download_job_results",
+      "description": "从 SCNet 超算下载已完成作业的计算结果到本地。\n在 check_job_status 确认作业状态为 statC（已完成）后调用。\n自动下载所有计算产出文件（.out, .dat, .gnu, pdos, OUTCAR 等）。\n\n**NEB / 多目录作业**：自动递归下载 image 子目录（00/ 01/ ... 0N/）的 OUTCAR/OSZICAR/CONTCAR/POSCAR/vasprun.xml。其他作业如需下子目录，设 include_subdirs=true。\n\n**MCP 重启后**：若 task_id 已丢失，可改用 remote_dir 直接指定远程目录（配合 local_dir 指定落地位置）。\n\n示例：\ndownload_job_results(task_id='a1b2c3d4')\ndownload_job_results(remote_dir='/work/home/xxx/jobs/a1b2c3d4', local_dir='HMF_DMF_catalysis/05_neb')",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "任务 ID（submit_compute_job 返回的 task_id）。与 remote_dir 二选一。"
+          },
+          "remote_dir": {
+            "type": "string",
+            "description": "远程作业目录绝对路径（如 '/work/home/xxx/jobs/a1b2c3d4'）。task_id 在 MCP 重启后丢失时使用，与 task_id 二选一。"
+          },
+          "local_dir": {
+            "type": "string",
+            "description": "本地落地目录（仅 remote_dir 模式需要）。支持绝对路径或相对于 workspace 的相对路径。省略时默认落到 workspace/<远程目录名>。"
+          },
+          "include_subdirs": {
+            "type": "boolean",
+            "description": "是否递归下载所有非 tmp 子目录（默认 false）。NEB image 子目录（两位数字命名）无论此参数为何都会下载。"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "preview_remote_file",
+      "description": "实时预览超算上的远程文件内容或列出目录。\n\n**读取文件末尾**（默认模式）：\n  preview_remote_file(task_id='xxx', filename='OSZICAR')  → 最后 100 行\n  preview_remote_file(task_id='xxx', filename='OUTCAR', tail_lines=200)  → 最后 200 行\n\n**搜索文件内容**（grep 模式）：\n  preview_remote_file(task_id='xxx', filename='OUTCAR', grep='EDIFF')  → 搜索包含 EDIFF 的行\n  preview_remote_file(task_id='xxx', filename='OUTCAR', grep='F=', grep_last=5)  → 只看最后 5 条匹配\n\n**读取完整文件**：\n  preview_remote_file(task_id='xxx', filename='scf.out', tail=false)\n\n**列出目录**（不传 filename）：\n  preview_remote_file(task_id='xxx')  → 列出远程目录所有文件和大小\n\n⚠️ 注意：OUTCAR 等大文件（>10MB）建议用 grep 或 tail 模式，不要全文读取。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "作业 task_id。用于自动定位远程工作目录。与 remote_dir 二选一。"
+          },
+          "remote_dir": {
+            "type": "string",
+            "description": "远程目录绝对路径（如 '/work/home/xxx/jobs/abc123'）。当 MCP 重启后 task 记录丢失时，可直接指定。与 task_id 二选一。"
+          },
+          "filename": {
+            "type": "string",
+            "description": "要预览的文件名（如 'scf.out'、'OSZICAR'）。不传则列出远程目录所有文件。支持子目录路径如 '01/OUTCAR'（NEB 场景）。"
+          },
+          "tail": {
+            "type": "boolean",
+            "description": "是否只显示文件末尾。默认 true，设为 false 查看全文。grep 模式下此参数无效。"
+          },
+          "tail_lines": {
+            "type": "number",
+            "description": "末尾显示行数。默认 100。可调大以看更多历史（如 500）。"
+          },
+          "grep": {
+            "type": "string",
+            "description": "搜索关键词（大小写不敏感）。返回包含该关键词的所有行及上下文。适合在大文件中精确定位信息（如在 OUTCAR 中搜 'EDIFF'、'magnetization'）。默认字面匹配；需要正则/多模式时设 regex=true（如 grep='130 F=|140 F=', regex=true）。"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "grep 是否按正则表达式解析（默认 false = 字面匹配）。true 时支持 alternation `|`、字符类等（大小写不敏感）。无效正则会报错。"
+          },
+          "grep_last": {
+            "type": "number",
+            "description": "grep 模式下只返回最后 N 条匹配（适用于只关心最新状态的场景）。例如 grep='F=', grep_last=10 → 只看 OSZICAR 最后 10 步能量。"
+          },
+          "grep_after": {
+            "type": "number",
+            "description": "grep 模式：每条匹配后额外显示 N 行（等价 grep -A）。例如取 OUTCAR 最后一个 'TOTAL-FORCE' 块：grep='TOTAL-FORCE', grep_after=40, grep_last=1。"
+          },
+          "grep_before": {
+            "type": "number",
+            "description": "grep 模式：每条匹配前额外显示 N 行（等价 grep -B）。"
+          },
+          "grep_context": {
+            "type": "number",
+            "description": "grep 模式：每条匹配前后各显示 N 行（等价 grep -C，默认 2）。被 grep_after / grep_before 覆盖（如指定后者则各自生效）。"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "cancel_job",
+      "description": "取消算力后端上正在运行或排队的作业。支持通过 job_id 直接取消，或通过 task_id 查找对应的 job_id 后取消。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "后端作业 ID（如 Slurm jobid '6301439'）。与 task_id 二选一。"
+          },
+          "task_id": {
+            "type": "string",
+            "description": "本地 task_id（8 位 hex）。会自动查找对应的 job_id。与 job_id 二选一。"
+          }
+        },
+        "required": []
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "dft-autopilot",
+    "version": "2.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 5812,
+  "stderr": "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  DFT AutoPilot — MCP Server\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  计算后端: scnet\n  工作目录: /pkg/workspace\n  ⚠️ 算力后端 \"scnet\" 未配置，作业提交类工具不可用（输入生成 / 结果解析 / 检索仍可用）。请按 .env.example 填写对应后端的连接信息。\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[MCP] ✅ 注册工具: create_qe_input\n[MCP] ✅ 注册工具: extract_dft_results\n[MCP] ✅ 注册工具: lookup_pseudopotential\n[MCP] ✅ 注册工具: lookup_hubbard_u\n[MCP] ✅ 注册工具: import_structure\n[MCP] ✅ 注册工具: create_vasp_input\n[MCP] ✅ 注册工具: extract_vasp_results\n[MCP] ✅ 注册工具: create_gaussian_input\n[MCP] ✅ 注册工具: extract_gaussian_results\n[MCP] ✅ 注册工具: run_pymatgen\n[MCP] ✅ 注册工具: plot_chart\n[MCP] ✅ 注册工具: write_report\n[MCP] ✅ 注册工具: search_literature\n[MCP] ✅ 注册工具: search_materials\n[MCP] ✅ 注册工具: submit_compute_job\n[MCP] ✅ 注册工具: check_job_status\n[MCP] ✅ 注册工具: download_job_results\n[MCP] ✅ 注册工具: preview_remote_file\n[MCP] ✅ 注册工具: cancel_job\n[MCP] 📦 共注册 19 个 DFT 工具\n\n  已注册 19 个工具\n  工具列表: create_qe_input, extract_dft_results, lookup_pseudopotential, lookup_hubbard_u, import_structure, create_vasp_input, extract_vasp_results, create_gaussian_input, extract_gaussian_results, run_pymatgen, plot_chart, write_report, search_literature, search_materials, submit_compute_job, check_job_status, download_job_results, preview_remote_file, cancel_job\n\n\n✅ MCP Server 已启动 (stdio 模式)\n\n"
+}

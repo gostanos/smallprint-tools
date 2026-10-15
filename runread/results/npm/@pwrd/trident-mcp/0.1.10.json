@@ -1,0 +1,448 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@pwrd/trident-mcp",
+  "version": "0.1.10",
+  "integrity": {
+    "dist": "sha512-o9LokUvpXEJ7d9rGkINMrAzWT/lkctTKA9An15lGSmU/ng2HcgvnJn+PUmDIwQxOpuze8ouDzj529Q0W/QbZ8A==",
+    "installed": "sha512-o9LokUvpXEJ7d9rGkINMrAzWT/lkctTKA9An15lGSmU/ng2HcgvnJn+PUmDIwQxOpuze8ouDzj529Q0W/QbZ8A=="
+  },
+  "bin": "node_modules/@pwrd/trident-mcp/./bin/trident-mcp.js",
+  "main": null,
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-14T14:41:34.432Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "mcp_ping",
+      "description": "Check that trident-mcp is running.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "mcp_login",
+      "description": "Probe PM SSO login or complete browser SSO. proceed=false: probe only. When login is needed, returns displayText (markdown blockquote) — show it VERBATIM as the only user-facing auth message; do not prepend or append text. proceed=true with skipElicitation=true: open browser after user agreed in chat.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "proceed": {
+            "type": "boolean",
+            "default": false,
+            "description": "false（默认）：仅探测 auth.json / PM_AUTH_TOKEN 与 token 有效性，不打开浏览器。true：尝试 SSO 登录（须配合 skipElicitation=true，表示用户已在对话中确认）。"
+          },
+          "skipElicitation": {
+            "type": "boolean",
+            "default": false,
+            "description": "仅 proceed=true 时有效。true：用户已在对话中明确同意 SSO 授权，此时才打开浏览器。false：返回 consent_required，提示先在对话中确认。"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "me",
+      "description": "Return the current logged-in PM user and their project list (id + name). Tries pm/getUser on each call and refreshes auth.json project cache; falls back to cached project list if refresh fails. Requires mcp_login status ok first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "pm_tasks",
+      "description": "Project scoping for all PM query/stat tools (pm_tasks, pm_versions, pm_users, pm_project_members, pm_workflow_states, pm_task_nodes, pm_priorities, pm_severities):\n- When projectId and projectName are both omitted: if the user has exactly ONE project, auto-select it and proceed.\n- When both are omitted and the user has MULTIPLE projects: stop and return the project list. Ask the user which project to query or aggregate. Do NOT scan all projects, do NOT guess, do NOT loop every project in scripts.\n- Call \"me\" to list projects when helpful. 查询 PM 项目任务。筛选：versionGroupId、tagId、tagIds、versionNames（多版本用 tagIds 或 versionNames 一次合并查询）；负责人 mineOnly/userIds/assigneeNames；创建人 creatorIds/creatorNames；状态 unfinishedOnly/finishedOnly/overdueOnly/statusNames/statusIds；类型 nodeIds/nodeNames；优先级 priorities/priorityNames；严重程度 severities/severityNames；日期 preStartTime*、preEndTime*、createTime* 等。JoSQL 内部构建，勿传原始 JoSQL。优先用 *Names 参数，不必先调发现类工具。任务数组位于 structuredContent.body.data.tasks；list/all 一次返回全量扁平列表。\n\n统计与分布：按状态/优先级/版本/延期分别计数或交叉统计时，用 versionNames（或 tagIds）+ unfinishedOnly 等宽条件调用一次，在 tasks[] 上本地分组；禁止按单个 statusNames、priorityNames 或 tagId 循环调用。数组参数为合并筛选，不是分维度 count。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "项目 ID；可选。可与 projectName 同时传入，同时传入时优先使用 projectId；均未传时，若用户仅有 1 个项目则自动选用"
+          },
+          "projectName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目名称；可选。可单独传入并自动解析为项目 ID；与 projectId 同时传入时优先使用 projectId"
+          },
+          "mineOnly": {
+            "type": "boolean",
+            "description": "true 表示只查当前登录用户负责的任务"
+          },
+          "userIds": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "按负责人 userId 筛选；与 assigneeNames 二选一"
+          },
+          "assigneeNames": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "按负责人姓名筛选（username/nickname，项目内自动解析为 userIds）"
+          },
+          "versionGroupId": {
+            "type": "integer",
+            "description": "版本组 ID，用于按版本标签筛选"
+          },
+          "tagId": {
+            "type": "integer",
+            "description": "任务标签 ID（单版本）；与 tagIds、versionNames 互斥"
+          },
+          "tagIds": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "description": "多个版本/路径的任务树 tagId（如 5515、5734 对应不同 QA 版本；可用 pm_versions 查 taskPaths[].taskFilter.tagId）。一次调用返回属于其中任意 tagId 的任务，用于多版本合并查询，不是每个 tagId 各调一次 pm_tasks。内部走 JoSql taskTagId 条件，请求体不传 tagId。数组表示「属于其中任意一项即命中」，返回合并结果，不会给出各元素分别的数量；若要分维度统计，请宽条件查一次后在 body.data.tasks 上本地分组，不要按单个值循环调用 pm_tasks"
+          },
+          "versionNames": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "版本/路径名称（如 5.30QA、7.10QA）；项目内解析为 tagIds 后合并查询，与 tagId、tagIds 互斥。数组表示「属于其中任意一项即命中」，返回合并结果，不会给出各元素分别的数量；若要分维度统计，请宽条件查一次后在 body.data.tasks 上本地分组，不要按单个值循环调用 pm_tasks"
+          },
+          "filterId": {
+            "type": "integer",
+            "description": "PM 系统或已保存的筛选器 ID"
+          },
+          "unfinishedOnly": {
+            "type": "boolean",
+            "description": "只查未完成任务（按工作流完成属性）"
+          },
+          "finishedOnly": {
+            "type": "boolean",
+            "description": "只查已完成任务（按工作流完成属性）"
+          },
+          "overdueOnly": {
+            "type": "boolean",
+            "description": "只查延期且未完成的任务"
+          },
+          "dueTodayOnly": {
+            "type": "boolean",
+            "description": "只查预计今天截止的任务"
+          },
+          "finishedTodayOnly": {
+            "type": "boolean",
+            "description": "只查今天完成的任务"
+          },
+          "nodeIds": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "按任务类型 nodeId 筛选；与 nodeNames 二选一"
+          },
+          "nodeNames": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "按任务类型名称筛选（项目内自动解析为 nodeIds）"
+          },
+          "statusIds": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "按工作流状态 ID 筛选；与 statusNames 二选一"
+          },
+          "statusNames": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "按工作流状态名称筛选（项目内自动解析为 statusIds）。数组表示「属于其中任意一项即命中」，返回合并结果，不会给出各元素分别的数量；若要分维度统计，请宽条件查一次后在 body.data.tasks 上本地分组，不要按单个值循环调用 pm_tasks"
+          },
+          "priorities": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "按优先级 ID 筛选；与 priorityNames 二选一"
+          },
+          "priorityNames": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "按优先级名称筛选（项目内自动解析为 priorities）。数组表示「属于其中任意一项即命中」，返回合并结果，不会给出各元素分别的数量；若要分维度统计，请宽条件查一次后在 body.data.tasks 上本地分组，不要按单个值循环调用 pm_tasks"
+          },
+          "severities": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "按严重程度 ID 筛选；与 severityNames 二选一"
+          },
+          "severityNames": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "按严重程度名称筛选（项目内自动解析为 severities）"
+          },
+          "creatorIds": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "按创建人 userId 筛选；与 creatorNames 二选一"
+          },
+          "creatorNames": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "按创建人姓名筛选（username/nickname，项目内自动解析为 creatorIds）"
+          },
+          "summaryContains": {
+            "type": "string",
+            "minLength": 1,
+            "description": "任务标题包含关键字"
+          },
+          "summaryEquals": {
+            "type": "string",
+            "minLength": 1,
+            "description": "任务标题完全匹配"
+          },
+          "preStartTimeStart": {
+            "type": "string",
+            "minLength": 1,
+            "description": "预计开始时间起始，格式 yyyy-MM-dd HH:mm:ss"
+          },
+          "preStartTimeEnd": {
+            "type": "string",
+            "minLength": 1,
+            "description": "预计开始时间截止，格式 yyyy-MM-dd HH:mm:ss"
+          },
+          "preEndTimeStart": {
+            "type": "string",
+            "minLength": 1,
+            "description": "预计结束时间起始，格式 yyyy-MM-dd HH:mm:ss"
+          },
+          "preEndTimeEnd": {
+            "type": "string",
+            "minLength": 1,
+            "description": "预计结束时间截止，格式 yyyy-MM-dd HH:mm:ss"
+          },
+          "createTimeStart": {
+            "type": "string",
+            "minLength": 1,
+            "description": "创建时间起始，格式 yyyy-MM-dd HH:mm:ss"
+          },
+          "createTimeEnd": {
+            "type": "string",
+            "minLength": 1,
+            "description": "创建时间截止，格式 yyyy-MM-dd HH:mm:ss"
+          },
+          "requirementUnfinishedOnly": {
+            "type": "boolean",
+            "description": "关联需求为未完成（reqJoSql）"
+          },
+          "orderByField": {
+            "type": "string",
+            "minLength": 1,
+            "description": "排序字段，如 id、preEndTime、createTime"
+          },
+          "orderByDirection": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "description": "排序方向，默认 desc"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pm_versions",
+      "description": "List version groups and task paths (versions/folders) for a PM project. If projectId/projectName are omitted: auto-select when user has one project; otherwise return project list and ask user to choose. Never scan all projects. Use taskPaths[].taskFilter.tagId with pm_tasks.tagId to filter by a version/path, or versionGroups[].taskFilter.versionGroupId with pm_tasks.versionGroupId to filter by a version group.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "项目 ID；可选。可与 projectName 同时传入，同时传入时优先使用 projectId；均未传时，若用户仅有 1 个项目则自动选用"
+          },
+          "projectName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目名称；可选。可单独传入并自动解析为项目 ID；与 projectId 同时传入时优先使用 projectId"
+          },
+          "includeFolders": {
+            "type": "boolean",
+            "description": "是否返回版本下的文件夹/审核点；默认 true"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pm_users",
+      "description": "List project members (id, username, nickname) for discovery. If projectId/projectName are omitted: auto-select when user has one project; otherwise return project list and ask user to choose. Never scan all projects. When querying tasks prefer assigneeNames/creatorNames on pm_tasks tool instead of calling this first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "项目 ID；可选。可与 projectName 同时传入，同时传入时优先使用 projectId；均未传时，若用户仅有 1 个项目则自动选用"
+          },
+          "projectName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目名称；可选。可单独传入并自动解析为项目 ID；与 projectId 同时传入时优先使用 projectId"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pm_project_members",
+      "description": "List all project members and member groups, including membership in both directions and a synthetic ungrouped group (id=0). If projectId/projectName are omitted: auto-select when user has one project; otherwise return project list and ask user to choose. Never scan all projects. Use after pm_tasks when results need to be grouped or otherwise processed by member group; match task assignee IDs to members[].id or memberGroups[].memberIds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "项目 ID；可选。可与 projectName 同时传入，同时传入时优先使用 projectId；均未传时，若用户仅有 1 个项目则自动选用"
+          },
+          "projectName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目名称；可选。可单独传入并自动解析为项目 ID；与 projectId 同时传入时优先使用 projectId"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pm_workflow_states",
+      "description": "List workflow states for a PM project; returns full WorkflowStateModel fields (id, projectId, state, name, description, color, inactive, sortId). If projectId/projectName are omitted: auto-select when user has one project; otherwise return project list and ask user to choose. Never scan all projects. Use for discovery only; when querying tasks prefer pm_tasks.statusNames instead of calling this first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "项目 ID；可选。可与 projectName 同时传入，同时传入时优先使用 projectId；均未传时，若用户仅有 1 个项目则自动选用"
+          },
+          "projectName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目名称；可选。可单独传入并自动解析为项目 ID；与 projectId 同时传入时优先使用 projectId"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pm_task_nodes",
+      "description": "List enabled task types/nodes for a PM project; returns full TaskNodeModel fields and only status=1 (enabled) nodes. If projectId/projectName are omitted: auto-select when user has one project; otherwise return project list and ask user to choose. Never scan all projects. Use for discovery only; when querying tasks prefer pm_tasks.nodeNames instead of calling this first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "项目 ID；可选。可与 projectName 同时传入，同时传入时优先使用 projectId；均未传时，若用户仅有 1 个项目则自动选用"
+          },
+          "projectName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目名称；可选。可单独传入并自动解析为项目 ID；与 projectId 同时传入时优先使用 projectId"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pm_priorities",
+      "description": "List task priority options for a PM project; returns full option fields (id, label, color, status, seq, disabled). If projectId/projectName are omitted: auto-select when user has one project; otherwise return project list and ask user to choose. Never scan all projects. Use for discovery only; when querying tasks prefer pm_tasks.priorityNames instead of calling this first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "项目 ID；可选。可与 projectName 同时传入，同时传入时优先使用 projectId；均未传时，若用户仅有 1 个项目则自动选用"
+          },
+          "projectName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目名称；可选。可单独传入并自动解析为项目 ID；与 projectId 同时传入时优先使用 projectId"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pm_severities",
+      "description": "List task severity options for a PM project; returns full option fields (id, label, color, status, seq, disabled). If projectId/projectName are omitted: auto-select when user has one project; otherwise return project list and ask user to choose. Never scan all projects. Use for discovery only; when querying tasks prefer pm_tasks.severityNames instead of calling this first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "项目 ID；可选。可与 projectName 同时传入，同时传入时优先使用 projectId；均未传时，若用户仅有 1 个项目则自动选用"
+          },
+          "projectName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目名称；可选。可单独传入并自动解析为项目 ID；与 projectId 同时传入时优先使用 projectId"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "trident-mcp",
+    "version": "0.1.9"
+  },
+  "protocolVersion": null,
+  "instructions": "Authentication for PM tools:\n- Call mcp_login (proceed=false) to probe auth.json and token validity. It does NOT open the browser.\n- If login is needed: ask the user in chat whether to open the browser for PM SSO. Do NOT open the browser until the user explicitly agrees in chat.\n- When any tool returns requiresUserConfirmation=true with displayText (including pm_tasks auth errors): output ONLY displayText to the user, verbatim. Keep the ## heading and the single bold CTA line. Do NOT prepend task context (e.g. \"需要先登录\"), do NOT append post-login plans, and do NOT repeat the CTA at the end.\n- After the user agrees in chat, call mcp_login(proceed=true, skipElicitation=true) to open the browser and complete SSO, then retry the original tool.\n- Calling mcp_login(proceed=true) without skipElicitation=true returns consent_required and will NOT open the browser.\n- Alternative: run npm run login in the trident-mcp directory.\n- After mcp_login status is ok, call me or other PM tools. Other PM tools will NOT auto-open the browser.\n- Project list may use auth.json cache when PM refresh fails; task/version/member data must always be fetched live from PM. Never use prior conversation history for business data.\n\nProject scoping for all PM query/stat tools (pm_tasks, pm_versions, pm_users, pm_project_members, pm_workflow_states, pm_task_nodes, pm_priorities, pm_severities):\n- When projectId and projectName are both omitted: if the user has exactly ONE project, auto-select it and proceed.\n- When both are omitted and the user has MULTIPLE projects: stop and return the project list. Ask the user which project to query or aggregate. Do NOT scan all projects, do NOT guess, do NOT loop every project in scripts.\n- Call \"me\" to list projects when helpful.\n\npm_tasks 统计与分布查询规则：\n- 需要按状态、优先级、版本、延期等维度分别计数或交叉统计时：用较宽条件（如 versionNames + unfinishedOnly）调用 pm_tasks 一次，从 body.data.tasks 本地分组；禁止为每个 statusNames、priorityNames 或 tagId 单独循环调用 pm_tasks。\n- statusNames、versionNames、priorityNames、tagIds 等数组参数表示「命中其中任意一项即返回」，是合并结果，不会返回各元素各自的数量。\n- 多版本合计或分版本统计：优先 versionNames 或 tagIds 一次拉取后本地按 taskTagId 分组；不要对多个 tagId 逐个调用 pm_tasks。\n- pm/task/list/all 一次返回全量扁平 tasks[]，totalCount 通常等于 tasks.length；无需分页或循环调用 pm_tasks。\n- 状态名、优先级名、成员组等元数据用 pm_workflow_states、pm_priorities、pm_project_members，各调一次即可。\n- 任务、版本、成员、工作流状态等项目业务数据：每次用户询问都必须实时调用 PM 工具，禁止用对话历史中的旧结果做汇总或估算。项目列表（me）允许使用 auth.json 缓存。",
+  "durationMs": 8956,
+  "stderr": ""
+}

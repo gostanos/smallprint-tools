@@ -1,0 +1,538 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "firefox-mcp-marionette",
+  "version": "0.9.0",
+  "integrity": {
+    "dist": "sha512-5WD8cOH88GvjZmvbutqf1IFSyG/vbRUUCcL6439AB+7y4f1b9/bLb8Cua3viBuWnjMJBLCQKs5pJ3LcQqyscug==",
+    "installed": "sha512-5WD8cOH88GvjZmvbutqf1IFSyG/vbRUUCcL6439AB+7y4f1b9/bLb8Cua3viBuWnjMJBLCQKs5pJ3LcQqyscug=="
+  },
+  "bin": "node_modules/firefox-mcp-marionette/src/server.mjs",
+  "main": "src/server.mjs",
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-15T02:38:37.005Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "fx_status",
+      "description": "Health: connection, session, active + configured endpoint, current page, navigator.webdriver flag. Never opens a session on its own: with no committed endpoint it probes non-invasively (TCP connect, expect the Marionette hello, close) and reports connected:false with the probe result and decision options; with a committed endpoint it attaches/re-attaches and reports live state. Reports launched/launchedCurrent when this server started the instance. When the result contains a `bootstrap` decision, present its question/options to the user and act only on THEIR choice.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_launch",
+      "description": "Bootstrap option 1 — start a NEW dedicated Firefox with Marionette: a fresh profile on a NEW port, with the port set through the profile user.js PREFERENCES (user_pref marionette.port / marionette.enabled — Firefox has no --marionette-port CLI flag, so this is the only way to move it off the default 2828), then `firefox --marionette --no-remote -profile <dir>`, and attach to it. The instance starts empty (no cookies/logins from your daily profile). Port defaults to the first free port above the configured one. Binary: FX_MCP_FIREFOX_BIN env (e.g. \"node /path/standin.mjs\") or firefox on PATH / common system paths. Returns the started pid, port, and profile, and leaves the MCP attached to the new instance. Run it only when the user chose this option from a decision payload or explicitly asked to start a new browser — never as a silent fallback when the configured endpoint is busy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "number",
+            "description": "marionette port; default = first free port above the configured one"
+          },
+          "profile": {
+            "type": "string",
+            "description": "profile directory; default <profile root>/firefox-mcp-marionette-<port>"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_shutdown",
+      "description": "Stop a Firefox that THIS server started via fx_launch (killed by the recorded pid — a user-launched browser is never touched). Omit {port} to stop the endpoint this MCP is attached to.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "number",
+            "description": "port of the fx_launch-managed instance to stop"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_connect",
+      "description": "Point the MCP at a Firefox endpoint (host/port) and attach — this is how a running browser detected at the first-trigger probe gets committed (and how to re-point at runtime). Marionette serves ONE client per browser, so use a dedicated instance per automation — the env-configured default (FX_MARIONETTE_HOST/PORT) is used when both args are omitted. Loopback only (by design). Committing an endpoint makes later in-session reconnects silent. Returns the active endpoint + session; a failed attach returns the probe result + options instead of a raw error. Call it only after the user chose/approved it (a decision-payload option or their explicit direction).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "loopback host, default 127.0.0.1"
+          },
+          "port": {
+            "type": "number",
+            "description": "marionette port, default = configured env port"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_navigate",
+      "description": "Navigate the active tab to a URL",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_page",
+      "description": "Current URL and title",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_snapshot",
+      "description": "Interactive-element map with refs (use refs in fx_click/fx_type/...). Crosses OPEN shadow roots by default: web-component modals/dialogs (e.g. LinkedIn post-apply prompts) get their own refs, marked \"SHADOW\"; clicking a shadow ref fires a full pointer/mouse sequence in-page (the driver cannot target shadow elements). deep=false → light DOM only. Closed shadow roots are never visible to any tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deep": {
+            "type": "boolean",
+            "description": "include controls inside open shadow roots (default true)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_click",
+      "description": "Click element by ref (from fx_snapshot) or CSS selector. Digit-leading ids: use [id=\"…\"] form (a bare #1abc is not valid CSS) — or pass it as-is and the tool will rewrite it for you. Unsupported CSS (e.g. :has()) is caught in-page with an actionable error before the driver call. If the element is obscured by an overlay of its own widget (Material button chrome, an li/label over a hidden input), the obscuring topmost element is clicked instead and reported as used:\"overlay-top:…\". Shadow-ref elements (marked SHADOW in fx_snapshot) are clicked in-page via the full pointer/mouse event sequence and reported via:\"shadow\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "number"
+          },
+          "selector": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_type",
+      "description": "Type text into element (clears first unless keep=true). Same selector rules as fx_click (digit-leading #ids auto-rewritten to [id=\"…\"]; unsupported CSS caught in-page). Shadow-ref elements get the value set in-page (native value setter + input/change events) and report via:\"shadow\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "number"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "keep": {
+            "type": "boolean",
+            "description": "true = append instead of clearing"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_select",
+      "description": "Set <select> by option value or visible label (light DOM; shadow selects: use fx_field by index/label)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "number"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_toggle",
+      "description": "Set checkbox/radio state (light DOM; shadow checkboxes: use fx_field by index/label or fx_click)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "number"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "on": {
+            "type": "boolean",
+            "description": "default true"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_upload",
+      "description": "Set a file input value (raw-path sendKeys; light DOM — for shadow-root file inputs, set files in-page via fx_eval); path must be under FX_MCP_FILE_ROOTS",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "number"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_form",
+      "description": "Structured dump of all visible form fields on the page: index, type, label, context, value, options, files, plus aggregated choice groups (radio/checkbox sets with their question context and per-option state) — audit every required group, not just individually labeled fields. Crosses OPEN shadow roots by default: web-component dialogs render their fields inside shadow trees and are included (flagged sh:true). Form workflow: run fx_form first to learn the fields/groups, then set values with fx_field (by index/id/label) and answer radio/checkbox/button questions with fx_answer. Prefer these over hand-written fx_eval form scripts. Optional CSS root scopes the light-DOM dump.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "CSS selector to scope the dump (default: whole page)"
+          },
+          "max": {
+            "type": "number",
+            "description": "max fields (default 80)"
+          },
+          "deep": {
+            "type": "boolean",
+            "description": "include fields inside open shadow roots (default true)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_field",
+      "description": "Set a form field by index (from fx_form), by id, or by label substring. Text/textarea = real keystrokes (framework-safe); checkbox/radio = real click that reaches the wanted state (pass value \"on\"/\"off\", default on) with verify + label-click + event fallbacks; select = option match by value or label. Scrolls the field into view automatically. File inputs: use fx_upload.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "number",
+            "description": "field index from fx_form"
+          },
+          "id": {
+            "type": "string",
+            "description": "field id attribute"
+          },
+          "label": {
+            "type": "string",
+            "description": "field label (substring match)"
+          },
+          "value": {
+            "type": "string",
+            "description": "text to type / option value / \"on\"|\"off\" for checkbox-radio"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_answer",
+      "description": "Answer a grouped choice question (Yes/No button groups, radio or checkbox option groups): locate the group by matching the question text, pick the option by its label, perform a real click, then re-read and report the resulting selection state. If the target was already selected (or is still not selected) after the click — a no-op click that frameworks often do not register — performs a toggle cycle (click another option, then the target) on exclusive groups and re-verifies. If the option labels are unreadable (label-less li/label rows), it self-heals by clicking the visible wrapper whose text matches the choice. Searches light + open shadow DOM (shadow options are clicked in-page via the full pointer sequence). Use this instead of clicking raw button refs — option order/refs can shift on re-render, and matching by question text prevents picking the wrong option of a neighbouring question.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "text that must appear in the question context"
+          },
+          "choice": {
+            "type": "string",
+            "description": "option label to select, e.g. \"Yes\" or \"New York City\""
+          },
+          "exact": {
+            "type": "boolean",
+            "description": "require exact label match (default false: case-insensitive substring allowed)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_scroll",
+      "description": "Scroll an element (ref from fx_snapshot, or selector) into view so it is not obscured (e.g. by a fixed header/cookie bar), wait, and return its top coordinate. Use before clicking elements that failed as \"not clickable because another element obscures it\". Shadow refs are scrolled in-page (reported r:\"sh:ok:<top>\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "number"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "pos": {
+            "type": "string",
+            "description": "start | center | end (default center)"
+          },
+          "wait_ms": {
+            "type": "number",
+            "description": "wait after scroll (default 400, max 2000)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_gates",
+      "description": "Consent/attestation gate audit: lists visible checkboxes with their nearby text (flags certify/understand/agree/consent/attest/terms/privacy wording — the hidden gates of long application forms), disabled buttons (a dead Submit/Apply), and visible alert-style banners. Includes open shadow-root checkboxes/buttons. Read-only; run it whenever a submit click does nothing or a submit button is disabled — the fix is usually an unchecked consent checkbox, not bot protection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_links",
+      "description": "Hyperlinks of the current page: text + absolute href (ready to navigate). Generic — any site. Use selector to scope which anchors to list (e.g. a[href^=\"/url\"]); deep=false for light DOM only. For redirect-wrapped destinations (e.g. Google /goto), the in-DOM href is the wrapper — use fx_search {resolve:true} or navigate and fx_page to learn the real URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS filter on which anchors to list (default: all <a>)"
+          },
+          "deep": {
+            "type": "boolean",
+            "description": "include anchors inside open shadow roots (default true)"
+          },
+          "max": {
+            "type": "number",
+            "description": "max links (default 100)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_extract",
+      "description": "Structured page read (\"scrape\" without writing fx_eval JS): one row per container matching the selector. Without fields each row is {i, text} (the container own innerText); with fields {name: \"css\"|\"text\"} each row gets one entry per field — the text of the first in-container element matching the field CSS (\"text\" = the container own innerText). Generic — any site; the selectors are yours (agent-supplied), not hard-coded.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "container selector (default body → single row)"
+          },
+          "fields": {
+            "type": "object",
+            "description": "{fieldName: cssSelector | \"text\"}"
+          },
+          "deep": {
+            "type": "boolean",
+            "description": "include containers inside open shadow roots (default true)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "max rows (default 25)"
+          },
+          "textLen": {
+            "type": "number",
+            "description": "max chars per text field (default 300)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_search",
+      "description": "Search without writing fx_eval scripts: navigates to the engine results page, waits for the results container, and returns structured rows {title, link, snippet} — the in-DOM href, which for some engines (Google /goto) is a redirect wrapper hiding the real URL. Engine presets: google (default), bing, duckduckgo — their selectors are swappable data: override with container/title/snippet for other engines or when an engine changes its DOM. With resolve:true each result is followed in the real browser (no CORS issue) and reports the genuine final URL + page title; the browser is left on the results page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "engine": {
+            "type": "string",
+            "description": "google | bing | duckduckgo (default google)"
+          },
+          "max": {
+            "type": "number",
+            "description": "max results (default 8, cap 25)"
+          },
+          "resolve": {
+            "type": "boolean",
+            "description": "follow each link and report the real final URL + title (default false)"
+          },
+          "container": {
+            "type": "string",
+            "description": "override results-container selector"
+          },
+          "title": {
+            "type": "string",
+            "description": "override title selector"
+          },
+          "snippet": {
+            "type": "string",
+            "description": "override snippet selector"
+          },
+          "wait_ms": {
+            "type": "number",
+            "description": "how long to wait for the results container (default 10000, max 30000)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_eval",
+      "description": "Execute JS in the page. `js` is tried as an EXPRESSION first — its completion value is returned, so `1 + 1`, `document.title`, `var x = 1; x`, `(async () => { … })()` and `fetch(u).then(r => r.json())` all work without `return`. If that fails with a SyntaxError (classic function-body style with a top-level `return`), it is re-run as a function body — so `return value` scripts work too. A rejected or Promise value is awaited (default max 30s, wait_ms to tune) and returned as {r: value, awaited: true}; a rejected or long-unsettled Promise is an error.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "js": {
+            "type": "string"
+          },
+          "wait_ms": {
+            "type": "number",
+            "description": "max wait for a Promise-returning body (default 30000, max 120000)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_wait",
+      "description": "Wait until visible text (or CSS selector exists). Text search looks inside open shadow roots too. Default 10s, max 30s",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_screenshot",
+      "description": "Full-page PNG (Marionette captures the entire scrollable document, not just the viewport) to a file under an allowed root (or explicit allowed path)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_windows",
+      "description": "List windows (focused marked)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_window",
+      "description": "Switch active window by handle",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_alert_state",
+      "description": "Text of an open native dialog",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_alert_accept",
+      "description": "Accept (OK) the open native dialog",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_alert_dismiss",
+      "description": "Dismiss (Cancel) the open native dialog",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fx_cookies",
+      "description": "Cookies of the current origin (names/domains only)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "firefox-mcp-marionette",
+    "version": "0.9.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 1328,
+  "stderr": "2026-10-15T02:38:38.233Z firefox-mcp-marionette ready on 127.0.0.1:2828 file roots: /tmp autoLaunch: false profileRoot: /tmp/.mozilla/firefox\n2026-10-15T02:38:38.245Z initialize ok\n2026-10-15T02:38:38.251Z notifications/initialized ok\n2026-10-15T02:38:38.252Z tools/list ok\n"
+}

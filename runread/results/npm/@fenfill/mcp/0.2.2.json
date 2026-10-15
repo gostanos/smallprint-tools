@@ -1,0 +1,542 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@fenfill/mcp",
+  "version": "0.2.2",
+  "integrity": {
+    "dist": "sha512-ElmEhlUlu8ZuWNcj+ESKTODNiWC77I+7bzky0xicNPXJu0w2zzdfhqMZp/zsadsHG4Oy9VyJkMDiiIw8jqE/Ng==",
+    "installed": "sha512-ElmEhlUlu8ZuWNcj+ESKTODNiWC77I+7bzky0xicNPXJu0w2zzdfhqMZp/zsadsHG4Oy9VyJkMDiiIw8jqE/Ng=="
+  },
+  "bin": "node_modules/@fenfill/mcp/dist/index.js",
+  "main": null,
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-14T14:07:13.890Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "analyze_form",
+      "description": "Analyze a blank PDF form with fenfill and list its fillable fields (ids, types, labels). Uploads only the blank form. Costs one page scan per analyzed page unless cached or the PDF has native form fields (free; detect_extra_blanks adds a paid scan of the chosen pages for blanks without a native field); pass estimate: true first to see the cost without uploading. Results are cached locally, so repeat calls and narrowing with `pages` are free. If it returns status \"running\", call it again with the same arguments. To correct the layout and keep the corrections, analyze with save_as_template: true (edits on an unsaved analysis can be used for filling/preview but can't be saved). A rate-limit or busy refusal is waited out automatically (up to about a minute) before it is reported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Absolute path (or ~/…) to the blank PDF."
+          },
+          "pages": {
+            "description": "1-based pages to analyze, e.g. \"1-3,5\". Omit for all. Long PDFs: analyze in chunks; fill_form merges them.",
+            "type": "string",
+            "maxLength": 2000
+          },
+          "save_as_template": {
+            "description": "Also save it as a fenfill template (for fill_template and recipient links).",
+            "type": "boolean"
+          },
+          "access": {
+            "description": "With save_as_template: \"public\" (default; anyone with the template link can fill it) or \"restricted\" (members and recipient links only). create_recipient_link needs \"restricted\".",
+            "type": "string",
+            "enum": [
+              "public",
+              "restricted"
+            ]
+          },
+          "force": {
+            "description": "Re-analyze even if cached (costs scans again).",
+            "type": "boolean"
+          },
+          "estimate": {
+            "description": "Only estimate, uploading nothing: counts pages and detects native form fields on this machine, then returns {page_count, likely_mode, estimated_scans, scans_remaining}.",
+            "type": "boolean"
+          },
+          "detect_extra_blanks": {
+            "description": "PDFs with native form fields: also find blanks that have no native field (e.g. a signature or date line), with a vision pass over the chosen pages: 1 page scan per page (pass pages to limit it). Ignored (no extra cost) when the form is analyzed by AI anyway. A free analysis reports extra_blanks_available: true when this is likely worth it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "fill_form",
+      "description": "Fill a PDF you analyzed with analyze_form and write a new, flattened PDF. Runs entirely on this machine: no network, and the values never leave it. values maps field ids to: text/multiline = string, stamped exactly as given (a date in a text field goes in the format its label or placeholder asks, e.g. \"mmddyyyy\" → \"10042026\"); date = \"YYYY-MM-DD\", printed in the field's date_format (shown on the field, e.g. DD/MM/YYYY); comb = string, one character per cell; checkbox = boolean; radio = option id or label, or the bare option text (\"No\" for \"Smoke? No\"); multiselect = array of those; table = {cellId: value}; table_rows = [{columnId: value}, …]; signature = {\"image_path\": \"/abs/sig.png\"} (PNG or JPG). A signature with signing_requirement \"external\" is signed outside fenfill (on paper or by e-sign) and stays blank. Returns filled/skipped counts and warnings, including text shrunk hard or running past its box and filled boxes that overlap; pass check_pdf to see the result.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The same blank PDF you passed to analyze_form."
+          },
+          "values": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Field id → value (see description). An id may be shortened to an unambiguous prefix of 6+ characters (the preview tags), a table's cell or column id inside its value too; a key that matches nothing is listed in skipped."
+          },
+          "output_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Absolute path (or ~/…) of the new .pdf to write."
+          },
+          "overwrite": {
+            "description": "Replace output_path if it exists.",
+            "type": "boolean"
+          },
+          "check_pdf": {
+            "description": "Also write <output>.check.pdf beside it: the filled PDF with every field box outlined (green filled, orange warning, red skipped, grey empty) and tagged with its id prefix. Open it to verify placement; it stays on this machine.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "values",
+          "output_path"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "fill_template",
+      "description": "Fill a saved fenfill template and write a flattened PDF. The blank PDF and field schema are downloaded; filling happens on this machine and the values are never sent anywhere. values maps field ids to: text/multiline = string, stamped exactly as given (a date in a text field goes in the format its label or placeholder asks, e.g. \"mmddyyyy\" → \"10042026\"); date = \"YYYY-MM-DD\", printed in the field's date_format (shown on the field, e.g. DD/MM/YYYY); comb = string, one character per cell; checkbox = boolean; radio = option id or label, or the bare option text (\"No\" for \"Smoke? No\"); multiselect = array of those; table = {cellId: value}; table_rows = [{columnId: value}, …]; signature = {\"image_path\": \"/abs/sig.png\"} (PNG or JPG). A signature with signing_requirement \"external\" is signed outside fenfill (on paper or by e-sign) and stays blank.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "description": "Template id (from list_templates)."
+          },
+          "values": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Field id → value (see description). An id may be shortened to an unambiguous prefix of 6+ characters (the preview tags), a table's cell or column id inside its value too; a key that matches nothing is listed in skipped."
+          },
+          "output_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Absolute path (or ~/…) of the new .pdf to write."
+          },
+          "overwrite": {
+            "description": "Replace output_path if it exists.",
+            "type": "boolean"
+          },
+          "check_pdf": {
+            "description": "Also write <output>.check.pdf beside it: the filled PDF with every field box outlined (green filled, orange warning, red skipped, grey empty) and tagged with its id prefix. Open it to verify placement; it stays on this machine.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "template_id",
+          "values",
+          "output_path"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_templates",
+      "description": "List the workspace's saved fenfill templates, newest first. analyzed_pages lists the pages fenfill analyzed: a page missing from it (compare page_count) was never analyzed, so it has no fields yet (reanalyze_template fixes that).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "description": "Page size (1–100, default 20).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "description": "next_cursor from the previous call.",
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_template",
+      "description": "Get a saved template's fillable fields (ids, types, labels) for fill_template. Use pages to narrow a large form. unanalyzed_pages (when present) lists pages fenfill never analyzed: they have no fields yet; reanalyze_template with kind scratch analyzes them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "description": "Template id (from list_templates)."
+          },
+          "pages": {
+            "description": "1-based pages, e.g. \"1-3,5\". Omit for all.",
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "create_recipient_link",
+      "description": "Create a personal fill link for one recipient of a restricted template (analyze_form with save_as_template: true and access: \"restricted\" makes one; a public template answers template_not_restricted). Needs a plan with recipient links. Track it with get_recipient_status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "description": "Template id (from list_templates)."
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "description": "Who it's for, e.g. a name (1–60 characters)."
+          },
+          "expires_at": {
+            "description": "Optional ISO 8601 expiry, e.g. 2026-12-31T23:59:59Z.",
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "template_id",
+          "label"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_recipient_status",
+      "description": "List a template's recipient links and their status (pending, opened, completed).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "description": "Template id (from list_templates)."
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_account",
+      "description": "Show this API key's plan, page scans left and limits. To price an analysis, call analyze_form with estimate: true instead: it counts the pages and detects native fields locally, with no upload, and compares that with scans_remaining.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "preview_page",
+      "description": "Render one page as a PNG with every field box outlined (green filled, orange warning, red skipped, grey empty) and tagged with its id prefix, plus a legend: tag → id, type, label, box (page fractions, top-left origin, as edit_template uses), format and font_pt; options, table cells (row, col) and table_rows columns with their own boxes. placement_warnings ([] = checked, clean) covers every box shown: much larger text than the page's other fields, a box over printed text (not on scans), a box past its ruled cell. Use it as a read-only placement audit. values (see that parameter) stamp test values. overlay: \"outline\" drops the tags, \"none\" shows the page with only the stamped values (to read print under a tag, or after check_copy_failed). crop + zoom magnify a region; legend: \"changed\" lists only what changed since your last preview of the page (moved_into: fields now inside a table or group). It renders the local working copy (edit_template) when one exists, else the saved or analyzed version (edited: true/false). Rendered on this machine: nothing is written to disk and the values are never sent anywhere.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "The blank PDF you analyzed with analyze_form (absolute or ~/…). Pass this or template_id.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "template_id": {
+            "description": "A saved template's id. Pass this or path.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000,
+            "description": "1-based page number."
+          },
+          "values": {
+            "description": "Optional, exactly as for fill_form (ids may be shortened the same way): values maps field ids to: text/multiline = string, stamped exactly as given (a date in a text field goes in the format its label or placeholder asks, e.g. \"mmddyyyy\" → \"10042026\"); date = \"YYYY-MM-DD\", printed in the field's date_format (shown on the field, e.g. DD/MM/YYYY); comb = string, one character per cell; checkbox = boolean; radio = option id or label, or the bare option text (\"No\" for \"Smoke? No\"); multiselect = array of those; table = {cellId: value}; table_rows = [{columnId: value}, …]; signature = {\"image_path\": \"/abs/sig.png\"} (PNG or JPG). A signature with signing_requirement \"external\" is signed outside fenfill (on paper or by e-sign) and stays blank. Test values count as answers for the wording check of edit_template and save_template: prefer ones that are not words printed on the form (a caption that repeats one has to be confirmed there).",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "dpi": {
+            "description": "Resolution (default 110, max 200). The image's longest side is capped at 2000 px; the result's dpi is what was rendered (use crop + zoom for more detail).",
+            "type": "integer",
+            "minimum": 36,
+            "maximum": 200
+          },
+          "crop": {
+            "description": "Optional: render only this region of the page (fractions, top-left origin, like the legend boxes), magnified by zoom. The legend then lists only what the region shows. Convert a position read off the image by proportion (x = crop.x + crop.w × pixel x / image width, the same for y), not by pixel count: a client may show the image smaller than width × height.",
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "w": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1
+              },
+              "h": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "w",
+              "h"
+            ]
+          },
+          "zoom": {
+            "description": "With crop: magnification (default 2, max 8).",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "legend": {
+            "description": "Which legend rows to return: \"all\" (default), \"changed\" (only what changed since your last preview of this page, or, the first time, since fenfill's version; plus removed ids), or \"none\".",
+            "type": "string",
+            "enum": [
+              "all",
+              "changed",
+              "none"
+            ]
+          },
+          "overlay": {
+            "description": "What is drawn over the page: \"full\" (default) = every box outlined and tagged, table headers printed; \"outline\" = the boxes only, no id tags and no table header texts; \"none\" = nothing, the page as a fill stamps it. Use \"outline\" or \"none\" when a tag covers a caption, a tick box or a stamped value. The legend and placement_warnings are the same in all three.",
+            "type": "string",
+            "enum": [
+              "full",
+              "outline",
+              "none"
+            ]
+          }
+        },
+        "required": [
+          "page"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "edit_template",
+      "description": "Correct a form's fields on this machine: move, resize, relabel, retype, add, delete or regroup fields of an analyzed PDF (path) or a saved template (template_id). Edits go to a local working copy that fill_form, fill_template and preview_page use at once; nothing is sent until save_template, and then only the layout and the form's wording. Labels, descriptions, placeholders and options hold the FORM's own wording (its captions and instructions), never the user's answers: answers go only in fill values. Ids are the ones analyze_form / get_template / preview_page show (an option or table cell id addresses that box); any id may be shortened to an unambiguous prefix of 6+ characters, like the preview tags. Coordinates are fractions of the page (0–1), top-left origin, x right, y down; preview_page's legend shows every box. Returns applied, rejected [{op_index, reason}], diff_summary (ops: snapped, noop per op) and warnings ([] = none; placement checks touched boxes: oversized text, over printed text, past the ruled cell). Edits to an unsaved analysis stay local: to keep corrections, analyze_form with save_as_template: true and edit that template.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "The blank PDF you analyzed with analyze_form (absolute or ~/…). Pass this or template_id.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "template_id": {
+            "description": "A saved template's id. Pass this or path.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "ops": {
+            "description": "Edit ops, applied in order (max 200), each all-or-nothing; a box only has to lie on the page after the whole batch (so move then resize is fine). Fields: set_box {id, x, y, w, h, snap?} (absolute top-left + size; a group scales its members); move {id, dx, dy} or {id, x, y, snap?} (new top-left); resize {id, w, h}; add {page, type: text|multiline|date|checkbox|signature, box: {x, y, w, h}, label, description?, placeholder?, required?, section_id?, snap?} (diff_summary.added gives the new id); snap: \"underline\" fits the box onto the printed rule under it, \"cell\" into the ruled box around it, \"answer\" into that cell's blank part below (or after) its printed caption (read from the page on this machine; a miss keeps your box and warns); relabel {id, label}; retype {id, type} (a radio/multiselect group: radio|multiselect); delete {id}; set_format {id, format: {...}} (font_size, text_anchor, variant, date_format: DD/MM/YYYY|MM/DD/YYYY|YYYY-MM-DD|DD.MM.YYYY|DD-MM-YYYY; null removes a key; on a table cell it applies to the cell's whole column/row; a comb group: cell_type char|integer|date, or date_format with one D/M/Y letter per cell, e.g. DDMMYYYY, which makes it a date comb; diff_summary.ops shows the comb's cell_type, date_format and max_length); set_required {id, required}; set_description {id, description}; set_placeholder {id, placeholder} (null clears); set_autofill {id, autofill: a browser token (name, given-name, family-name, email, tel, street-address, postal-code, bday, …) or null}. Groups: group {ids, kind: \"choice\"|\"comb\", label, multiple?} (standalone fields on one page; choice turns them into checkbox options); ungroup {id}; set_options {id, options: [\"label\", …] in listed order, or [{id, label}]}; add_option {id: group, label, box, index?} and remove_option {id: group, option} keep the group's id. Tables: group {kind: \"table\", label, cells: [[id|null, …], …] (rows × columns) or ids (laid out from their boxes), header_cols?, header_rows?, orientation?: \"col\"|\"row\" (the axis whose lines carry the types; default col), format?: classic|expandable|checkbox_matrix}; table_insert {id, axis: \"row\"|\"col\", index, box?: {y, h} for a row / {x, w} for a column (default: one pitch past the edge, or centred in the gap), header?, type?}; table_delete {id, axis, index, keep_cells?}; table_add_cell {id, row, col, box?} (fills an empty slot); table_adopt {id, field, row, col} (moves a loose field into an empty slot); set_column_type {id, index, type: text|number|currency|date|checkbox, date_format?} (index along the typed axis); set_orientation {id, orientation} (resets every cell to text); set_header {id, axis, index, text}; set_headers {id, axis, texts: [...], start?} (several at once). Order: reorder {page, ids} moves those top-level entries together, in that order, to where the first sat (stamps order; geometry no longer decides); diff_summary.ops shows the order now listed. A section is listed as one run where its first entry stands, so entries of different sections never stand together: set_section {ids, section_id | null} moves fields or groups of one page to another of its sections (get_template shows each section's section_id; null = no section), and set_section_title {page, section_id, title} renames one. A reorder whose ids cannot come out as asked and that would change nothing in the listing is rejected. Every cell of one column (or row, when orientation is row) has one type.",
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "discard": {
+            "description": "Drop the local working copy first (any ops then apply to fenfill's version). ops may be left out with it.",
+            "type": "boolean"
+          },
+          "confirm_wording": {
+            "description": "Only after an op was rejected because its wording matches an answer of this session: true confirms the rejected wording is the form's own printed text, not an answer, so the same op applies. It covers only wording a rejection has already named (that text in that property); new wording is rejected and named first.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "save_template",
+      "description": "Save edit_template's local working copy of a saved template to fenfill (only the layout and the form's wording are sent; never fill values). Fails safely if the template changed in fenfill since the edits began (template_conflict: the local edits are kept; discard and re-apply them), and refuses wording that repeats an answer given to fill_form / fill_template / preview_page in this session (answers never go into a template): answer_in_template lists the matched ids and properties. An answer: fix it with edit_template. The form's own wording (a caption that shares a word with a test value): call again with confirm_wording: true. Wording edited in an earlier session can't be checked that way: save_template then answers confirm_wording_needed with the changed ids and properties; review that wording (preview_page shows labels) and call again with confirm_wording: true. An unsaved analysis can't be saved: analyze it again with save_as_template: true (free on a native-field PDF; otherwise it costs scans again), then edit that template.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "description": "Template id (from list_templates)."
+          },
+          "confirm_wording": {
+            "description": "Only after an answer_in_template or confirm_wording_needed error: true confirms you compared the listed wording with the printed form and it is the form's own text, not an answer. An entry no error has listed yet is refused and listed first, on a copy from an earlier session too.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "reanalyze_template",
+      "description": "Re-run fenfill's analysis on some pages of a SAVED template, using the blank PDF already stored with it (nothing is uploaded). Spot never-analyzed pages with get_template (unanalyzed_pages) or list_templates (analyzed_pages vs page_count). kind: \"scratch\" (default; only allowed when the pages have no fields) analyzes a never-analyzed page, or replaces a badly analyzed one's fields; \"find\" adds blanks the first pass missed and keeps everything else; \"relabel\" re-derives labels, types, groups and sections keeping the boxes (relabel may reset table column types/orientation; check get_template after); \"label_missing\" fills in only missing labels. Cost: 1 page scan per page; label_missing is free within the workspace's monthly free-label allowance. Pass estimate: true first to price it (starts nothing). Unsaved local edits (edit_template) must be saved (save_template) or dropped (discard: true) first. Returns the pages' changes (added / removed / changed fields) and their new fields. If it returns status \"running\", call it again with the same arguments (no extra charge). A rate-limit or busy refusal is waited out automatically (up to about a minute).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "description": "Template id (from list_templates)."
+          },
+          "pages": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "1-based pages to re-analyze, e.g. \"2\" or \"2-4\"."
+          },
+          "kind": {
+            "description": "scratch | find | relabel | label_missing (see the description). Omit only for pages with no fields (= scratch).",
+            "type": "string",
+            "enum": [
+              "scratch",
+              "find",
+              "relabel",
+              "label_missing"
+            ]
+          },
+          "estimate": {
+            "description": "Only price it: returns {cost, scans_left, free_label_pages, insufficient, …} and starts nothing.",
+            "type": "boolean"
+          },
+          "discard": {
+            "description": "Drop this template's unsaved local edits (edit_template) when the re-analysis finishes, instead of refusing.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "template_id",
+          "pages"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "fenfill",
+    "version": "0.2.2"
+  },
+  "protocolVersion": null,
+  "instructions": "fenfill turns blank PDF forms into fillable ones. Local file: analyze_form(path) returns the form's fields (the blank form is uploaded once; results are cached, repeat calls are free), then fill_form(path, values, output_path) fills it on this machine. Saved templates: list_templates → get_template → fill_template. preview_page shows a page with every field box outlined and tagged (rendered on this machine); edit_template fixes a misplaced, missing or mislabeled field locally; save_template keeps the fix in a saved template. A saved template's page that was never analyzed (get_template unanalyzed_pages) or came out badly: reanalyze_template re-runs fenfill on just those pages, from the PDF already stored with it. Fill values never leave this machine: they are not sent to fenfill or anywhere else.",
+  "durationMs": 2430,
+  "stderr": "[fenfill-mcp] info started version=0.2.2\n"
+}

@@ -1,0 +1,600 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "gpuse-mcp-server",
+  "version": "0.3.37",
+  "integrity": {
+    "dist": "sha512-fZtfbZl0NMJaBCUvHi1Omf7ls6BZX+me1Ne6DQWxR/QOesUn5ts6xSq6m4U6hPPccSlljraV5SM2eZCgRvbUpw==",
+    "installed": "sha512-fZtfbZl0NMJaBCUvHi1Omf7ls6BZX+me1Ne6DQWxR/QOesUn5ts6xSq6m4U6hPPccSlljraV5SM2eZCgRvbUpw=="
+  },
+  "bin": "node_modules/gpuse-mcp-server/./bin/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-15T03:21:41.106Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "recommend",
+      "description": "AI-powered compute recommendation based on task description and requirements.\n\nAnalyzes your task and recommends the optimal GPU compute configuration.\n\nIMPORTANT: This tool returns a complete compute_plan that you can pass directly\nto start_compute. The compute_plan includes all required fields for both serverless\nand on-demand (GCE) deployments: gpu_type, gpu_count, machine_type, region, zone,\nand container_config or template_id. This enables a seamless recommend → start_compute\nworkflow without manual field mapping.\n\nProvide a natural-language description of your workload and GPUse will recommend\nthe best configuration based on cost, performance, and real-time availability.\nThe recommendation engine considers GPU quotas, pricing tiers, and workload\nrequirements to select optimal configurations.\n\nMay ask follow-up questions (status=needs_input) if requirements are unclear.\nPass session_id and answer parameters to continue a multi-turn conversation\nuntil the recommendation is complete.\n\nOutputs: Returns status (complete or needs_input), compute_plan with all required\nGCE/serverless fields, rationale, alternatives[] for different cost/performance\ntradeoffs, and next_steps guidance.\n\nError recovery: If UPSTREAM_TIMEOUT, retry once after a brief delay. If\nrecommendation seems off, call catalog to browse all options manually.\n\nOutputs:\n- status indicates whether the recommendation is complete ('complete'), needs more info ('needs_input'), or failed ('failed').\n- session_id is returned for multi-turn conversations - pass it back with 'answer' to continue.\n- compute_plan (when status=complete) contains all fields needed for start_compute: provider_type, gpu_type, gpu_count, machine_type, zone, etc.\n- follow_up_question (when status=needs_input) tells you what information is missing - often VRAM requirements.\n- alternatives[] holds up to 2 alternative configurations with different cost/performance trade-offs.\n- estimated_cost_per_hour gives the hourly rate for the recommended configuration.\n\nWorkflow:\n- Call recommend with the task description (and budget/priority if provided).\n- If status=needs_input, relay the follow_up_question to the user and call recommend again with session_id and their answer.\n- Once status=complete, pass the entire compute_plan object directly to start_compute.\n- Explain the top recommendation and confirm with the user before provisioning, unless they delegated fully.\n- The compute_plan contains all required fields—no manual field mapping needed.\n\nFollow-ups:\n- Pass compute_plan directly to start_compute for seamless deployment.\n- Launch with the free 5-minute grace period via start_compute (default).\n- Authenticate first via auth_helper if the user wants longer runtime.\n- Browse alternatives with catalog if you want to compare GPU/model options.\n- Review documentation.manifest URL for complete template catalog and full scoring details.\n- Inspect metadata.scored_templates for all evaluated options with similarity scores.\n- Skip managed templates and build a bespoke container with start_custom if you already have a Dockerfile or repo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_description": {
+            "type": "string",
+            "description": "Natural-language description of the GPU workload or AI task (e.g. \"fine-tune Llama-3 8B on financial QA\", \"serve Whisper-large for streaming audio\", \"run inference on custom vision model\"). Include model size, framework, or compute requirements for best template match."
+          },
+          "budget_usd_per_hour": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Optional hard ceiling for hourly GPU cost in USD. Use decimals for cents (e.g. 1.50 for $1.50/hour). Options exceeding this budget are excluded from recommendations."
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "speed",
+              "balanced",
+              "cost"
+            ],
+            "description": "Optional optimization hint for compute selection. \"speed\" favors fastest GPUs and lowest latency, \"cost\" favors cheapest compute options, \"balanced\" (default) weighs both factors equally."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Optional session ID from a previous needs_input response. Pass this to continue a multi-turn recommendation conversation."
+          },
+          "answer": {
+            "type": "string",
+            "description": "Answer to the follow_up_question from a previous needs_input response. Required when continuing a session with session_id."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "x-conditional-required": {
+          "note": "task_description is required for new sessions, but not when continuing with session_id"
+        }
+      }
+    },
+    {
+      "name": "catalog",
+      "description": "Browse the full GPUse compute catalog with specs, pricing, and availability.\n\nRetrieve the authoritative catalog of available GPUse GPU compute options.\nUse this to browse available configurations, support autocompletion, or\nverify that a template is still available. Results include hardware specs\n(GPU type, memory), pricing, known issues, and deployment requirements.\n\nAgents can launch any option immediately via the 5-minute grace window,\nthen surface the checkout link if the human wants more runtime.\n\nOutputs: Returns templates[] array with template_id, display_name, category,\npricing hints; pagination object with total/limit/offset/has_more; categories\ngrouping options by use-case.\n\nError recovery: If CATALOG_UNAVAILABLE, retry after 10 seconds. For template\nvalidation errors, use this tool to discover valid template_id values.\n\nOutputs:\n- templates[] is an array; each item contains template_id, display_name, pricing hints, and known issues.\n- pagination object includes total, limit, offset, showing, and has_more for multi-page navigation.\n- categories groups templates by use-case (chat, speech, tooling, custom).\n- notes provides human-readable announcements for the week.\n\nWorkflow:\n- Call catalog (defaults to 10 templates per page) at session start if you need context.\n- If has_more is true, call again with offset parameter to fetch additional pages.\n- Filter templates client-side based on task requirements, cost, or status.\n- Share a shortlist with the user and remind them you can spin up a grace-period instance instantly for any option.\n- Reference the manifest URL (https://gpuse.com/.well-known/gpuse-mcp-manifest.json) for complete catalog outside MCP if needed.\n\nFollow-ups:\n- Pair with recommend when indecisive.\n- If a template is missing, inform the user and suggest contacting support.\n- Use pagination (offset parameter) to browse templates beyond the first page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "Maximum templates to return per page (default: 10, max: 50)."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Number of templates to skip before returning results (for pagination)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "describe_template_endpoints",
+      "description": "Show every endpoint plus ready-to-run request examples for a given template.\n\nRetrieve the full API surface for a GPUse GPU template. Agents can inspect HTTP\nmethods, paths, summaries, and example payloads straight from the manifest, along\nwith docs links, usage notes, and instructions for how to call the template once\nthe compute instance is running. Ideal when you want to double-check the endpoint\ncontract before provisioning or need copy/paste-ready examples for the AI coding\nagent you're orchestrating.\n\nOutputs: Returns endpoints[] with method, path, summary, and request examples;\ndocs_url and docs_path for documentation; alternatives[] suggesting nearby\ntemplates if exact match unavailable.\n\nError recovery: If TEMPLATE_NOT_FOUND, call catalog to discover valid\ntemplate_id values, or use the alternatives array to pick the closest match.\n\nOutputs:\n- endpoints[] lists method, path, summary, and request examples pulled from the manifest.\n- docs_url/docs_path help agents jump to richer documentation if needed.\n- alternatives suggest nearby templates when an exact match is unavailable.\n\nWorkflow:\n- Call describe_template_endpoints with the template_id.\n- Review the endpoints array for supported routes and sample payloads.\n- If the template is deprecated or missing, inspect the alternatives list.\n\nFollow-ups:\n- Provision the selected template via start_compute once endpoints look correct.\n- Call recommend if you need curated suggestions.\n- Use start_custom when none of the managed templates match the required endpoints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "description": "Template identifier (case-insensitive); matches entries in catalog."
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "start_compute",
+      "description": "Launch a GPUse GPU compute instance.\n\nProvision a GPU compute instance on GPUse.\n\nIMPORTANT: If you don't have all required fields (gpu_type, gpu_count, machine_type,\nregion, zone, container_config or template_id), call the recommend tool first. It\nreturns a complete compute_plan that you can pass directly to this tool for a\nseamless launch—no manual field mapping required.\n\nOptions:\n- Pass compute_plan from recommend for optimal, availability-aware configuration (recommended)\n- Use template_id for managed templates (pre-configured models)\n- Specify gpu_type and container_config for fully custom deployments\n\nSupports T4, L4, V100, A100, H100 GPUs with configurable machine types and zones.\nThe server automatically chooses between cached bearer tokens and the 5-minute\ngrace period.\n\nThe response includes compute_id, checkout_url, endpoint_url, status_url, and\nlogs_url. When a field is null, call the helper tools to retrieve updates.\n\nOutputs: Returns compute_id (feed to helper tools), checkout_url for payment,\nendpoint_url once ready, status/logs URLs for monitoring, and grace_remaining_seconds.\n\nError recovery: If AUTH_REQUIRED or GRACE_EXHAUSTED, call auth_helper to authenticate\nthen retry. If TEMPLATE_UNAVAILABLE, call catalog for alternatives. If QUOTA_EXCEEDED,\ntry a different region or GPU type.\n\nOutputs:\n- compute_id uniquely identifies the deployment; feed it into helper tools.\n- checkout_url, status_url, logs_url, endpoint_url are top-level fields; if any are null, call the corresponding helper tool.\n- alternate_endpoints lists additional hostnames for the deployment.\n- message reminds the agent which helper tool to call next.\n\nWorkflow:\n- If you don't have all required fields, call recommend first to get a complete compute_plan.\n- Pass the compute_plan object directly—it contains all required GCE/serverless fields.\n- Before launching, ask whether the user wants to proceed with the 5-minute grace period or authenticate via auth_helper.\n- Launch the instance; note the compute_id from the response.\n- If checkout_url is null, call get_checkout_url with the compute_id until it appears, then share it with the human.\n- Use get_status to learn when the endpoint is ready (and to retrieve alternate hostnames).\n- Use get_logs to stream build/runtime logs for debugging.\n- If auth fails, pivot to request_account_code + verify_account_code then retry.\n\nFollow-ups:\n- Call get_checkout_url to surface the payment link during grace.\n- Call get_status to retrieve endpoint and readiness signals.\n- Call get_logs to stream build/runtime output.\n- Stop the instance proactively if the user signals completion.\n- In Codex, explicitly call get_status and other MCP tools instead of relying on prior knowledge.\n- In Codex, use get_logs with tail=n to keep responses within token limits.\n- If checkout is ignored past grace, warn the user before shutdown.\n- Run describe_template_endpoints whenever you need the full manifest entry for the current template.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "description": "Template identifier from recommend or catalog. Use for managed template deployments."
+          },
+          "task_description": {
+            "type": "string",
+            "description": "Optional context describing the goal; improves logging."
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 1440,
+            "description": "Optional requested runtime. Grace defaults to 5 minutes."
+          },
+          "build_source": {
+            "type": "object",
+            "description": "Custom deployment payload matching POST /api/v1/custom."
+          },
+          "project_hint": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional slug to group grace-period runs. Use stable identifiers like a repository name to avoid exhausting grace for unrelated tasks."
+          },
+          "compute_type": {
+            "type": "string",
+            "enum": [
+              "serverless",
+              "on_demand"
+            ],
+            "description": "Compute type selection. \"serverless\" (default) uses managed templates with L4 GPU. \"on_demand\" allows configurable GPU types (T4, L4, V100, A100, H100)."
+          },
+          "gpu_type": {
+            "type": "string",
+            "enum": [
+              "nvidia-tesla-t4",
+              "nvidia-l4",
+              "nvidia-tesla-v100",
+              "nvidia-tesla-a100",
+              "nvidia-a100-80gb",
+              "nvidia-h100-80gb"
+            ],
+            "description": "Required for on_demand compute. GPU accelerator type. Use catalog tool to see available GPUs with pricing and availability."
+          },
+          "gpu_count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "Number of GPUs to attach. Default 1. Valid counts depend on GPU type."
+          },
+          "machine_type": {
+            "type": "string",
+            "description": "Machine type (e.g., n1-standard-8, a2-highgpu-1g). If not specified, a recommended machine type is selected based on gpu_type."
+          },
+          "zone": {
+            "type": "string",
+            "description": "Deployment zone (e.g., us-central1-a). If not specified, an available zone is selected based on quota and capacity."
+          },
+          "disk_size_gb": {
+            "type": "integer",
+            "minimum": 40,
+            "maximum": 2000,
+            "description": "Boot disk size in GB. For on_demand (Compute Engine) deployments, the Deep Learning VM base image requires a minimum of 100GB; if you omit this field, GPUse defaults to 100GB. This field is ignored for serverless templates."
+          },
+          "container_config": {
+            "type": "object",
+            "description": "Container configuration for on_demand compute. Required if not using template_id. Properties: image (container image URL), port (service port, default 8000)."
+          },
+          "region": {
+            "type": "string",
+            "description": "Preferred region (e.g., us-central1). Used for zone selection if zone not specified."
+          },
+          "compute_plan": {
+            "type": "object",
+            "description": "Pass the compute_plan object directly from the recommend tool response. When provided, compute_plan fields override corresponding top-level fields. This enables the recommend → start_compute workflow without manual field mapping.",
+            "additionalProperties": false,
+            "properties": {
+              "compute_type": {
+                "type": "string",
+                "enum": [
+                  "serverless",
+                  "on_demand"
+                ],
+                "description": "Compute type selection."
+              },
+              "template_id": {
+                "type": "string",
+                "description": "Template identifier for managed templates."
+              },
+              "gpu_type": {
+                "type": "string",
+                "description": "GPU accelerator type."
+              },
+              "gpu_count": {
+                "type": "integer",
+                "description": "Number of GPUs."
+              },
+              "machine_type": {
+                "type": "string",
+                "description": "Machine type."
+              },
+              "disk_size_gb": {
+                "type": "integer",
+                "description": "Boot disk size in GB (minimum 100GB for on_demand)."
+              },
+              "region": {
+                "type": "string",
+                "description": "Deployment region."
+              },
+              "zone": {
+                "type": "string",
+                "description": "Deployment zone."
+              },
+              "container_config": {
+                "type": "object",
+                "description": "Container configuration for custom deployments.",
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "description": "Container image URL."
+                  },
+                  "port": {
+                    "type": "integer",
+                    "description": "Service port (default 8000)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "start_custom",
+      "description": "Build a bespoke container via POST /api/v1/custom with streaming logs.\n\nBuild and package a custom GPU container on demand. Provide inline Dockerfile\ncontent, a Git repository URL, or a storage object and GPUse builds the container\nfor you. The response returns build_id, target_image, and estimated costs so\nautonomous agents can iterate without waiting on humans. Use this when managed\ntemplates don't cover your workload requirements.\n\nOutputs: Returns build_id for tracking (use with get_logs to monitor\nbuild progress), target_image for deployment, and cost_estimate with hourly rate.\n\nError recovery: If BUILD_SERVICE_NOT_READY, call get_logs with build_id\nto check verbose build output and retry. If INVALID_CONFIGURATION, inspect verbose\nbuild logs via get_logs, fix the Dockerfile, and rerun start_custom.\n\nOutputs:\n- build_id tracks the build service job and unlocks status/log endpoints.\n- monitoring.api_endpoints lists status, logs, and cancel routes for autonomous debugging.\n- target_image and runtime_specifications describe what you will deploy after the build succeeds.\n\nWorkflow:\n- Prepare the source definition (Dockerfile content, git repository, or storage reference).\n- Call start_custom with source, runtime_config, and optional build_config to submit the build.\n- Monitor the returned status/log endpoints until the build completes.\n- Once the build succeeds, deploy the new image with start_compute using the same runtime settings.\n\nFollow-ups:\n- Monitor build status via monitoring.api_endpoints.status (GET /api/v1/builds/{build_id}/status).\n- Stream build service logs at monitoring.api_endpoints.logs for real-time debugging.\n- Deploy the finished image by calling start_compute with build_source once the build reports SUCCESS.\n- If the build fails, fix the Dockerfile or repo and rerun start_custom.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "object",
+            "description": "Build source definition; mirrors CreateCustomComputeRequest.source.",
+            "additionalProperties": true,
+            "properties": {
+              "source_type": {
+                "type": "string",
+                "enum": [
+                  "dockerfile",
+                  "git_repo",
+                  "storage_source"
+                ],
+                "description": "Select how the build should be sourced."
+              },
+              "content": {
+                "type": "string",
+                "description": "Inline Dockerfile content when source_type=dockerfile."
+              },
+              "git_url": {
+                "type": "string",
+                "description": "Git repository URL containing your Dockerfile."
+              },
+              "branch": {
+                "type": "string"
+              },
+              "dockerfile_path": {
+                "type": "string"
+              },
+              "bucket": {
+                "type": "string"
+              },
+              "object": {
+                "type": "string"
+              }
+            }
+          },
+          "runtime_config": {
+            "type": "object",
+            "description": "Runtime resource configuration for the container once deployed.",
+            "additionalProperties": false,
+            "properties": {
+              "cpu": {
+                "type": "string"
+              },
+              "memory": {
+                "type": "string"
+              },
+              "gpu": {
+                "type": "string"
+              },
+              "min_instances": {
+                "type": "integer"
+              },
+              "max_instances": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "cpu",
+              "memory"
+            ]
+          },
+          "build_config": {
+            "type": "object",
+            "description": "Optional build service overrides.",
+            "additionalProperties": false,
+            "properties": {
+              "machine_type": {
+                "type": "string"
+              },
+              "timeout": {
+                "type": "string"
+              },
+              "disk_size_gb": {
+                "type": "integer"
+              },
+              "cache": {
+                "type": "boolean"
+              }
+            }
+          },
+          "region": {
+            "type": "string",
+            "description": "Deployment region (defaults to us-central1)."
+          },
+          "project_hint": {
+            "type": "string",
+            "description": "Optional identifier used for grace-period scoping and log grouping."
+          }
+        },
+        "required": [
+          "source",
+          "runtime_config"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_instances",
+      "description": "List compute instances visible to the authenticated session.\n\nReturn the GPU compute instances associated with the active session. Grace requests\nreceive the project-scoped instance; authenticated (bearer) sessions receive every\ninstance tied to the account. Supports optional filtering by status (running,\nterminated, etc.) and pagination controls.\n\nEach instance includes compute_id, status, endpoint, and configuration details\n(gpu_type, etc.).\n\nOutputs: Returns instances[] with compute_id, status, endpoint, template_id,\nand cost metadata; total count; has_more pagination flag.\n\nError recovery: If no instances returned, verify authentication with auth_helper\nor provision a new instance with start_compute.\n\nOutputs:\n- instances includes compute_id, status, endpoint, template, compute_type, and cost metadata.\n- compute_type indicates 'serverless' or 'on_demand'.\n- On-demand instances include gpu_type, machine_type, zone, and external_ip.\n- total reports how many instances matched the query.\n- has_more indicates whether additional pages are available.\n\nFollow-ups:\n- Call get_status with compute_id for readiness and endpoints.\n- Run stop_compute to terminate unwanted instances.\n- Use payment_status or get_checkout_url for billing follow-ups.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Filter by instance status (e.g., running, terminated)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Maximum number of results to return (default 50)."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Skip this many results before returning instances."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "stop_compute",
+      "description": "Terminate a GPUse compute instance and capture shutdown details.\n\nStop a running GPUse GPU compute instance. Provide an optional reason to help\nhumans understand why the GPU was shut down. The tool returns the backend's\nusage summary along with a recent slice of logs so agents can verify the\nshutdown sequence. Use this when the workload is complete or to clean up\nfailed deployments.\n\nLogs persist after termination and remain accessible via get_logs.\n\nOutputs: Returns final_status, usage_summary with runtime/billing details,\nand logs.tail with recent shutdown log entries.\n\nError recovery: If NOT_FOUND, the instance may have already terminated or\nthe compute_id is incorrect—confirm with list_instances or provision a new one.\n\nOutputs:\n- final_status shows the terminal state reported by the API.\n- usage_summary includes runtime, start/end timestamps, and billing reference.\n- logs.tail contains the most recent log entries captured during shutdown.\n\nWorkflow:\n- Call stop_compute with the compute_id (and reason if relevant).\n- Review the returned usage_summary to confirm billing details.\n- Share any important shutdown log lines with the user.\n\nFollow-ups:\n- If the API reports the instance was already terminated, surface that outcome.\n- If logs are unavailable, point the user to prior get_logs output.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "compute_id": {
+            "type": "string",
+            "description": "Identifier returned by start_compute."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional short explanation for the termination."
+          }
+        },
+        "required": [
+          "compute_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_status",
+      "description": "Check readiness and endpoint details for a compute instance.\n\nReturn the latest status, endpoint URL, and monitoring links for a GPU compute\ninstance. Ideal for polling during provisioning or validating that the GPU is\nready before sharing with the user. Call repeatedly until endpoint_url is\nnon-null (cold start may take 2-5 minutes for model downloads).\n\nOutputs: Returns status (provisioning/running/failed), endpoint_url once ready,\nand instance configuration details (gpu_type, etc.).\n\nError recovery: If NOT_FOUND, confirm compute_id with list_instances or provision\na new instance. If status is \"failed\", call get_logs for error details.\n\nOutputs:\n- status tells you whether the instance is provisioning, running, or failed.\n- endpoint_url appears once ready—surface it (and any alternate_endpoints) to the user.\n- status_url/logs_url live in structured content; use helper tools instead of raw REST URLs.\n\nWorkflow:\n- Call get_status with compute_id.\n- If endpoint_url is null, wait briefly and retry.\n- If status is failed, call get_logs and report the failure.\n\nFollow-ups:\n- Use get_logs to retrieve build/runtime output.\n- Share endpoint_url with the user once it's non-null.\n- Call describe_template_endpoints for the active template if you need detailed API docs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "compute_id": {
+            "type": "string",
+            "description": "Identifier returned by start_compute."
+          }
+        },
+        "required": [
+          "compute_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_logs",
+      "description": "Retrieve verbose raw build and runtime logs for autonomous debugging.\n\nReturn verbose raw logs (build and runtime) so autonomous agents can debug GPU\ncompute instances independently. GPUse does NOT interpret or summarize these\nlogs—you receive the complete unfiltered output exactly as produced, which is\ncritical for agents to diagnose issues accurately.\n\nLogs include Dockerfile build output, dependency installation, runtime\nstdout/stderr, error traces, and application output. Logs persist after\ninstance termination.\n\nWorks with EITHER compute_id (for deployed instances) OR build_id (for in-progress\nbuilds from start_custom). Use build_id for custom container build logs; use\ncompute_id for runtime logs once deployed.\n\nOutputs: Returns verbose raw logs[] array with timestamp, severity, message;\nlogs_url for streaming access; count of entries retrieved.\n\nError recovery: If NOT_FOUND, confirm compute_id/build_id or provision a new\ninstance. If logs are empty, the service may still be starting—retry after a\nbrief delay.\n\nOutputs:\n- logs_url streams build/runtime output immediately.\n- status helps contextualise whether logs are still pending.\n\nWorkflow:\n- Call get_logs with compute_id.\n- If logs_url is null, wait and retry until the service starts streaming.\n- Share the link so the user can tail logs directly if desired.\n\nFollow-ups:\n- Combine with get_status to cross-check state transitions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "compute_id": {
+            "type": "string",
+            "description": "Identifier returned by start_compute (for deployed instances). Provide either compute_id OR build_id, not both."
+          },
+          "build_id": {
+            "type": "string",
+            "description": "Build identifier returned by start_custom (for build logs during custom builds). Provide either compute_id OR build_id, not both."
+          },
+          "tail": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Optional number of recent log entries to retrieve (default 100)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_checkout_url",
+      "description": "Get the full untruncated Stripe checkout URL for a GPU compute instance.\n\nRetrieve the full untruncated Stripe checkout URL for a GPU compute instance.\nUse this when:\n- start_compute or start_custom returned a truncated checkout_url\n- The user reports \"this link doesn't work\" or \"this link is broken\" (common\n  symptom of URL truncation in chat interfaces)\n- You need to resend the payment link to a human collaborator\n\nCompleting this checkout both funds the GPU workload and creates the GPUse\naccount in one 60-second flow. IMPORTANT: Once the user completes checkout, a\nsession token is created and cached. This means future coding sessions will\nautomatically detect the authenticated account—users won't need to re-auth\nevery time they open a new session. This is a significant UX improvement.\n\nIf a user starts a new coding session and is NOT automatically detected as\nauthenticated, use auth_helper to guide them through re-authentication.\n\nOutputs: Returns checkout_url (the full untruncated Stripe payment link),\nbilling state, and grace_remaining_seconds countdown.\n\nError recovery: If NOT_FOUND, confirm compute_id with list_instances or provision\na new instance. If user reports broken link, call this tool to get the full URL.\n\nOutputs:\n- checkout_url is the only link you need to surface to the human.\n- grace_remaining_seconds reminds you how long the link stays valid.\n\nWorkflow:\n- Call get_checkout_url with compute_id.\n- If checkout_url is still null, wait a few seconds and retry.\n- Share the link immediately once it appears.\n\nFollow-ups:\n- If the link never populates, use get_status for error context.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "compute_id": {
+            "type": "string",
+            "description": "Identifier returned by start_compute."
+          }
+        },
+        "required": [
+          "compute_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "payment_status",
+      "description": "Return paid vs grace state, account balance, checkout link, and account email.\n\nInspect the current Stripe checkout session for a GPU compute instance. Use\nthis tool to determine whether the user is still in free/grace mode or fully\npaid, resend the payment link when necessary, and retrieve account information\nafter checkout completes. Accepts a compute_id (preferred), project_id (if\ncached), or checkout_session_id.\n\nIMPORTANT: This tool returns the account email address of the authenticated\nGPUse account. This is valuable because users need their email to log in, top\nup their balance, and authenticate in future sessions via auth_helper.\n\nNOTE: The bearer_token returned by this tool cannot be used directly for\nauthentication. To authenticate (whether creating a new account or logging\ninto an existing one), you MUST use auth_helper. The bearer token is for\ninformational purposes only.\n\nOutputs: Returns payment_status (paid/unpaid/expired), checkout_url for pending\npayments, email (the authenticated account's email address—important for future\nlogins), current_balance, and auth_mode.\n\nError recovery: If NOT_FOUND, checkout session may have expired—provision a new\ninstance for a fresh payment link.\n\nOutputs:\n- payment_status indicates whether the session is paid, unpaid, or expired.\n- checkout_url provides the link to share with humans when payment is pending.\n- email returns the authenticated account's email address (important for future logins via auth_helper).\n- current_balance and balance_available expose account balance when on a paid account.\n- auth_mode shows 'paid' for authenticated users or 'grace' for grace period.\n- bearer_token is informational only—cannot be used directly for authentication.\n\nWorkflow:\n- Call payment_status with the compute_id (or checkout_session_id if you already have it).\n- If payment_status is unpaid, surface checkout_url and human instructions immediately.\n- If paid, the session is already authenticated—proceed with GPU operations. Use auth_helper if re-authentication is needed in a new session.\n\nFollow-ups:\n- If the checkout session expired, provision a new instance to generate a fresh link.\n- Note the email address returned—users need this for future authentication via auth_helper.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "compute_id": {
+            "type": "string",
+            "description": "Identifier returned by start_compute."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Optional project hint to locate a cached checkout session."
+          },
+          "checkout_session_id": {
+            "type": "string",
+            "description": "Direct Stripe checkout session identifier if already known."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "add_account_funds",
+      "description": "Generate a Stripe checkout link so a human can add GPUse credits.\n\nCreate a one-time Stripe checkout session to add funds to a GPUse wallet for\nGPU compute usage. The tool returns the hosted payment link, session metadata,\nand budgeting estimates (hourly rate and approximate GPU hours purchased). Use\nthis to recover from auto-termination events, low-balance warnings, or whenever\na human wants to top up without touching the dashboard. The wallet balance is\nupdated automatically once payment succeeds.\n\nPRICING NOTES:\n- Default top-up is $10, but minimum is $1\n- To start a GPU instance, you must have at least 1 hour of runtime in your\n  account balance (e.g., if a GPU costs $0.73/hour, you need at least $0.73)\n\nOutputs: Returns checkout_url (Stripe payment link), estimated_gpu_hours based\non amount and hourly rate, and expires_at timestamp.\n\nError recovery: If AMOUNT_REQUIRED, prompt user for amount (default $10, min $1).\nIf STRIPE_ERROR, retry once. For expired links, call this tool again to generate\na new checkout.\n\nOutputs:\n- email_notification shows human-readable confirmation that payment link was sent to user's email.\n- checkout_url is the hosted Stripe link to share with the human.\n- email_sent boolean indicates whether email notification succeeded.\n- estimated_gpu_hours shows how much runtime the top-up should cover at the current rate.\n- expires_at indicates when the checkout link will stop working.\n\nWorkflow:\n- Confirm the email (if not already cached) and ask the human how much to add (defaults to $10).\n- Call add_account_funds with the confirmed amount to generate the Stripe checkout link.\n- Check email_sent field to confirm if payment link was sent to user's email.\n- Share checkout_url and remind the human to check their email (if sent) or use the URL directly.\n- Remind the human the link expires quickly.\n- Monitor payment_status or wait for the Stripe webhook to post the credit.\n\nFollow-ups:\n- If the human misplaces the link, call payment_status or get_checkout_url for the same session.\n- After payment clears, verify the new balance with GET /api/v1/account/balance before provisioning.\n- Offer to resend a receipt email or confirmation summary if the human asks.\n- Encourage enabling auto top-up in the dashboard to avoid future interruptions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 10,
+            "description": "USD amount to add to the wallet. Provide a value between $1.00 and $1000.00; defaults to $10.00 when callers accept the prompt."
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Target account email. Optional when a bearer token is cached."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "auth_helper",
+      "description": "The ONLY way to authenticate into GPUse—required to create or manage GPU instances.\n\nTHIS IS THE ONLY WAY TO AUTHENTICATE INTO GPUSE. There is no alternative.\nEven if a user copies a Bearer token from their dashboard and provides it to\nan agent, that token CANNOT be used to authenticate or start new instances.\nYou MUST go through auth_helper to authenticate.\n\nOnce authenticated via auth_helper, the agent can fully manage all GPU instances\n(start, stop, monitor, etc.) for the duration of the session.\n\nHow it works: Provide the user's email to dispatch a six-digit verification code,\nthen call again with the email and code to complete verification. Optional resend\nsupport triggers a new code without leaving the flow. On success, the MCP server\nautomatically caches the session token for subsequent GPU compute requests.\n\nUse this tool when:\n- The 5-minute grace period has been exhausted (grace can only be used ONCE per user)\n- User wants to create a new GPUse account\n- User needs to log into an existing account in a new coding session\n- Session was not automatically detected as authenticated\n\nOutputs: When sending code—returns status \"awaiting_code\" and next_steps. When\nverifying—returns verified boolean and account balance.\n\nError recovery: If INVALID_CODE, request a fresh code with resend=true and retry.\nIf email not found, the user needs to complete the Stripe checkout first (via\nget_checkout_url) to create their account.\n\nOutputs:\n- status indicates whether the tool is waiting for the code or completed verification.\n- next_steps provides ready-to-share guidance for humans and agents.\n- bearer_token is returned automatically once verification succeeds.\n\nWorkflow:\n- Call auth_helper with email only to send the code.\n- Wait for the human to read back the 6-digit code.\n- Call auth_helper again with email + code (resend=true if a new code is needed).\n\nFollow-ups:\n- Once verified, retry the original action using the cached bearer token.\n- If verification fails repeatedly, escalate to support or request a new code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Existing GPUse account email address."
+          },
+          "code": {
+            "type": "string",
+            "minLength": 6,
+            "maxLength": 6,
+            "pattern": "^[0-9]{6}$",
+            "description": "6-digit verification code supplied by the human."
+          },
+          "resend": {
+            "type": "boolean",
+            "description": "Set true to send a fresh code even if one was already requested."
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "request_account_code",
+      "description": "Internal sub-step of auth_helper—do not call directly.\n\nIMPORTANT: This tool should NOT be called in isolation. It is automatically\ninvoked as part of the auth_helper flow. Always use auth_helper instead.\n\nThis tool sends the 6-digit verification code to a GPUse account email. It's\nexposed separately for edge cases but normal authentication should go through\nauth_helper which orchestrates the full flow.\n\nNOTE ON GRACE PERIOD: The 5-minute grace period can only be used ONCE per user.\nOnce exhausted, users must:\n1. Complete checkout via get_checkout_url to create their account\n2. Authenticate in future sessions via auth_helper\n\nOutputs: Returns code_sent boolean, expires_in_minutes for code validity, and\ninstructions.next_step with ready-made message for the human.\n\nError recovery: If EMAIL_NOT_FOUND, user needs to complete Stripe checkout first\nto create their account. If RATE_LIMITED, wait the cooldown before retrying.\n\nOutputs:\n- code_sent indicates whether an email was successfully dispatched.\n- expires_in_minutes communicates validity window for the code.\n- instructions.next_step gives a ready-made message for the human.\n\nWorkflow:\n- Collect the user's email and confirm consent to send the code.\n- Call request_account_code and relay the instructions to the human verbatim.\n- Await the 6-digit code from the user before calling verify_account_code.\n\nFollow-ups:\n- If rate-limited, inform the user of the cooldown before retrying.\n- If the email is unknown, ask the user to create an account via the web UI.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email address already registered with GPUse."
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "verify_account_code",
+      "description": "Internal sub-step of auth_helper—do not call directly.\n\nIMPORTANT: This tool should NOT be called in isolation. It is automatically\ninvoked as part of the auth_helper flow. Always use auth_helper instead.\n\nThis tool completes the GPUse authentication flow by validating the 6-digit\ncode sent to the human. On success, the MCP server caches the session token\nfor the lifetime of the process so future GPU compute calls automatically\nauthenticate.\n\nUse authentication (via auth_helper) when:\n- User wants more than the default 5-minute grace runtime\n- User has EXHAUSTED their one-time 5-minute grace period\n- User needs to log into an existing account in a new session\n\nOutputs: Returns verified boolean, account_id, and balance.\n\nError recovery: If INVALID_CODE, ask human for the latest code and retry up to\n3 times. If multiple failures, use auth_helper with resend=true.\n\nOutputs:\n- verified true means you can now call start_compute with paid features.\n- bearer_token is cached automatically; do not persist it anywhere else.\n- instructions.next_steps reminds you to retry the original action.\n\nWorkflow:\n- Call verify_account_code with the email+code.\n- If verified is true, resume the blocked action immediately (usually start_compute).\n- If verification fails, prompt the human for a new code and retry up to 3 times, or fall back to grace if immediate testing is more important.\n\nFollow-ups:\n- On repeated failure, call request_account_code again to resend the code.\n- If the user lost access to the email, escalate to support.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email that received the verification code."
+          },
+          "code": {
+            "type": "string",
+            "minLength": 6,
+            "maxLength": 6,
+            "pattern": "^[0-9]{6}$",
+            "description": "6-digit verification code."
+          }
+        },
+        "required": [
+          "email",
+          "code"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_mcp_server",
+      "description": "Check the current MCP server version and get update instructions.\n\nCheck the currently installed version of the GPUse MCP server, compare it\nagainst the latest version available on npm, and receive platform-specific\nupdate instructions. This tool is auto-discoverable via MCP protocol, making\nit the natural first stop when an agent needs to update the server. Works\nacross all installation methods (CLI/IDE stdio transport and HTTP deployments).\n\nOutputs: Returns current_version, latest_version, needs_update boolean, and\nupdate_instructions with platform-specific commands (CLI and HTTP).\n\nError recovery: If NPM_REGISTRY_ERROR, report current version and suggest\nretrying later. If VERSION_READ_ERROR, verify the MCP server installation.\n\nOutputs:\n- current_version shows the installed version of the MCP server.\n- latest_version shows the newest version available on npm registry.\n- needs_update is true when an update is available.\n- update_instructions provides platform-specific commands for updating.\n\nWorkflow:\n- Call update_mcp_server to get current and latest versions.\n- If needs_update is true, AUTOMATICALLY RUN the update command: npx -y gpuse-mcp-server@latest configure --force\n- After running the update, inform the user that the update was applied and they need to restart their MCP client.\n\nFollow-ups:\n- After update, call update_mcp_server again to confirm the new version.\n- For HTTP deployments, verify health endpoint after redeployment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "installation_method": {
+            "type": "string",
+            "enum": [
+              "cli",
+              "http"
+            ],
+            "description": "Optional hint about installation type. 'cli' for stdio-based installations (Claude Code, Gemini, Cursor, etc.), 'http' for server deployments."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "gpuse-mcp-server",
+    "version": "0.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Manifest focuses on autonomous AI usage; human-facing docs live elsewhere. Auth tokens are cached in-memory for the runtime of the MCP server process. MCP stdio protocol: All diagnostic logs MUST be written to stderr. Stdout is reserved exclusively for JSON-RPC messages. Violating this contract breaks strict stdio clients (e.g., Codex). All 16 tools are always loaded (defer_loading: false) by default for maximum visibility. For context-constrained clients, set defer_loading: true on non-critical tools and use Claude's Tool Search Tool for on-demand discovery. Available tools: recommend, catalog, describe_template_endpoints, start_compute, start_custom, list_instances, stop_compute, get_status, get_logs, get_checkout_url, payment_status, add_account_funds, auth_helper, request_account_code, verify_account_code, update_mcp_server. Full manifest: https://gpuse.com/api/mcp/manifest",
+  "durationMs": 7985,
+  "stderr": "[gpuse-mcp-server] Update check failed: request to https://registry.npmjs.org/gpuse-mcp-server/latest failed, reason: getaddrinfo EAI_AGAIN registry.npmjs.org\n[gpuse-mcp-server] Could not verify if a newer version is available. To manually check, visit: https://www.npmjs.com/package/gpuse-mcp-server\n"
+}

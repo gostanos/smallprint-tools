@@ -1,0 +1,1984 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "browser-agent-mcp-farm",
+  "version": "0.8.0",
+  "integrity": {
+    "dist": "sha512-bOF637/OdtEIWx05D4ikHALPJNO2fzc5gZ7Anf7KZMXU++UMd/3pVrENW/5xQIu9hCo4kaAom8fuFHGsVCqP4w==",
+    "installed": "sha512-bOF637/OdtEIWx05D4ikHALPJNO2fzc5gZ7Anf7KZMXU++UMd/3pVrENW/5xQIu9hCo4kaAom8fuFHGsVCqP4w=="
+  },
+  "bin": "node_modules/browser-agent-mcp-farm/dist/cli.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [
+    "serve"
+  ],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-14T23:38:58.912Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "farm_acquire_context",
+      "description": "Acquire an isolated browser lease (BrowserContext) with capability, allowed-domain, and page-limit guards. Call FIRST before opening pages. Use read-only (default) for capture; read-write only to click/fill/press.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; recorded as the lease owner and required by every later tool call."
+          },
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Caller-chosen run identifier used to group artifacts for one research run."
+          },
+          "artifactRunDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute directory where this run's artifacts (screenshots, text, ledgers) are written."
+          },
+          "ttlMs": {
+            "description": "Lease time-to-live in ms (max 1h). Extend with farm_heartbeat during long work.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 3600000
+          },
+          "allowedDomains": {
+            "description": "Allowlist of hostnames this lease may open; requests to other domains are refused.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "maxPages": {
+            "description": "Maximum concurrent open pages for this lease (max 20).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20
+          },
+          "capability": {
+            "default": "read-only",
+            "description": "'read-only' for capture (default); 'read-write' only when you must click/fill/press. Payment/booking actions are always refused.",
+            "type": "string",
+            "enum": [
+              "read-only",
+              "read-write"
+            ]
+          },
+          "storagePolicy": {
+            "default": "ephemeral",
+            "description": "'ephemeral' (fresh context, default); 'storage-state' (reuse a saved cookie jar); 'persistent-profile' (a real on-disk browser profile).",
+            "type": "string",
+            "enum": [
+              "ephemeral",
+              "storage-state",
+              "persistent-profile",
+              "external-bridge"
+            ]
+          },
+          "profileName": {
+            "description": "Named saved profile to reuse (with storage-state/persistent-profile). One active lease per profile, enforced across processes.",
+            "type": "string",
+            "minLength": 1
+          },
+          "storageStatePath": {
+            "description": "Explicit path to a Playwright storageState JSON (alternative to profileName).",
+            "type": "string",
+            "minLength": 1
+          },
+          "userDataDir": {
+            "description": "Explicit persistent user-data directory (used with persistent-profile).",
+            "type": "string",
+            "minLength": 1
+          },
+          "proxy": {
+            "description": "Optional upstream proxy for this context.",
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string",
+                "minLength": 1
+              },
+              "username": {
+                "type": "string",
+                "minLength": 1
+              },
+              "password": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "server"
+            ]
+          },
+          "fingerprint": {
+            "description": "Optional user-agent/locale/timezone/viewport overrides.",
+            "type": "object",
+            "properties": {
+              "userAgent": {
+                "type": "string",
+                "minLength": 1
+              },
+              "locale": {
+                "type": "string",
+                "minLength": 1
+              },
+              "timezoneId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "viewport": {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "height": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "width",
+                  "height"
+                ]
+              },
+              "colorScheme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark",
+                  "no-preference"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "agentId",
+          "runId",
+          "artifactRunDir"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_heartbeat",
+      "description": "Extend a lease's TTL so it is not reaped during long multi-step work. Call periodically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_open_page",
+      "description": "Open a URL in a leased context and return a pageId. Requires an active lease from farm_acquire_context.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL to open in the leased context."
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "url"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_capture",
+      "description": "Capture browser-visible evidence (screenshot, text, HTML, metadata, visible links, media index) of the current page into the run's artifact ledger. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "captureId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_wait",
+      "description": "Wait a fixed number of milliseconds on a page to let content settle. Prefer farm_wait_for_selector when you know the target element.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "waitMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 120000
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId",
+          "waitMs"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_wait_for_selector",
+      "description": "Wait until a CSS selector is present/visible (bounded by timeout). Use before capturing or acting on dynamic content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CSS selector to wait for."
+          },
+          "timeoutMs": {
+            "default": 10000,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 120000
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId",
+          "selector"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_scroll",
+      "description": "Scroll a page down/up/top/bottom to reveal lazy-loaded content before capture.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "direction": {
+            "default": "down",
+            "type": "string",
+            "enum": [
+              "down",
+              "up",
+              "bottom",
+              "top"
+            ]
+          },
+          "pixels": {
+            "default": 800,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50000
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_capture_after_idle",
+      "description": "Wait for network/DOM idle (bounded), then capture. Use for SPA/dynamic pages where content arrives after load.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "captureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "waitMs": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 120000
+          },
+          "idleMs": {
+            "default": 500,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30000
+          },
+          "timeoutMs": {
+            "default": 10000,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 120000
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_sample_frames",
+      "description": "Sample timestamped frame screenshots from visible media (required to support visual claims). Supports dense sampling around transcript/OCR/scene-change hits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "selector": {
+            "default": "video",
+            "type": "string",
+            "minLength": 1
+          },
+          "captureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timestampsSec": {
+            "maxItems": 120,
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            }
+          },
+          "durationSec": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 86400
+          },
+          "strideSec": {
+            "default": 60,
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 3600
+          },
+          "maxFrames": {
+            "default": 120,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 120
+          },
+          "seekTimeoutMs": {
+            "default": 5000,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 30000
+          },
+          "settleMs": {
+            "default": 250,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_evidence_run",
+      "description": "Flagship one-shot research workflow: given a URL it captures the page, derives evidence (frames/OCR/transcript/official-API/obstructions), runs source strategy, and produces a final claim-gated report. Prefer this for end-to-end research; it manages its own lease. Returns runDir + reportPath; the result is isError when the final claim gate fails.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The page to research. The farm captures the rendered page, derives evidence (frames/OCR/transcript/official-API/obstructions), runs source strategy, and produces a claim-gated report."
+          },
+          "runDir": {
+            "description": "Directory for this run's artifacts. Defaults to a temp directory; the chosen path is returned as `runDir`.",
+            "type": "string",
+            "minLength": 1
+          },
+          "captureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "frameSelector": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timestampsSec": {
+            "maxItems": 120,
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            }
+          },
+          "maxFrames": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 120
+          },
+          "waitMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 120000
+          },
+          "navigationTimeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 120000
+          },
+          "seekTimeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 30000
+          },
+          "settleMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "sampleFrames": {
+            "default": true,
+            "description": "Sample timestamped frames from visible media (required to support visual claims). Default true.",
+            "type": "boolean"
+          },
+          "finalClaimGate": {
+            "default": true,
+            "description": "Run the final claim gate; the report (and the MCP result) fails if any claim is uncited or there are zero claims. Default true.",
+            "type": "boolean"
+          },
+          "profileName": {
+            "description": "Named saved profile to drive this run (for authenticated or anti-bot-sensitive pages).",
+            "type": "string",
+            "minLength": 1
+          },
+          "storagePolicy": {
+            "type": "string",
+            "enum": [
+              "ephemeral",
+              "storage-state",
+              "persistent-profile",
+              "external-bridge"
+            ]
+          },
+          "headed": {
+            "default": false,
+            "description": "Run with a visible browser window. NOT supported over MCP (use the CLI); MCP evidence-run is headless.",
+            "type": "boolean"
+          },
+          "browserChannel": {
+            "type": "string",
+            "enum": [
+              "chromium",
+              "chrome",
+              "msedge",
+              "msedge-beta",
+              "msedge-dev"
+            ]
+          },
+          "researchIntent": {
+            "description": "Soft intent lock. The farm records decision scope, required evidence shapes, recommended modalities, missing questions, and boundaries without blocking capture.",
+            "type": "object",
+            "properties": {
+              "decisionNeeded": {
+                "description": "What decision this run supports: alpha pick, trend watch, price compare, UI/design teardown, user-pain mining, source verification, etc.",
+                "type": "string",
+                "minLength": 1
+              },
+              "targetScope": {
+                "description": "Entity/product/person/place, geography/language, time horizon, and must-include or must-exclude sources.",
+                "type": "string",
+                "minLength": 1
+              },
+              "evidenceShapes": {
+                "description": "Modalities that matter for this run: text/html, structured data, UI screenshot, OCR, video frames, captions, STT/ASR, TTS/audio, map/place state, or BYO bytes.",
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "page_text",
+                    "page_html",
+                    "structured_data",
+                    "semi_structured_dom",
+                    "ui_screenshot",
+                    "ocr_image_text",
+                    "video_frames",
+                    "captions_transcript",
+                    "stt_asr",
+                    "tts_detection",
+                    "audio_events",
+                    "map_place_state",
+                    "byte_faithful_byo"
+                  ]
+                }
+              },
+              "successCriteria": {
+                "description": "What would count as useful, surprising, or decision-changing.",
+                "type": "string",
+                "minLength": 1
+              },
+              "boundaries": {
+                "description": "Login/profile/BYO permissions and refusal lines such as no paywall/CAPTCHA/raw-media bypass.",
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "httpFetch": {
+            "default": false,
+            "description": "Tier-0 browserless capture: try a plain HTTP GET first (no Chromium) when the page is server-rendered; falls back to the browser if it declines. No screenshots/frames are produced on the tier-0 path. Default false.",
+            "type": "boolean"
+          },
+          "captureRouting": {
+            "default": "browser",
+            "description": "Capture routing. 'auto' tries the tier-0 browserless HTTP GET first and escalates to the browser whenever the page is a client-rendered shell, non-HTML, off-domain, or bot-blocked — so it is never a worse capture than 'browser', but a server-rendered page is captured without launching Chromium (and is labelled http_fetch, with no screenshot). 'browser' (default) always uses Chromium, leaving the default capture method, screenshot, and provenance unchanged.",
+            "type": "string",
+            "enum": [
+              "browser",
+              "auto"
+            ]
+          },
+          "captureCache": {
+            "default": false,
+            "description": "Opt-in capture replay (C4). When a bare ephemeral run on the bundled Chromium engine would re-capture bytes identical to a recent run under the same run-root, replay that prior capture (same SHA-256) instead of launching the browser. Conservative for a verification tool: freshness is clamped to <= 1h, the replayed page claim is labelled 'cached_capture' with its staleness age (never 'browser_visible'), and a credentialed/fingerprinted/branded-channel run is never cached. Default false.",
+            "type": "boolean"
+          },
+          "captureProfile": {
+            "default": "full",
+            "description": "Browser capture profile. 'text' blocks image/media/font + ad-host subrequests and skips the page screenshot (faster text/structure-only runs); 'full' (default) captures everything including the screenshot.",
+            "type": "string",
+            "enum": [
+              "text",
+              "full"
+            ]
+          },
+          "overlayDismissal": {
+            "default": {
+              "enabled": true,
+              "maxActions": 3
+            },
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "default": true,
+                "type": "boolean"
+              },
+              "maxActions": {
+                "default": 3,
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10
+              }
+            }
+          },
+          "ocr": {
+            "default": {
+              "enabled": false,
+              "maxFrames": 20,
+              "timeoutMs": 10000,
+              "language": "eng",
+              "minConfidence": 0
+            },
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "default": false,
+                "type": "boolean"
+              },
+              "maxFrames": {
+                "default": 20,
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 120
+              },
+              "timeoutMs": {
+                "default": 10000,
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 60000
+              },
+              "language": {
+                "default": "eng",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "minConfidence": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            }
+          },
+          "denseSampling": {
+            "default": {
+              "enabled": false,
+              "windowSec": 5,
+              "stepSec": 1,
+              "maxDenseFrames": 40,
+              "sceneChange": true,
+              "sceneChangeThreshold": 16
+            },
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "default": false,
+                "type": "boolean"
+              },
+              "windowSec": {
+                "default": 5,
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 600
+              },
+              "stepSec": {
+                "default": 1,
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 60
+              },
+              "maxDenseFrames": {
+                "default": 40,
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 240
+              },
+              "sceneChange": {
+                "default": true,
+                "type": "boolean"
+              },
+              "sceneChangeThreshold": {
+                "default": 16,
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 64
+              },
+              "sceneChangeMaxHits": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 120
+              },
+              "query": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "officialApi": {
+            "default": {
+              "enabled": false,
+              "credentials": {}
+            },
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "default": false,
+                "type": "boolean"
+              },
+              "credentials": {
+                "default": {},
+                "type": "object",
+                "properties": {
+                  "youtubeApiKeyEnv": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "youtubeOAuthTokenEnv": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "instagramAccessTokenEnv": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "tiktokAccessTokenEnv": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "tiktokResearchTokenEnv": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_read_report",
+      "description": "Read back the Markdown report a prior farm_evidence_run produced, given its reportPath. Read-only; no browser.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reportPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Path to a final report file, exactly as returned by farm_evidence_run's `reportPath`."
+          }
+        },
+        "required": [
+          "reportPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_list_artifacts",
+      "description": "List the artifact ledger (artifacts.jsonl) for a prior run's runDir, optionally filtered by evidence kind. Read-only; no browser.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run directory (the `runDir` returned by farm_evidence_run) whose artifacts.jsonl ledger to list."
+          },
+          "evidenceKind": {
+            "description": "Optional filter: only return artifacts of this evidence kind (e.g. frame_screenshot, destination_triage).",
+            "type": "string",
+            "enum": [
+              "page_text",
+              "page_html",
+              "page_screenshot",
+              "frame_screenshot",
+              "metadata",
+              "media",
+              "media_index",
+              "transcript_cue",
+              "ocr_text",
+              "structured_data",
+              "multi_vantage_agreement",
+              "capture_transcript",
+              "official_api_metadata",
+              "api_cache",
+              "source_strategy",
+              "source_registry",
+              "intent_profile",
+              "trend_analysis",
+              "search_result_candidates",
+              "search_strategy_plan",
+              "candidate_deepening_ledger",
+              "search_followup_plan",
+              "search_followup_outcome_ledger",
+              "source_navigation_plan",
+              "source_navigation_execution_plan",
+              "source_navigation_recipe_plan",
+              "source_navigation_calibration",
+              "source_navigation_action",
+              "source_navigation_followup",
+              "destination_candidate",
+              "client_state_destinations",
+              "destination_triage",
+              "destination_deepening_proposal",
+              "destination_deepening_run",
+              "browser_obstruction",
+              "browser_overlay_dismissal",
+              "audio_transcription",
+              "failure"
+            ]
+          },
+          "limit": {
+            "default": 200,
+            "description": "Maximum number of artifact rows to return.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "runDir"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_run_claim_gate",
+      "description": "Re-run the claim gate over an existing run's runDir to validate that claims cite registered, hash-verified artifacts. Read-only; the result is isError when the gate fails.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run directory (the `runDir` returned by farm_evidence_run) to validate."
+          },
+          "mode": {
+            "default": "final",
+            "description": "'final' enforces typed claims, citation provenance, and at least one cited claim; 'smoke' is lenient.",
+            "type": "string",
+            "enum": [
+              "smoke",
+              "final"
+            ]
+          },
+          "minClaims": {
+            "description": "Minimum number of claims required (defaults to 1 in final mode, 0 in smoke mode).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "strictProvenance": {
+            "description": "When true, a claim citing AGENT-AUTHORED structured_data (self-asserted JSON, not farm-derived) is a hard error instead of a warning — closes the measured 'structured-in-disguise' repackaging hole for audits that demand witnessed provenance.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "runDir"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_read_artifact",
+      "description": "Read one registered artifact's bytes (text or base64) by artifactId or path, RE-HASHING on read to detect tampering (recordedSha256 vs recomputed). Lets a parallel agent SEE another run's evidence and verify it. Read-only; isError if not found or tampered.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run directory (the `runDir` from farm_evidence_run) containing the artifact ledger."
+          },
+          "artifactId": {
+            "description": "artifact_id to read (from farm_list_artifacts). Provide this OR `path`.",
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "description": "The artifact's ledger `path` relative to runDir. Provide this OR `artifactId`.",
+            "type": "string",
+            "minLength": 1
+          },
+          "maxBytes": {
+            "default": 1000000,
+            "description": "Maximum bytes to return; content is truncated past this.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 5000000
+          },
+          "asText": {
+            "description": "Force text (utf8) vs binary (base64). Default: text for text-like evidence kinds, base64 for screenshots/media.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "runDir"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_register_evidence",
+      "description": "Register a piece of evidence (the exact bytes/text you saw) as a hash-verified artifact you can then cite, returning its artifactId. The first half of authoring a cite-or-fail claim.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run directory to register the artifact into (a fresh dir for a new bundle, or an existing runDir)."
+          },
+          "text": {
+            "description": "The UTF-8 evidence content to register (e.g. the exact text you will cite). Provide this OR bytesBase64.",
+            "type": "string",
+            "minLength": 1
+          },
+          "bytesBase64": {
+            "description": "Exact BYO evidence bytes encoded as base64. Provide this OR text when preserving non-text/browser-external bytes.",
+            "type": "string",
+            "minLength": 1
+          },
+          "mime": {
+            "description": "MIME type for bytesBase64 evidence, e.g. image/png or application/octet-stream.",
+            "type": "string",
+            "minLength": 1
+          },
+          "format": {
+            "description": "File extension/format for bytesBase64 evidence, e.g. png, har, html, bin.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,15}$"
+          },
+          "evidenceKind": {
+            "default": "page_text",
+            "description": "Typed kind of this evidence (default page_text).",
+            "type": "string",
+            "enum": [
+              "page_text",
+              "page_html",
+              "page_screenshot",
+              "frame_screenshot",
+              "metadata",
+              "media",
+              "media_index",
+              "transcript_cue",
+              "ocr_text",
+              "structured_data",
+              "multi_vantage_agreement",
+              "capture_transcript",
+              "official_api_metadata",
+              "api_cache",
+              "source_strategy",
+              "source_registry",
+              "intent_profile",
+              "trend_analysis",
+              "search_result_candidates",
+              "search_strategy_plan",
+              "candidate_deepening_ledger",
+              "search_followup_plan",
+              "search_followup_outcome_ledger",
+              "source_navigation_plan",
+              "source_navigation_execution_plan",
+              "source_navigation_recipe_plan",
+              "source_navigation_calibration",
+              "source_navigation_action",
+              "source_navigation_followup",
+              "destination_candidate",
+              "client_state_destinations",
+              "destination_triage",
+              "destination_deepening_proposal",
+              "destination_deepening_run",
+              "browser_obstruction",
+              "browser_overlay_dismissal",
+              "audio_transcription",
+              "failure"
+            ]
+          },
+          "sourceUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "The source the evidence came from (recorded as provenance)."
+          },
+          "captureId": {
+            "description": "Optional id for the artifact filename.",
+            "type": "string",
+            "minLength": 1
+          },
+          "captureMethod": {
+            "description": "How these bytes were captured, e.g. 'byo-firecrawl' / 'byo-operator' / 'byo-human' / 'byo-mobile-har' (default 'agent-authored').",
+            "type": "string",
+            "minLength": 1
+          },
+          "capturedBy": {
+            "description": "Id of the tool/agent/human that captured these bytes (provenance).",
+            "type": "string",
+            "minLength": 1
+          },
+          "capturedAt": {
+            "description": "ISO 8601 timestamp the bytes were captured (defaults to now).",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "runDir",
+          "sourceUrl"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_register_transcript",
+      "description": "Register a video's transcript (its caption/spoken track) from any LAWFUL source — a served WebVTT track captured on the wire, a transcript tool, or a human paste — as a transcript_cue artifact you can cite. Supply WebVTT (parsed into timed cues) or plain text. The farm performs NO speech-to-text; the transcript is the platform's own caption, recorded with bring-your-own-capture provenance. The second half of a cite-or-fail spoken-content claim.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run directory to register the transcript artifact into (a fresh dir, or an existing runDir)."
+          },
+          "sourceUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "The video/source URL the transcript came from (recorded as provenance)."
+          },
+          "vtt": {
+            "description": "WebVTT caption text; parsed into timed cues. Provide this OR text.",
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "description": "Plain-text transcript; registered as-is. Provide this OR vtt.",
+            "type": "string",
+            "minLength": 1
+          },
+          "captureMethod": {
+            "description": "How the transcript was captured, e.g. 'byo-transcript' / 'farm-vtt' / 'byo-human' (default 'byo-transcript').",
+            "type": "string",
+            "minLength": 1
+          },
+          "capturedBy": {
+            "description": "Id of the tool/agent/human that captured the transcript (provenance).",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "runDir",
+          "sourceUrl"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_add_claim",
+      "description": "Author a substantive claim that cites a registered artifact, with an optional anchor (where in the artifact it is grounded). The gate runs immediately: a claim whose anchor text is NOT in the cited bytes makes the result isError. This is how an agent's OWN answer becomes cite-or-fail, not just runner boilerplate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run directory containing the cited artifact's ledger."
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The substantive claim text you are asserting."
+          },
+          "claimType": {
+            "type": "string",
+            "enum": [
+              "visual",
+              "text",
+              "metadata",
+              "audio",
+              "inference"
+            ],
+            "description": "visual | text | metadata | audio | inference."
+          },
+          "artifactId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "artifact_id of the registered evidence this claim cites (from farm_register_evidence / farm_list_artifacts)."
+          },
+          "evidenceKind": {
+            "type": "string",
+            "enum": [
+              "page_text",
+              "page_html",
+              "page_screenshot",
+              "frame_screenshot",
+              "metadata",
+              "media",
+              "media_index",
+              "transcript_cue",
+              "ocr_text",
+              "structured_data",
+              "multi_vantage_agreement",
+              "capture_transcript",
+              "official_api_metadata",
+              "api_cache",
+              "source_strategy",
+              "source_registry",
+              "intent_profile",
+              "trend_analysis",
+              "search_result_candidates",
+              "search_strategy_plan",
+              "candidate_deepening_ledger",
+              "search_followup_plan",
+              "search_followup_outcome_ledger",
+              "source_navigation_plan",
+              "source_navigation_execution_plan",
+              "source_navigation_recipe_plan",
+              "source_navigation_calibration",
+              "source_navigation_action",
+              "source_navigation_followup",
+              "destination_candidate",
+              "client_state_destinations",
+              "destination_triage",
+              "destination_deepening_proposal",
+              "destination_deepening_run",
+              "browser_obstruction",
+              "browser_overlay_dismissal",
+              "audio_transcription",
+              "failure"
+            ],
+            "description": "The cited artifact's evidence kind."
+          },
+          "anchor": {
+            "description": "WHERE in the cited artifact the claim is grounded; verified against the bytes.",
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "text_span"
+                  },
+                  "quote": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Exact text the claim is grounded on; must appear in the cited text/HTML/OCR artifact."
+                  },
+                  "normalizedTokens": {
+                    "description": "Optional normalized supporting tokens for derived/aggregated claims.",
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "type",
+                  "quote"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "ocr_bbox"
+                  },
+                  "wordIndexes": {
+                    "maxItems": 500,
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "bbox": {
+                    "type": "object",
+                    "properties": {
+                      "x0": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "y0": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "x1": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "y1": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "x0",
+                      "y0",
+                      "x1",
+                      "y1"
+                    ]
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "transcript_cue"
+                  },
+                  "cueIndex": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "timeRangeSec": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 86400
+                      },
+                      "end": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 86400
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end"
+                    ]
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "frame"
+                  },
+                  "timestampSec": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  }
+                },
+                "required": [
+                  "type",
+                  "timestampSec"
+                ]
+              }
+            ]
+          },
+          "claimTaxonomy": {
+            "description": "quote (default) | derived | aggregated.",
+            "type": "string",
+            "enum": [
+              "quote",
+              "derived",
+              "aggregated"
+            ]
+          },
+          "verificationLevel": {
+            "default": "grounded",
+            "description": "Verification level recorded on the claim.",
+            "type": "string",
+            "enum": [
+              "verified",
+              "grounded",
+              "browser_visible",
+              "http_fetch",
+              "cached_capture",
+              "official_api",
+              "transcript_cue",
+              "ocr_extracted",
+              "unverified",
+              "inferred"
+            ]
+          },
+          "timestampSec": {
+            "description": "Required for visual claims citing a frame screenshot.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 86400
+          },
+          "corroboration": {
+            "description": "Cross-source corroboration: assert this claim is backed by multiple INDEPENDENT sources. The gate verifies each cited source is registered, verifies any per-source quote against that source's bytes, and counts distinct registrable domains — it proves N independent hash-verified sources are cited, not that they semantically agree.",
+            "type": "object",
+            "properties": {
+              "sources": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "artifactId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "artifact_id of an INDEPENDENT supporting source (already registered)."
+                    },
+                    "quote": {
+                      "description": "Optional supporting text that the gate verifies appears in THIS source's bytes.",
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "artifactId"
+                  ]
+                },
+                "description": "Additional independent sources that support this claim, beyond the primary artifactId."
+              },
+              "minIndependentSources": {
+                "default": 2,
+                "description": "Minimum distinct registrable-domain sources required across the primary + supporting sources; the gate fails the claim below this. Default 2.",
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 20
+              }
+            },
+            "required": [
+              "sources"
+            ]
+          }
+        },
+        "required": [
+          "runDir",
+          "claim",
+          "claimType",
+          "artifactId",
+          "evidenceKind"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_judge_claim",
+      "description": "Submit a SEMANTIC verdict (supported | refuted | insufficient) over a claim, citing the SUPPORTING and/or REFUTING spans you rely on. The gate verifies every cited span literally appears in its source's bytes and enforces a quorum: a 'supported' verdict needs >= minIndependentSources verified supporting spans from distinct registrable domains and no verified refuting span. Your verdict is untrusted, but it cannot stand on a fabricated/recombined span. Use for cross-source synthesis where token-presence grounding is too weak. isError if a span does not verify or the verdict is structurally inconsistent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run directory holding the cited sources' ledger."
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The claim being judged."
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "supported",
+              "refuted",
+              "insufficient"
+            ],
+            "description": "The judge's verdict over the cited spans."
+          },
+          "support": {
+            "default": [],
+            "description": "Spans that SUPPORT the claim; each verified against its source's bytes.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "artifactId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "artifact_id of a registered source."
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Contiguous text the gate verifies appears verbatim in THIS source's bytes."
+                }
+              },
+              "required": [
+                "artifactId",
+                "quote"
+              ]
+            }
+          },
+          "refute": {
+            "default": [],
+            "description": "Spans that REFUTE/contradict the claim; each verified against its source's bytes.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "artifactId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "artifact_id of a registered source."
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Contiguous text the gate verifies appears verbatim in THIS source's bytes."
+                }
+              },
+              "required": [
+                "artifactId",
+                "quote"
+              ]
+            }
+          },
+          "minIndependentSources": {
+            "default": 2,
+            "description": "Independent registrable-domain sources required among the verified SUPPORT spans for a 'supported' verdict. Default 2.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "runDir",
+          "claim",
+          "verdict"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_close_page",
+      "description": "Close a page in a leased context when finished with it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_click",
+      "description": "Guarded click on a selector. Requires a read-write lease; payment/booking/account-changing controls are refused.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CSS selector for the target element."
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId",
+          "selector"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_fill",
+      "description": "Guarded fill of a form field. Requires a read-write lease.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CSS selector for the target element."
+          },
+          "value": {
+            "type": "string",
+            "description": "Text to fill into the field."
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId",
+          "selector",
+          "value"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_press",
+      "description": "Guarded key press on a page (e.g. Enter to submit a search). Requires a read-write lease.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Key to press (e.g. 'Enter', 'Tab', 'ArrowDown')."
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId",
+          "key"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_select_option",
+      "description": "Guarded <select> option choice. Requires a read-write lease.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page ID returned by farm_open_page."
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CSS selector for the <select> element."
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Option value to select."
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken",
+          "pageId",
+          "selector",
+          "value"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_release_context",
+      "description": "Release a lease and close its browser context. Call when finished to free the profile lock and resources.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the calling agent; must own the lease."
+          },
+          "contextToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Lease/context token returned by farm_acquire_context."
+          }
+        },
+        "required": [
+          "agentId",
+          "contextToken"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_list_leases",
+      "description": "List active leases (agent, capability, domains, page count, TTL). Read-only diagnostics.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_reap_expired",
+      "description": "Reap expired leases and close their contexts. Maintenance/cleanup.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_capabilities",
+      "description": "Identify THIS server (name, version, evidence kinds, non-goals, optional deps, lenses). Call to confirm you reached browser-agent-mcp-farm and not a similarly-named browse skill.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_lens",
+      "description": "List the declarative research lenses, or describe one (lensId: research | market_scan | product_planning) with its claim templates, report sections, and prioritized source-registry entries. A lens is a domain config (e.g. marketing, product planning) over the same capture + cite-or-fail engine. Read-only, no browser.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "lensId": {
+            "description": "Lens id to describe with its claim templates, report sections, and prioritized sources (research | market_scan | product_planning). Omit to list all lenses.",
+            "type": "string",
+            "minLength": 1
+          },
+          "locale": {
+            "description": "Optional locale segment (e.g. ko-KR, en-US, global) to narrow the lens's prioritized source-registry entries.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_list_runs",
+      "description": "List prior evidence-run directories under a root (default: the temp dir) with artifact/claim counts, so you can find a runDir to read or verify. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runRoot": {
+            "description": "Directory to scan for run folders. Defaults to the system temp dir, where evidence-run writes.",
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "default": 50,
+            "description": "Maximum number of runs to return.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 500
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_extract_structured",
+      "description": "Deterministically parse captured HTML for structured data (JSON-LD, Open Graph, Twitter cards, canonical, title). Byte-reproducible, no network. Publisher markup is a SITE CLAIM, not ground truth — cross-check against DOM/OCR. Pair with farm_read_artifact on a page_html artifact.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "description": "Captured HTML to parse. Provide this, OR runDir + artifactId/path to load a page_html artifact.",
+            "type": "string",
+            "minLength": 1
+          },
+          "runDir": {
+            "description": "Run directory holding the HTML artifact (alternative to passing html).",
+            "type": "string",
+            "minLength": 1
+          },
+          "artifactId": {
+            "description": "artifact_id of a page_html artifact in runDir to parse.",
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "description": "Ledger path of the HTML artifact (alternative to artifactId).",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_export_bundle",
+      "description": "Export a verifiable bundle manifest for a run: a Merkle root over its artifact SHA-256 hashes, plus an optional Ed25519 signature (privateKeyEnv). A second agent can re-verify it with farm_verify_bundle without trusting you.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run directory to export a verifiable bundle manifest for."
+          },
+          "privateKeyEnv": {
+            "description": "Name of an env var holding an Ed25519 private key (PEM) to sign the Merkle root. Omit to skip signing.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "runDir"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "farm_verify_bundle",
+      "description": "Re-verify a bundle manifest against a run's artifacts IN PLACE: re-hashes each file (detects tampered bytes), recomputes the Merkle root (detects a tampered manifest), and optionally checks the signature. No network. isError if anything fails.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run directory whose artifacts the manifest is checked against (re-hashed in place)."
+          },
+          "manifest": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "number",
+                "const": 1
+              },
+              "artifactCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "artifacts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "artifact_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "artifact_id",
+                    "sha256"
+                  ]
+                }
+              },
+              "merkleRoot": {
+                "type": "string",
+                "minLength": 1
+              },
+              "claimCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "citationCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "signature": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "version",
+              "artifactCount",
+              "artifacts",
+              "merkleRoot",
+              "claimCount",
+              "citationCount"
+            ],
+            "description": "The bundle manifest from farm_export_bundle."
+          },
+          "publicKeyEnv": {
+            "description": "Name of an env var holding the Ed25519 public key (PEM) to verify the signature. Omit to skip signature verification.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "runDir",
+          "manifest"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "browser-agent-mcp-farm",
+    "version": "0.8.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 16472,
+  "stderr": "[browser-agent-mcp-farm] Chromium not found; installing once via 'playwright install chromium' (~150MB one-time)…\nError: getaddrinfo EAI_AGAIN cdn.playwright.dev\n    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:internal/dns/promises:102:17) {\n  errno: -3001,\n  code: 'EAI_AGAIN',\n  syscall: 'getaddrinfo',\n  hostname: 'cdn.playwright.dev'\n}\nError: getaddrinfo EAI_AGAIN cdn.playwright.dev\n    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:internal/dns/promises:102:17) {\n  errno: -3001,\n  code: 'EAI_AGAIN',\n  syscall: 'getaddrinfo',\n  hostname: 'cdn.playwright.dev'\n}\nError: getaddrinfo EAI_AGAIN cdn.playwright.dev\n    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:internal/dns/promises:102:17) {\n  errno: -3001,\n  code: 'EAI_AGAIN',\n  syscall: 'getaddrinfo',\n  hostname: 'cdn.playwright.dev'\n}\nError: getaddrinfo EAI_AGAIN cdn.playwright.dev\n    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:internal/dns/promises:102:17) {\n  errno: -3001,\n  code: 'EAI_AGAIN',\n  syscall: 'getaddrinfo',\n  hostname: 'cdn.playwright.dev'\n}\nError: getaddrinfo EAI_AGAIN cdn.playwright.dev\n    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:internal/dns/promises:102:17) {\n  errno: -3001,\n  code: 'EAI_AGAIN',\n  syscall: 'getaddrinfo',\n  hostname: 'cdn.playwright.dev'\n}\n[browser-agent-mcp-farm] Chromium install failed; run 'npx playwright install chromium' manually.\n"
+}

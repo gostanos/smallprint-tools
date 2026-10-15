@@ -1,0 +1,376 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@toolrate/mcp-server",
+  "version": "0.1.2",
+  "integrity": {
+    "dist": "sha512-pd75sU96JoQwF6RY7O9uW3O3aED0/CnGp1tnN/4rO0Yx6miZmz4iWw6fF5l2jANL4JLjYDcp+2tGSMs9bjJvzQ==",
+    "installed": "sha512-pd75sU96JoQwF6RY7O9uW3O3aED0/CnGp1tnN/4rO0Yx6miZmz4iWw6fF5l2jANL4JLjYDcp+2tGSMs9bjJvzQ=="
+  },
+  "bin": "node_modules/@toolrate/mcp-server/bin/toolrate-mcp",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-14T19:30:29.230Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "toolrate_assess",
+      "description": "Get ToolRate's reliability score (0-100), pitfalls, mitigations, and the best alternatives for any third-party tool/API the agent is about to call.\n\nGuard pattern: call this BEFORE invoking the actual third-party tool. After the real call returns, call toolrate_report.\n\nFor LLM provider selection, prefer toolrate_route_llm — it's a simpler interface that returns just the routing fields.\n\nQuota tip: assess once per tool per workflow, not per call. The API caches 5min server-side. Use toolrate_my_usage to check remaining quota.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool_identifier": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "URL or canonical name of the tool to assess. Examples: 'https://api.stripe.com/v1/charges', 'sendgrid'."
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Workflow context for context-bucketed scoring, e.g. 'high-value payment processing'."
+          },
+          "max_price_per_call": {
+            "type": "number",
+            "minimum": 0,
+            "description": "USD cap per call. Tools above are flagged within_budget=false (not filtered)."
+          },
+          "max_monthly_budget": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Max USD spend per month. Combines with expected_calls_per_month for the budget check."
+          },
+          "expected_calls_per_month": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "Expected call volume. Drives estimated_monthly_cost."
+          },
+          "expected_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Total tokens (input+output) per LLM call. Triggers exact per-token math for LLM providers."
+          },
+          "task_complexity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "very_high"
+            ],
+            "description": "Task complexity hint for LLM model picker. low=Haiku/mini, very_high=Opus/4o."
+          },
+          "budget_strategy": {
+            "type": "string",
+            "enum": [
+              "reliability_first",
+              "balanced",
+              "cost_first",
+              "speed_first"
+            ],
+            "description": "How to weigh reliability vs cost vs latency. Default: reliability_first (80/20)."
+          },
+          "eu_only": {
+            "type": "boolean",
+            "description": "Filter alternatives to EU-hosted only."
+          },
+          "gdpr_required": {
+            "type": "boolean",
+            "description": "Filter alternatives to GDPR-adequate jurisdictions."
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "Include extra fields (jurisdiction details, eu_alternatives, recommended_for) in the response."
+          }
+        },
+        "required": [
+          "tool_identifier"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "toolrate_report",
+      "description": "Tell ToolRate what happened after you invoked a third-party tool/API. This is how the reliability scores improve.\n\nGuard pattern: call this AFTER every third-party tool call you make. Report success=true on success; on failure, set success=false and pass error_category.\n\nWhen chaining attempts, set attempt_number (2 = first fallback, 3 = second, …) and previous_tool — this builds the fallback-chain analytics that power toolrate_fallback_chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool_identifier": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Tool identifier that was called."
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Whether the call succeeded."
+          },
+          "error_category": {
+            "type": "string",
+            "enum": [
+              "timeout",
+              "rate_limit",
+              "auth_failure",
+              "validation_error",
+              "server_error",
+              "connection_error",
+              "not_found",
+              "permission_denied"
+            ],
+            "description": "Failure category. Required when success=false to be useful."
+          },
+          "latency_ms": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300000,
+            "description": "How long the call took in milliseconds."
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Workflow context, hashed for privacy."
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "UUID grouping related calls in one workflow (for journey analytics)."
+          },
+          "attempt_number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Which attempt this was. 1 = first try, 2 = first fallback, etc."
+          },
+          "previous_tool": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Tool identifier that was tried before this one (for fallback chains)."
+          }
+        },
+        "required": [
+          "tool_identifier",
+          "success"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "toolrate_route_llm",
+      "description": "Pick the most cost-effective LLM provider+model for a task given expected token volume, complexity, and budget caps.\n\nConsiders all 7 supported providers (Anthropic, OpenAI, Groq, Together, Mistral, DeepSeek, Ollama) by default. Pass `provider` to restrict to one.\n\nReturns a flat decision object: { recommended_provider, recommended_model, cost_adjusted_score, estimated_monthly_cost, within_budget, reasoning, alternatives[] }. Use this instead of toolrate_assess when picking a model.\n\nCosts 1 ToolRate quota call per provider considered (so up to 7 by default). Use the `provider` arg to limit, or call once per workflow and reuse the result.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "One-sentence description of what the LLM needs to do. Used as scoring context."
+          },
+          "expected_tokens": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 1000000,
+            "description": "Total tokens (input+output) per call. Required — drives the cost math."
+          },
+          "task_complexity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "very_high"
+            ],
+            "description": "low=Haiku/mini, medium=Sonnet/4o-mini, high=Sonnet/4o, very_high=Opus/4o-large."
+          },
+          "max_price_per_call": {
+            "type": "number",
+            "minimum": 0
+          },
+          "max_monthly_budget": {
+            "type": "number",
+            "minimum": 0
+          },
+          "expected_calls_per_month": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "budget_strategy": {
+            "type": "string",
+            "enum": [
+              "reliability_first",
+              "balanced",
+              "cost_first",
+              "speed_first"
+            ],
+            "description": "Default: reliability_first. Use cost_first to minimize spend, speed_first for low latency."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai",
+              "groq",
+              "together",
+              "mistral",
+              "deepseek",
+              "ollama"
+            ],
+            "description": "Restrict to one provider. Omit to compare all 7 and pick the best."
+          }
+        },
+        "required": [
+          "task_description",
+          "expected_tokens"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "toolrate_fallback_chain",
+      "description": "Given a tool identifier, return the tools that real agents actually switched to after this one failed — ranked by success rate in the fallback position.\n\nUse this when toolrate_assess flagged the primary tool as risky, or when a live call just failed and you need a fallback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool_identifier": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The tool to find fallbacks for."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Max results (default 5)."
+          }
+        },
+        "required": [
+          "tool_identifier"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "toolrate_hidden_gems",
+      "description": "Returns tools that have a high success rate in the fallback position but are rarely picked first. Use this to discover lesser-known but reliable APIs in a given category.\n\nFilter by category — call toolrate_categories first to see the canonical names.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Filter by category (e.g. 'LLM APIs', 'Payment APIs'). Use toolrate_categories to list."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Max results (default 10)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "toolrate_search_tools",
+      "description": "Search the ToolRate catalog by name, identifier substring, or category. Returns identifiers you can pass to toolrate_assess.\n\nUse this when the agent needs to find candidate tools for a task but doesn't know the canonical identifier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Search by tool name or identifier (case-insensitive substring)."
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Filter by category."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Max results (default 50)."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Pagination offset."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "toolrate_categories",
+      "description": "Get the canonical category names + tool counts. Useful to filter toolrate_search_tools or toolrate_hidden_gems.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "toolrate_my_usage",
+      "description": "Returns your tier, daily/monthly limit, calls used, and remaining quota. Use this to self-throttle before burning your free tier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "toolrate_register",
+      "description": "Creates a new ToolRate API key tied to your email and returns it. Only available when TOOLRATE_API_KEY is unset on the MCP server.\n\nAfter getting the key: paste it into your MCP server config under env.TOOLRATE_API_KEY and restart the editor. The other 8 ToolRate tools will then become available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Your email — used for the API key, not for marketing."
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "toolrate",
+    "version": "0.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 6909,
+  "stderr": ""
+}
