@@ -1,0 +1,643 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@muhaven/mcp",
+  "version": "0.6.2",
+  "integrity": {
+    "dist": "sha512-Lqg3aVU8GJZC9fkoROspu9dpZGVk4iXDrC7e2C7BtqzSQWE8qSWg8CAaP24dArRqcdaeltv6+uXX855DNDn/9g==",
+    "installed": "sha512-Lqg3aVU8GJZC9fkoROspu9dpZGVk4iXDrC7e2C7BtqzSQWE8qSWg8CAaP24dArRqcdaeltv6+uXX855DNDn/9g=="
+  },
+  "bin": "node_modules/@muhaven/mcp/./bin/muhaven-mcp.cjs",
+  "main": "./dist/index.cjs",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-15T13:42:13.525Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "muhaven.read.portfolio",
+      "description": "Return the authenticated investor's encrypted-balance portfolio summary. Output exposes only public aggregates (token list, ebool isOverexposed / isUnderYield handles); decrypted balances are NEVER included in the response. The LLM should call muhaven.read.portfolio for fact-checks about the user's state, not estimate from chat history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.read.yields",
+      "description": "Return per-token yield history (cleartext aggregates only — distribution dates, total funded amounts, epoch numbers). Use to answer \"what was my yield last epoch?\" with authoritative data, not from cached LLM context.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.read.distribution",
+      "description": "Return distribution status for a (token, epoch). Inputs: token address (Hex), epoch (uint). Output: { state, totalFunded, escrowsCreated, escrowsFunded } — all cleartext aggregates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "epoch": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "token",
+          "epoch"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.read.tokens",
+      "description": "List the RWA tokens the authenticated user holds (token addresses + symbols + decimals). Balances are NOT included; use muhaven.read.portfolio for the encrypted-balance aggregates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.read.audit",
+      "description": "Return the authenticated user's tiered-autonomy audit log entries. Cursor-paginated. Useful for forensic review (\"why was I paused?\") and grant-reviewer demos. Read-only — never exposes other users' data.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "surface": {
+            "type": "string",
+            "enum": [
+              "havenbot",
+              "mcp",
+              "openclaw",
+              "checkout"
+            ]
+          },
+          "eventTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tier_changed",
+                "paused",
+                "resumed",
+                "cron_tick",
+                "confirm_token_issued",
+                "confirm_token_consumed",
+                "permit_granted",
+                "permit_revoked",
+                "validator_installed",
+                "validator_uninstalled",
+                "kyc_revocation_received",
+                "risk_questionnaire_complete"
+              ]
+            },
+            "maxItems": 20
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.read.activity",
+      "description": "Return the authenticated investor's on-chain activity feed (buys / sells / wraps / unwraps / yield claims / transfers). Each row carries token address, tx hash, block timestamp, and event type — but NEVER cleartext amounts (encrypted handles only, decryptable client-side via permit). USE THIS to verify a dashboard action settled: after position.buy / position.sell / cash.wrap, the user opens the deep-link, taps Authorize, the on-chain tx lands → a new row appears here. Far more reliable than re-calling read.portfolio (which only changes shape when a NEW token enters the catalog).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.position.buy",
+      "description": "Prepare a Subscription buy. Returns a dashboard deep-link URL (muhaven.app/trade?mode=buy&...) the user opens to review the pre-filled form, then taps Authorize. The user's passkey + ZeroDev kernel sign on the dashboard — this MCP tool never holds or submits a signing key. Use after the user names a clear amount + token (e.g. \"Buy 5 mhUSDC of TBILL1\" → `amountUsdc: \"5\"`). Token accepts either a symbol (\"TBILL1\") or 0x-address. The `amountUsdc` field is HUMAN-DECIMAL mhUSDC (\"5\" = 5 mhUSDC, \"0.5\" = half a mhUSDC) — NOT base-6 integer. Max 6 fractional digits. The tool fetches the current on-chain NAV for the token and converts the notional to integer shares (floor) before building the URL — so \"Buy 3 mhUSDC of GOLD1\" at NAV $0.01 becomes \"Buy 300 GOLD1 shares (~3 mhUSDC)\". Refuses with `amount_too_small_for_share` when the notional won't buy at least 1 share at current NAV; the error message tells the user the minimum mhUSDC needed. Settlement is NOT observable from MCP — verify by calling muhaven.read.activity after the user confirms done (a new \"buy\" row with the tx hash will appear).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "amountUsdc": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)(\\.\\d{1,6})?$",
+            "maxLength": 48
+          }
+        },
+        "required": [
+          "token",
+          "amountUsdc"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.position.sell",
+      "description": "Sell (redeem) RWA shares back to mhUSDC. When an active Scoped autonomy session is present it submits the redeem autonomously (same broker-signed path as position.buy) and returns the tx hash directly; otherwise it returns a dashboard deep-link (muhaven.app/trade?mode=sell&...) the user opens + authorizes with their passkey. Input is amountShares (raw POSITIVE INTEGER share count, NOT mhUSDC notional) — fhERC-20 shares have no decimals so fractional inputs are rejected. By default it does an INSTANT redeem, which on-chain auto-escalates to the token's redemption queue if it overflows the instant capacity (the result reports settlement: \"instant\" | \"escalated\" with the queue requestId). Set viaQueue: true ONLY when the user explicitly wants to queue the sell directly (settlement: \"queued\"). IMPORTANT over-sell caveat: selling MORE shares than the holder owns silently burns ZERO on-chain (a no-op, NOT a partial fill) — balances are encrypted so this cannot be pre-checked; ALWAYS verify settlement afterward via muhaven.read.activity (look for a \"sell\" / \"sell-queued\" row with the tx hash) and warn the user if no balance change landed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "amountShares": {
+            "type": "string",
+            "pattern": "^[1-9]\\d*$"
+          },
+          "viaQueue": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "token",
+          "amountShares"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.position.claim",
+      "description": "Claim matured yield for an epoch. When an active Scoped autonomy session is present AND a concrete escrowId (the epoch id) is given, it submits claimYield autonomously (broker-signed, same path as position.buy/sell) and returns the tx hash directly; otherwise — no active session, OR no escrowId — it returns a dashboard deep-link URL (muhaven.app/yields?...) the user opens and passkey-signs. escrowId is the epoch id: when set, the matching row is highlighted + scrolled into view; when omitted, the page renders the full claimable list and the user picks (autonomous claim REQUIRES a concrete epoch — without one it always deep-links). The claimed amount is computed on-chain and stays encrypted (amount-blind). Verify settlement via muhaven.read.activity (a \"claim\" row with the tx hash) — amounts are never shown.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "escrowId": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.position.rebalance",
+      "description": "NOT IMPLEMENTED in this release — returns an error pointing the user at single-leg position.buy / position.sell or the dashboard /trade page. Multi-leg execute_plan lands in Wave 5 with a composite preview UI + executeBatch on the kernel.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "legs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "token": {
+                  "type": "string"
+                },
+                "side": {
+                  "type": "string",
+                  "enum": [
+                    "buy",
+                    "sell"
+                  ]
+                },
+                "amount": {
+                  "type": "string",
+                  "pattern": "^\\d+$"
+                }
+              },
+              "required": [
+                "token",
+                "side",
+                "amount"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 2,
+            "maxItems": 8
+          }
+        },
+        "required": [
+          "legs"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.cash.wrap",
+      "description": "Prepare a USDC → mhUSDC wrap (the encrypted-balance conversion that funds buys). Returns a dashboard deep-link URL (muhaven.app/cash?amount=...&from=mcp) with the amount pre-filled. Input amountUsdc is human-readable USDC (\"100\" = $100). Common LLM chain: read.portfolio → notice 0 mhUSDC → cash.wrap → then position.buy (each is its own user-confirmed deep-link). Verify settlement by calling muhaven.read.activity (a new \"wrap\" row will appear with the tx hash).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "amountUsdc": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)(\\.\\d{1,6})?$",
+            "maxLength": 48
+          }
+        },
+        "required": [
+          "amountUsdc"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.cash.unwrap",
+      "description": "User-initiated only (no autonomous execution). Prepare an mhUSDC → USDC withdrawal (inverse of cash.wrap; Wave 5 W3). Returns a dashboard deep-link (muhaven.app/cash?mode=unwrap&...) that lands on the Withdraw form. Input amountUsdc is the dollar amount to convert back; mhUSDC↔USDC is 1:1 at 6 decimals so \"withdraw 50 mhUSDC\" or \"convert $50 back to USDC\" both map to amountUsdc: \"50\" (never include \"$\" or convert to base units). Optional — omit to let the user pick on the form. Two-phase async: (1) burn mhUSDC + request coprocessor decrypt (~30-60s), (2) claim USDC from the wrapper's on-chain reserve. The dashboard form drives both phases; this tool NEVER submits the burn or claim. To verify in-conversation, call muhaven.read.activity ONLY AFTER the user reports the claim landed — look for an \"unwrap\" row with a non-null claim tx hash. Seeing only the burn row means step 2 has not happened yet (do NOT declare settled).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "amountUsdc": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)(\\.\\d{1,6})?$",
+            "maxLength": 48
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.policy.set_tier",
+      "description": "REQUEST or COMMIT a tiered-autonomy transition (Advisory ↔ Confirm-per-action ↔ Policy-bound) on the MCP surface. Two-step: first call returns a single-use confirmation token; the user passkey-signs in the dashboard; the host re-invokes with the token to commit. Step-down transitions skip the token. NEVER allows Advisory → Policy-bound in a single call (ADR-0).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetTier": {
+            "type": "string",
+            "enum": [
+              "advisory",
+              "confirm-per-action",
+              "policy-bound",
+              "paused"
+            ]
+          },
+          "confirmationToken": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "targetTier"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.policy.pause",
+      "description": "Activate the /pause kill-switch. Backend marks the surface Paused immediately; the on-chain @zerodev/permissions uninstallPlugin UserOp envelope is returned for the user to submit via passkey. Cascade-mode (no surface arg) pauses all four Wave 4 surfaces atomically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "surface": {
+            "type": "string",
+            "enum": [
+              "havenbot",
+              "mcp",
+              "openclaw",
+              "checkout"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.policy.audit_export",
+      "description": "Stream the authenticated user's full audit log to a single JSON document. Convenience wrapper over muhaven.read.audit that drains the cursor — useful for compliance handoffs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "surface": {
+            "type": "string",
+            "enum": [
+              "havenbot",
+              "mcp",
+              "openclaw",
+              "checkout"
+            ]
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "maxRows": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5000,
+            "default": 1000
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.policy.session_key_status",
+      "description": "Return the current ZeroDev session-key validator state for the MCP surface: tier, validator address, valid-until timestamp, recent action count. Pure read; never modifies state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.issuer.distribute_yield",
+      "description": "PROPOSE a yield distribution for a registered RWA token. Wraps the @muhaven/sdk distributeYield pipeline (startDistribution → batchCreate → fundEscrows). Returns an ActionDescriptor + confirmation token. Issuer-only — the use-case rejects non-issuer kernels with NOT_APPROVED_ISSUER.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tokenAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "totalYieldUsd6": {
+            "type": "string",
+            "pattern": "^[1-9]\\d*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "tokenAddress",
+          "totalYieldUsd6"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.issuer.kyc_add",
+      "description": "PROPOSE adding an investor to the ERC-3643 whitelist for a registered token. kycTier=1 is retail KYC; kycTier=2 is accredited (which also requires tier 1). Returns an ActionDescriptor + confirmation token. Issuer-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tokenAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "investorAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "kycTier": {
+            "type": "number",
+            "enum": [
+              1,
+              2
+            ],
+            "default": 1
+          }
+        },
+        "required": [
+          "tokenAddress",
+          "investorAddress"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.issuer.kyc_remove",
+      "description": "PROPOSE removing an investor from the ERC-3643 whitelist for a registered token. Tier-2 accredited status is auto-cleared by the contract. The on-chain T-5 KYC-revocation cascade across investor surfaces wires up in Wave 5 once the indexer subscribes. Issuer-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tokenAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "investorAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          }
+        },
+        "required": [
+          "tokenAddress",
+          "investorAddress"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.issuer.unpause_token",
+      "description": "PROPOSE the F2 wizard step 6 closure: oracle.setNAV(token, initialNav) + tokenRegistry.setPaused(token, false). Both signed by the applicant kernel. Idempotent — refuses if the token is already active. Issuer-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tokenAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "initialNavUsd6": {
+            "type": "string",
+            "pattern": "^[1-9]\\d*$"
+          }
+        },
+        "required": [
+          "tokenAddress",
+          "initialNavUsd6"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.issuer.audit_query",
+      "description": "Return the calling issuer's tiered-autonomy audit log entries (cursor-paginated). Useful for compliance review of past distributions, KYC additions, and unpause events. Wave 4 = issuer-self only; Wave 5 adds permit-gated cross-user access for compliance officers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "surface": {
+            "type": "string",
+            "enum": [
+              "havenbot",
+              "mcp",
+              "openclaw",
+              "checkout"
+            ]
+          },
+          "eventTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tier_changed",
+                "paused",
+                "resumed",
+                "cron_tick",
+                "confirm_token_issued",
+                "confirm_token_consumed",
+                "permit_granted",
+                "permit_revoked",
+                "validator_installed",
+                "validator_uninstalled",
+                "kyc_revocation_received",
+                "risk_questionnaire_complete"
+              ]
+            },
+            "maxItems": 20
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.read.protection_coverage",
+      "description": "Read-only inspection of DefaultProtection coverage for an RWA token. Returns the public reserveRateBps, status, issuer address, and a human-readable explanation. Encrypted reserve balances are NEVER decrypted server-side; only public aggregates surface. Returns \"not_deployed\" when the P11.A contract is not yet on-chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tokenAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          }
+        },
+        "required": [
+          "tokenAddress"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.read.kyc_attestation",
+      "description": "Read-only informational tool that explains MuHaven cross-chain KYC attestations + returns the registry config (default validity period, attestation signer, jurisdiction hash). Use to answer \"how does cross-chain KYC work?\" with authoritative data. Returns \"not_deployed\" when the P11.C registry is not yet on-chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "investorAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.governance.propose",
+      "description": "PROPOSE opening a governance proposal on the EncryptedGovernance contract. Wave 4 supports proposalType=0 (TRIGGER_PROTECTION) only; type=1 reserved for Wave 5. Returns an ActionDescriptor + confirmation token; the user signs through the dashboard ConfirmModal. Tier-gated. Refuses with P11_NOT_DEPLOYED when the contract is not yet on-chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tokenAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$"
+          },
+          "proposalType": {
+            "type": "number",
+            "enum": [
+              0,
+              1
+            ]
+          }
+        },
+        "required": [
+          "tokenAddress",
+          "proposalType"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "muhaven.governance.cast_vote",
+      "description": "PROPOSE submitting an FHE-encrypted ballot on an EncryptedGovernance proposal. The cleartext yes/no is rendered for the user in ConfirmModal; the SDK encrypts to InEuint128 client-side BEFORE the on-chain write so the agent surface NEVER sees the encrypted handle. The audit log records that a vote was cast but does NOT record which way (privacy invariant).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "proposalId": {
+            "type": "string",
+            "pattern": "^[1-9]\\d*$"
+          },
+          "voteYes": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "proposalId",
+          "voteYes"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "@muhaven/mcp",
+    "version": "0.6.2"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 13372,
+  "stderr": "[muhaven-mcp] starting @muhaven/mcp@0.6.2 (verbose=off)\n[muhaven-mcp] bundler chain-id assert failed: bundler eth_chainId network error: fetch failed — autonomous (Scoped) buys will fail until MUHAVEN_BUNDLER_URL + MUHAVEN_CHAIN_ID agree\n"
+}
