@@ -1,0 +1,420 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "threatcluster-mcp",
+  "version": "0.2.5",
+  "integrity": {
+    "dist": "sha512-ggR0SUo7sq14bd1NIZEloyUB3B0Hjg9AN919AJ/VOoJhF8tXtYcAjqKZHwzEw+/4QwwhIJgfrlLutaTShMJQ3w==",
+    "installed": "sha512-ggR0SUo7sq14bd1NIZEloyUB3B0Hjg9AN919AJ/VOoJhF8tXtYcAjqKZHwzEw+/4QwwhIJgfrlLutaTShMJQ3w=="
+  },
+  "bin": "node_modules/threatcluster-mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-16T11:38:29.027Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "search_threats",
+      "description": "Keyword search over incident clusters (each cluster is one deduplicated story built from every source that covered it). Best for named things: actors, malware, vendors, products, CVE ids, companies, countries. Matching is literal: it tries the exact phrase, then all words together, then any word, and finally widens the time window if still under 3 hits; `matched_stage` says which stage matched. Use `alternatives` for spellings and synonyms (UK / United Kingdom / British). Costs 1 credit per term searched; at most 8 API calls per invocation, and `api_calls` in the result says how many were made. For one call that also covers entity profiles and the dark web use search_everything instead (5 credits).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "2-4 specific words; not a sentence",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "alternatives": {
+            "type": "array",
+            "description": "other names for the same thing, OR'd with query",
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "days": {
+            "type": "integer",
+            "description": "only clusters with reporting in the last N days (free keys: up to 7)",
+            "minimum": 1,
+            "maximum": 90
+          },
+          "limit": {
+            "type": "integer",
+            "default": 8,
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "search_everything",
+      "description": "One call across the whole corpus: incident clusters, entity profiles (actors, malware, vendors, CVEs) and dark-web ransomware listings that match the query. Costs 5 credits for the phrase; if that returns little it retries one call per word (up to 4 more, so 25 at worst) and `matched_stage` says which stage the results came from. Prefer search_threats (1 credit per term) when you only need clusters; use this when you do not know whether the name is an actor, a victim or a product, or when you want the dark-web hits too.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "what to look up, e.g. 'LockBit', 'CVE-2026-83549', 'Ivanti'",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "days": {
+            "type": "integer",
+            "description": "only results with activity in the last N days (free keys: up to 7)",
+            "minimum": 1,
+            "maximum": 90
+          },
+          "limit": {
+            "type": "integer",
+            "description": "max clusters (entities and dark-web hits are capped the same way)",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "newest_threats",
+      "description": "The newest incident clusters in a window, no keyword. Use for 'what happened today / this week', 'what's new', 'what should a SOC know'. `sort_by=new` lists by first report time; `sort_by=trending` ranks by how fast coverage is growing. 1 credit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "time_filter": {
+            "type": "string",
+            "description": "window; 30d needs a paid key (free keys are clamped to 7d)",
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "default": "24h"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 12,
+            "minimum": 1,
+            "maximum": 15
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": [
+              "new",
+              "trending"
+            ],
+            "default": "new"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_threat",
+      "description": "Full record for one cluster returned by another tool: summary, timeline, the underlying articles with their source URLs, extracted entities and CVEs. Call this for the 1-3 clusters that matter before answering in depth. `identifier` is the cluster id, its 8-character short id, or the slug from a threatcluster.io/cluster/... URL. Set `include_iocs` to also fetch the cluster's validated indicators (+1 credit). 1 credit (2 with IOCs).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string",
+            "description": "cluster id, 8-char short id, or slug",
+            "minLength": 4,
+            "maxLength": 200
+          },
+          "include_iocs": {
+            "type": "boolean",
+            "description": "also return validated IOCs (domains, IPs, hashes, URLs) for the cluster",
+            "default": false
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "leak_site_victims",
+      "description": "Ransomware leak-site victim listings: who a group claims to have hit, when, sector, country. These are claims by the groups, not confirmed breaches. Returns the newest listings matching the filters plus a tally of every listing in the window by group, sector and country, so 'most active group' and 'most hit sector' questions are answered from the tally, not the sample. Use for any question about ransomware victims, a group's activity, or a sector / country being hit. 2 credits (listings + tally).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "description": "window in days (free keys: up to 7)",
+            "default": 7,
+            "minimum": 1,
+            "maximum": 90
+          },
+          "sector": {
+            "type": "string",
+            "description": "e.g. Healthcare, Education, Financial Services, Manufacturing, Government",
+            "maxLength": 100
+          },
+          "group": {
+            "type": "string",
+            "description": "ransomware group name, e.g. qilin, akira, lockbit5",
+            "maxLength": 100
+          },
+          "country": {
+            "type": "string",
+            "description": "ISO-2 code, e.g. US, GB",
+            "pattern": "^[A-Za-z]{2}$"
+          },
+          "victim": {
+            "type": "string",
+            "description": "substring of a victim organisation name or domain (matched client-side over the newest listings)",
+            "maxLength": 100
+          },
+          "limit": {
+            "type": "integer",
+            "default": 15,
+            "minimum": 1,
+            "maximum": 25
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "lookup_entity",
+      "description": "Profile of a threat actor, malware family, tool, company, product, country, industry or CVE as tracked in the corpus: how often it appears, first and last seen, the recent clusters and articles it appears in, and the entities it co-occurs with. Give `entity_type` when the name is ambiguous (a company that is also a malware name). 2 credits (name resolution + profile).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "entity_type": {
+            "type": "string",
+            "description": "optional: apt_group, ransomware_group, malware, tool, company, platform, cve, country, industry, campaign, attack_type, mitre_attack, domain, ipv4",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_vulnerability",
+      "description": "One CVE record: description, CVSS, EPSS score and percentile, CISA KEV status with due date, known ransomware use, public exploit count and links, affected vendors and products, references. 1 credit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cve_id": {
+            "type": "string",
+            "description": "e.g. CVE-2026-83549",
+            "pattern": "^[Cc][Vv][Ee]-[0-9]{4}-[0-9]{4,}$"
+          }
+        },
+        "required": [
+          "cve_id"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "exploited_vulnerabilities",
+      "description": "CVEs published or updated in a window, filtered to the ones that matter: in CISA KEV (`kev_only`), with a public exploit (`has_exploit`), by severity, vendor or product. Use for 'what should we patch this week' and 'is anything in our stack being exploited'. 1 credit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "description": "window in days (free keys: up to 7)",
+            "default": 7,
+            "minimum": 1,
+            "maximum": 90
+          },
+          "kev_only": {
+            "type": "boolean",
+            "description": "only CVEs in CISA's Known Exploited Vulnerabilities catalogue",
+            "default": true
+          },
+          "has_exploit": {
+            "type": "boolean",
+            "description": "only CVEs with a public exploit",
+            "default": false
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "CRITICAL",
+              "HIGH",
+              "MEDIUM",
+              "LOW"
+            ]
+          },
+          "vendor": {
+            "type": "string",
+            "description": "CPE vendor, e.g. microsoft, cisco, fortinet",
+            "maxLength": 100
+          },
+          "product": {
+            "type": "string",
+            "description": "CPE product, e.g. windows, ios, fortios",
+            "maxLength": 100
+          },
+          "limit": {
+            "type": "integer",
+            "default": 15,
+            "minimum": 1,
+            "maximum": 25
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "trending_entities",
+      "description": "Which threat actors, ransomware crews, malware families, tools, vendors, products, CVEs, countries and industries are rising in the corpus over a window, with mention counts and the change against the previous window. Indicator types (hashes, IPs, wallets) are left out unless named in `entity_types`. 1 credit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "time_filter": {
+            "type": "string",
+            "description": "window; 30d needs a paid key (free keys are clamped to 7d)",
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "default": "7d"
+          },
+          "entity_types": {
+            "type": "array",
+            "description": "restrict to these types, e.g. [\"apt_group\", \"ransomware_group\", \"malware\"]",
+            "maxItems": 12,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "description": "entities per type",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "api_budget",
+      "description": "Credits and rate-limit state from the headers of the most recent API responses in this session, plus what has been spent so far. No API call is made and nothing is charged; call it to pace yourself before a burst of lookups. Free keys: 100 credits a day, 30 requests a minute, budget refills at 00:00 UTC.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "threatcluster",
+    "version": "0.2.5"
+  },
+  "protocolVersion": null,
+  "instructions": "ThreatCluster is a threat-intelligence corpus: incident clusters (each cluster is one deduplicated story built from every source that covered it, with a threat score, timeline and extracted entities), entity profiles (threat actors, malware, tools, vendors, products, CVEs, countries, industries), CVE records with KEV / EPSS / exploit status, and ransomware leak-site victim listings. Always call a tool before stating a fact about a threat; never answer from memory. Every result carries `url` fields for citation and `cost` (credits spent). A free key has 100 credits a day and a 7-day lookback; call api_budget (free, no API call) to pace yourself. Use search_threats for named things, newest_threats for what is new, leak_site_victims for who was hit, lookup_entity for a profile, get_threat for depth on the 1-3 clusters that matter.",
+  "durationMs": 5768,
+  "stderr": "threatcluster_mcp: no API key found (THREATCLUSTER_API_KEY unset, no tc-cli credential); tools will return an auth error. Free key: https://threatcluster.io/api\n"
+}

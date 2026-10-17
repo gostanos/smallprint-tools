@@ -1,0 +1,1303 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@marwansaab/obsidian-cli-mcp",
+  "version": "0.8.11",
+  "integrity": {
+    "dist": "sha512-jHIcO6jiA/iOi48WaVnnlhfrMFI+U5Jasfy8rmbzoO4K9ypbCp1DjNmjfJcbgpvjZ/GyK7anwqG1sDQfwu3Qnw==",
+    "installed": "sha512-jHIcO6jiA/iOi48WaVnnlhfrMFI+U5Jasfy8rmbzoO4K9ypbCp1DjNmjfJcbgpvjZ/GyK7anwqG1sDQfwu3Qnw=="
+  },
+  "bin": "node_modules/@marwansaab/obsidian-cli-mcp/dist/index.js",
+  "main": "./dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-16T15:52:38.511Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "append_note",
+      "description": "Add content to the END of an existing markdown note. Eliminates the read-then-rewrite cycle of the full-replace surface.\n\nPick `prepend` to add at the TOP of a note instead. Pick `write_note` to replace the WHOLE file or create a new note (this tool does NOT auto-create).\n\nTargeting: `target_mode: \"specific\"` + `vault` + EXACTLY ONE of `path` (vault-relative) or `file` (bare wikilink name, no `[[...]]` brackets). Or `target_mode: \"active\"` + `content` to write to whatever note is open in Obsidian. No opt-in flag is required in active mode — append is additive and cannot destroy content.\n\nSeparator: a newline is auto-inserted between the existing file content and your appended content, matching the file's LF/CRLF convention. If the file already ends with `\\n` or `\\r\\n`, no extra newline is added (so repeated appends grow the file cleanly without blank-line bloat). If the file is empty, no leading separator is inserted. Pass `inline: true` to skip the separator and fuse onto the existing trailing byte — useful for finishing a partial trailing line.\n\nContent: preserved byte-for-byte (no trim, no normalisation, no auto-appended trailing newline — caller controls whether the file ends with a newline after the call). Must be non-empty. No wrapper-imposed size cap.\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR` (with `details.code: CONTENT_EMPTY`), `NOTE_NOT_FOUND`, `EXTERNAL_EDITOR_CONFLICT` (Windows file-lock detection only), `FS_WRITE_FAILED`, `PATH_ESCAPES_VAULT`, `VAULT_NOT_FOUND`, `ERR_NO_ACTIVE_FILE`. Call `help({ tool_name: \"append_note\" })` for recovery hints, worked examples, and the cross-invocation last-write-wins contract.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "inline": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_mode",
+          "content"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "backlinks",
+      "description": "Return the flat ordered list of every source note that references a target Markdown note as a typed envelope `{ count, backlinks: [{ source, count? }], truncated? }`. Replaces \"vault-wide body-text search for the target's name\" at one to two orders of magnitude less token cost.\n\nInverse of `links` (which returns outgoing references from a single note); together the two surfaces give complete 1-hop link-graph reads.\n\nTargeting: `target_mode: \"specific\"` + `vault` + EXACTLY ONE of `file` (wikilink) or `path` (vault-relative). Or `target_mode: \"active\"` for the currently-focused note.\n\nOptions:\n- `with_counts: true` — decorates each per-source entry with an integer `count` aggregating all references from that source.\n- `total: true` — count-only mode (`backlinks: []`). BYPASSES the implicit 1000-source cap and reports the full pre-cap count. Use for hub notes referenced by thousands of sources where only the headline number matters.\n- `limit` (integer 1..10000) — overrides the implicit 1000-source cap on `backlinks.length` (entry-list modes only).\n\nWhen the underlying source set exceeds the applied cap (in entry-list modes), the response includes `truncated: true` and carries the FIRST cap-many entries (sorted by source path UTF-16 ascending).\n\nSource corpus is restricted to `.md` files only — `.canvas` / `.base` / plugin-config / attachment sources are excluded even if Obsidian's metadata cache lists them. Self-references ARE included (matching Obsidian's Backlinks pane). Aliased wikilinks attribute to the resolved target, not the alias text. Frontmatter-declared references contribute uniformly with body references. Code-block-only references are excluded (Obsidian's link parser does not extract them).\n\nCross-folder reach: when the target's basename is unique vault-wide, bare-basename wikilinks (`[[<basename>]]`) from any folder resolve to the target. When two notes share a case-folded basename, Obsidian's resolver picks one canonical destination and the other receives zero bare-basename backlinks — use folder-prefixed wikilinks to disambiguate.\n\nNon-Markdown target locators (`.canvas`, `.pdf`, attachments) surface as `CLI_REPORTED_ERROR` with `details.code: \"NOT_MARKDOWN\"`. Unknown vault display names surface as `CLI_REPORTED_ERROR` with `details.message: \"Vault not found.\"` (no silent routing to focused vault).\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR`, `CLI_REPORTED_ERROR` (with sub-discriminators `VAULT_NOT_FOUND` / `FILE_NOT_FOUND` / `NOT_MARKDOWN`), `ERR_NO_ACTIVE_FILE`, `CLI_NON_ZERO_EXIT`, `CLI_BINARY_NOT_FOUND`. Call `help({ tool_name: \"backlinks\" })` for worked examples (with_counts / total / capped / truncated), the self-reference + frontmatter-inclusion semantics, and the full error roster with recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "with_counts": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "target_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bases",
+      "description": "Enumerate all Obsidian Bases (`.base`) files in the vault and return their vault-relative paths as a sorted list. Siblings in the Bases family: `query_base` (query rows from a view), `views_base` (list views inside a base), `create_base` (create a new item in a base).\n\nResponse: `{ bases: string[], count: number }`. Paths are sorted lexicographically (path-ascending). Empty vault returns `{ bases: [], count: 0 }`. No truncation — all paths returned unconditionally.\n\nOptional `vault` (string): accepted for cohort parity but currently silently ignored by the underlying CLI — the tool always operates on the active vault context regardless of the value provided. This is an inherited CLI limitation; the parameter is preserved for forward compatibility.\n\nRead-only — the tool never mutates vault contents.\n\nTyped errors via `UpstreamError.code`: `CLI_REPORTED_ERROR` (upstream CLI failure); `VALIDATION_ERROR` (malformed input, e.g. unknown keys in strict mode). Call `help({ tool_name: \"bases\" })` for worked examples and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "context_search",
+      "description": "Vault-wide literal substring search returning each match as `{ path, line, text }`. Collapses the \"find file → read file → locate line\" three-call grep pattern into a single MCP call.\n\nPick `context_search` when you need per-match line context. Pick `search` when you only need the file paths (smaller payload). Pick `pattern_search` for regex queries. Pick `smart_connections_query` for semantic similarity (different concept entirely).\n\nVault-scoped — NO `target_mode` discriminator. The optional `vault` field routes to a named vault; omitted routes to the focused vault.\n\nRequired `query` (string, 1..1000 chars, non-empty post-trim; whitespace-only rejected). Internal whitespace preserved verbatim — `\"foo bar\"` matches `foo bar` but not `foobar` or `foo  bar`.\n\nOptional `folder` (string): vault-relative folder prefix; leading/trailing \"/\" stripped; recursive subtree-prefix match (`folder=Projects` matches `Projects/foo.md` and `Projects/sub/bar.md`); case-sensitive segment-boundary equality (`folder=Projects` does NOT match `projects/`).\n\nOptional `limit` (integer 1..10000, default 1000): caps the response `matches` array.\n\nOptional `case_sensitive` (boolean, default false): when true, exact-case match; otherwise ASCII-fold only — `É` does NOT match `é`.\n\nResponse `{ count, matches: [{ path, line, text }], truncated? }`. Sorted by `path` asc then `line` asc. `text` capped at 500 chars + `…` ellipsis marker; trailing `\\r` stripped for cross-platform CRLF defence. `truncated: true` present only when the underlying match-set exceeded the applied cap. Non-`.md` paths filtered out.\n\n**Zero-match handling**: WITHOUT `folder`, returns `{ count: 0, matches: [] }` (never an error). WITH `folder`, the wrapper fires a second `obsidian folder` probe to distinguish \"folder exists with no matches\" from \"folder missing\" — a missing folder surfaces as `CLI_REPORTED_ERROR` with `details.message` starting `\"Error: Folder ...\"`.\n\nUnknown vault → `CLI_REPORTED_ERROR` with `details.message: \"Vault not found.\"`. CLI parse failures → `CLI_REPORTED_ERROR` with `details.stage: \"json-parse\"` or `\"wire-parse\"`.\n\nCall `help({ tool_name: \"context_search\" })` for worked examples (folder-scoped, capped+truncated, folder-not-found error, mixed CRLF/LF source) and the full failure roster with recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "folder": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_base",
+      "description": "Create a new item (Markdown note) within an Obsidian Bases (`.base`) file. Siblings in the Bases family: `bases` (enumerate `.base` files), `query_base` (query rows from a view), `views_base` (list views inside a base).\n\nRequired `path` (string, 1..1000 chars): vault-relative path to the `.base` file; MUST end with `.base` (case-insensitive). Required `name` (string, 1..1000 chars): name for the new item (becomes the Markdown filename). Optional `content` (string): body text for the new item; max 3072 UTF-16 code units — over-limit fails fast with `VALIDATION_ERROR` / `CONTENT_TOO_LARGE` before invoking the CLI. Optional `view` (string): view name within the base; not validated by the CLI (nonexistent views silently accepted). Optional `vault` (string): accepted for cohort parity but silently ignored by the CLI.\n\nResponse: `{ path: string, name: string }`. `path` is the wrapper-constructed vault-relative path of the created item. `name` is the actual filename returned by the CLI — may differ from the requested name due to auto-increment on collision (e.g. requesting \"Task\" when \"Task.md\" exists yields `name: \"Task 1.md\"`).\n\nWrite operation — creates a new Markdown note in the vault.\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR` (`INVALID_BASE_PATH` with sub-reasons `empty`/`too-long`/`wrong-extension`/`path-traversal`; `INVALID_NAME` with sub-reasons `empty`/`too-long`; `CONTENT_TOO_LARGE`); `CLI_REPORTED_ERROR` (`BASE_NOT_FOUND` when the specified base file does not exist). Call `help({ tool_name: \"create_base\" })` for worked examples and recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "view": {
+            "type": "string",
+            "minLength": 1
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delete",
+      "description": "Delete a note from an Obsidian vault. Default sends the file to the OS trash (recoverable); permanent: true bypasses trash and is irreversible. Call help({ tool_name: \"delete\" }) for full parameter docs and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "permanent": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "files",
+      "description": "List files directly inside a vault folder (non-recursive). Folder-scoped typed enumeration — agents that want \"what files are in this folder?\" no longer pay the cost of obsidian_exec returning plain text plus client-side line parsing. Returns { count, paths } with vault-relative paths sorted lexically by UTF-8 byte order; sub-folder entries and dotfile entries are dropped wrapper-side. Discriminated by target_mode. Specific mode: target_mode + vault + optional folder + optional ext. Active mode: target_mode + optional folder + optional ext (operates on the focused vault). When folder is omitted, lists the vault root. Missing folder, empty folder, and folder-names-a-file all return { count: 0, paths: [] } (conflated by upstream). Setting total:true discards the paths array and returns { count: N, paths: [] } for token-economical count-only queries. Call help({ tool_name: \"files\" }) for full parameter docs, the filter pipeline explanation, and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "folder": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ext": {
+            "type": "string",
+            "minLength": 1
+          },
+          "total": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_and_replace",
+      "description": "Find-and-replace with **preview-then-commit** semantics. Scan a vault, a sub-folder, or a single note for a literal-or-regex pattern; default returns a preview, `commit: true` rewrites the matches on disk.\n\n**SCOPE — default is vault-wide; narrow it deliberately.** With no scope field this tool replaces matches across EVERY eligible `.md` file in the vault (or the named `subfolder`, recursively). To confine a change to ONE note, use a single-note scope (below) so the SCOPE — not a globally-unique pattern — bounds the blast radius. Agents have corrupted unintended files by committing wide-pattern replacements; ALWAYS preview first and inspect `affected_notes` before `commit: true`.\n\nRequired `pattern` (1..1000 UTF-16 code units). Required `replacement` (0..1000 chars; empty = deletion).\n\nOptional `mode: \"literal\" | \"regex\"` (default `\"literal\"`). Regex mode uses ECMAScript (Node RegExp, V8) with `$1`/`$&`/`$$` interpolation in `replacement`. Literal mode inserts `replacement` verbatim — no metacharacter interpretation.\n\nOptional `case_insensitive` (boolean, default false). Optional `include_code_blocks` (default false — fenced code blocks are SKIPPED). Optional `include_html_comments` (default false — `<!-- ... -->` is SKIPPED). Optional `commit` (boolean, default false — preview-only). Optional `vault` (string; absent routes to focused vault).\n\n**Scope (choose at most one):**\n- `subfolder` (vault-relative path) — confine to every eligible note under that folder, recursively. Path-traversal rejected with `INVALID_SUBFOLDER`/`path-traversal`; missing folder rejected with `INVALID_SUBFOLDER`/`not-found`.\n- `path` (vault-relative path to one note, e.g. `Projects/Alpha.md`) — confine to exactly that note.\n- `file` (bare note name, e.g. `Alpha`) — confine to exactly that note, resolved by Obsidian's shortest-unique-name (like a wikilink). Supply the bare name, NOT the `[[…]]` bracket form (rejected with a wikilink-bracket `VALIDATION_ERROR`).\n- `active_note: true` — confine to the note currently open in the editor; supply no path. No note open → `ERR_NO_ACTIVE_FILE`.\n\nA single-note scope (`path`/`file`/`active_note`) touches at most one note; a preview affects ≤ 1 note (early confirmation), and a zero-match named scope returns an empty success (not an error). Scopes are mutually exclusive — `file`+`path`, any single-note + `subfolder`, and `active_note` + (`file`/`path`/`subfolder`/`vault`) are rejected with `VALIDATION_ERROR` + `details.code: \"SCOPE_CONFLICT\"` before any note is read. `vault` is permitted with a named `file`/`path` (it selects the note's vault). A named target that does not exist → `INVALID_NOTE`/`not-found`; one that resolves to a non-`.md` or dotfolder note → `INVALID_NOTE`/`not-eligible`. Omit all scope fields for the byte-stable vault-wide default.\n\nResponse is a discriminated union on `mode`:\n- **Preview**: `{ mode: \"preview\", affected_notes: [{ path, occurrence_count, occurrences: [{ line_number, full_line, matched_substring, replacement_substring }] }], total_occurrences }`. Notes path-ascending, occurrences (line, offset)-ascending.\n- **Commit**: `{ mode: \"commit\", changed_notes, total_occurrences_replaced, partial }` plus `failing_note_locator` when `partial: true`. Per-note atomic writes (temp + rename).\n\n**Guards**:\n- **Occurrence cap**: > `OBSIDIAN_FIND_REPLACE_MAX_OCCURRENCES` (default 500) → `VALIDATION_ERROR` with `details.code: \"OCCURRENCE_COUNT_EXCEEDED\"`. Recovery: narrow the scope with `subfolder` or a tighter pattern.\n- **Drift detection**: commit re-scans before writing; if the count differs from the preview → `VALIDATION_ERROR` with `details.code: \"OCCURRENCE_COUNT_DRIFT\"`. Recovery: re-run preview to pick up the new vault state (the wrapper refuses to commit a stale preview).\n\nEligible files: `.md` extension (case-insensitive) AND every path segment NOT starting with `.` (skips `.obsidian/`, `.trash/`, etc.).\n\nLine-scoped only — `\\n` in `pattern` does NOT match cross-line; line endings preserved byte-for-byte. Zero-width regex matches (`a*`, `^`, `$`, `\\b`, lookarounds) are skipped. Frontmatter / indented code blocks / inline code spans are treated as PROSE.\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR` with sub-discriminators (`INVALID_PATTERN`/`empty`|`too-long`|`regex-syntax`; `INVALID_REPLACEMENT`; `INVALID_SUBFOLDER`/`path-traversal`|`not-found`; `OCCURRENCE_COUNT_EXCEEDED`; `OCCURRENCE_COUNT_DRIFT`); `CLI_REPORTED_ERROR` (`VAULT_NOT_FOUND`/`unknown`|`not-open`); `PATH_ESCAPES_VAULT` (canonical escape, security event logged); `FS_WRITE_FAILED` (`details.reason: \"read\"` no-op, OR `\"write\"` with `partial: true` + `failing_note_locator` + `changed_notes`).\n\nCall `help({ tool_name: \"find_and_replace\" })` for worked examples (literal preview, regex preview, commit, error envelopes for each discriminator) and the full failure roster with recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "replacement": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "mode": {
+            "default": "literal",
+            "type": "string",
+            "enum": [
+              "literal",
+              "regex"
+            ]
+          },
+          "case_insensitive": {
+            "default": false,
+            "type": "boolean"
+          },
+          "subfolder": {
+            "type": "string"
+          },
+          "include_code_blocks": {
+            "default": false,
+            "type": "boolean"
+          },
+          "include_html_comments": {
+            "default": false,
+            "type": "boolean"
+          },
+          "commit": {
+            "default": false,
+            "type": "boolean"
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "active_note": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pattern",
+          "replacement"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "find_by_property",
+      "description": "Find vault notes whose named frontmatter property matches a given value. Returns `{ count, paths }` — vault-relative paths of every match. Inverse direction of `read_property`: value → file rather than file → value.\n\n**NOTE — the property-name parameter is `property:`, not `name:`** (diverges from sibling `read_property` / `set_property` which use `name:`). A call with `name:` instead of `property:` fails with VALIDATION_ERROR.\n\nInputs: `{ vault?, property, value, folder?, arrayMatch?, caseSensitive? }`.\n\n`value` accepts string / number / boolean / null / array<scalar>; type-faithful comparison (number `7` is distinct from string `\"7\"`).\n\n`arrayMatch` (default `true`): contains-semantics on list-valued properties. `arrayMatch: false` enables order-sensitive exact-equality (requires array value).\n\n`caseSensitive` (default `true`).\n\n`folder` narrows to a vault-relative subtree.\n\n`vault` should be passed explicitly in multi-vault setups to avoid focused-vault basename ambiguity.\n\nCall `help({ tool_name: \"find_by_property\" })` for worked examples, full parameter docs, and the error roster with recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "property": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              }
+            ]
+          },
+          "folder": {
+            "type": "string"
+          },
+          "arrayMatch": {
+            "default": true,
+            "type": "boolean"
+          },
+          "caseSensitive": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "property",
+          "value"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_active_file",
+      "description": "Report the active file — the note Obsidian currently has focused — so an agent can confirm what is active before acting on it. The read counterpart of `open_file`: where `open_file` makes a file active, `get_active_file` tells you which file is active right now. Makes implicit focus state explicit (the discovery remedy for the ADR-003 implicit-active-state risk).\n\nTargeting — two modes:\n- `target_mode: \"active\"` (no `vault`) — the FOCUSED vault's active file.\n- `target_mode: \"specific\"` + `vault` — a NAMED vault's active file, read CROSS-VAULT: the answer reflects that vault's active file even when it is open-but-unfocused (a background window). You do NOT pre-focus the vault, and focus is NOT changed (this is a pure read). No `file`/`path` is accepted in either mode — the active file IS the implicit target, there is no locator.\n\nSuccess shape — `{ active: { path, name, basename, extension } | null }`:\n- `path` — vault-relative path; directly reusable as a `path` locator for a follow-up operation against the same file.\n- `name` — file name including extension; `name === basename + extension`.\n- `basename` — name without the final extension (`note.draft.md` → `note.draft`).\n- `extension` — the final dot-delimited segment without the dot, or `\"\"` when the name has no dot (then `name === basename`). Non-ASCII characters are returned raw (no normalization).\n\n**No active file is a SUCCESS, not an error.** When nothing is active (empty workspace, all panes closed, or a non-file view in front) the result is `{ active: null }` — a successful result you branch on via `active === null`. This tool NEVER raises `ERR_NO_ACTIVE_FILE` (a deliberate divergence from the rest of the eval cohort, whose tools treat no-active-file as a usage error).\n\nTiming: the answer is a point-in-time snapshot of the active file at lookup time — it may be stale by the time a follow-up action runs (no locking/pinning). If an app-down launch fired as inherited recovery, the relaunched vault's active file may differ (null / last-open) from the pre-down state — the answer reflects post-launch focus.\n\nResponse is file-only: no `vault` / `target_mode` echo, no pane / split / leaf info, no cursor / heading / block position.\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR` (missing `vault` in specific mode; `vault` supplied in active mode; any `file`/`path` locator; unknown field); `CLI_REPORTED_ERROR` with `details.code: \"VAULT_NOT_FOUND\"` / `reason: \"unknown\"` (an unregistered `vault` — never `{ active: null }`, never another vault's data) or a malformed eval response; `CLI_NON_ZERO_EXIT` / `details.reason: \"obsidian-not-running\"` (app down and could not be launched, e.g. `OBSIDIAN_AUTO_LAUNCH=0`); `CLI_BINARY_NOT_FOUND` (the `obsidian` binary is missing). A registered vault that is merely closed or unfocused is NOT an error — it is a success path (inherited recovery).\n\nOut of scope: never changes which file is active (pure read); reports no pane/split/leaf or cursor/heading/block position; does not report a non-file view as the active file. Call `help({ tool_name: \"get_active_file\" })` for worked examples and the full error roster with recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "help",
+      "description": "Look up full Markdown documentation for any registered MCP tool. Call help() with no arguments for an index of available docs, or help({ tool_name: \"<name>\" }) for a specific tool's full parameter docs. Self-describing — call help({ tool_name: \"help\" }).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "links",
+      "description": "Return the flat ordered list of every outgoing link in a Markdown note (returns { count, links: [{ target, line, kind, displayText? }] }) — link-graph primitive that replaces \"full read plus client-side Markdown parse\" for the link-inventory case at one to two orders of magnitude less token cost. Discriminated by target_mode. Specific mode: target_mode + vault + exactly one of file/path. Active mode: target_mode only (operates on the focused note in the focused vault). Setting total:true populates count and returns links:[] for a token-economical pre-flight read; the envelope shape is uniform across both modes. Frontmatter-declared wikilinks (e.g. related: \"[[Project]]\") appear in the listing intermingled in source order with synthetic line:1, classified kind:\"wikilink\" identical to body wikilinks (no source: frontmatter|body discriminator). The kind field is from the closed three-value enum {wikilink, embed, markdown}; bare URLs in body prose are NOT surfaced (body content, not links). Heading and block fragments are embedded byte-faithful in the target string (e.g. \"Target#Heading\" / \"Target#^block-id\"); no separate fragment field. displayText is present only when the source carries an alias distinct from the link target. Non-Markdown filetypes (.canvas, .pdf, attachments) are rejected as CLI_REPORTED_ERROR. Unknown vault display names emit a structured CLI_REPORTED_ERROR (multi-vault callers must supply a registered name; no silent routing to focused vault). Call help({ tool_name: \"links\" }) for full parameter docs, the count-only example, the frontmatter-inclusion note, the multi-vault structured-error note, and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "total": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "move",
+      "description": "Move a note within an Obsidian vault (optionally renaming it). Honours the vault's \"Automatically update internal links\" setting; link-rewriting is vault-config-dependent. Call help({ tool_name: \"move\" }) for full parameter docs and the error-code roster including the active-mode no-focused-note caveat.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "target_mode",
+          "to"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "obsidian_exec",
+      "description": "Invoke any Obsidian Integrated CLI subcommand. Returns stdout, stderr, exitCode, and the exact argv invoked. Failures (non-zero exit, in-band Error: prefix, missing binary, timeout, output > 10 MiB) surface as structured errors with stable codes. Call help({ tool_name: \"obsidian_exec\" }) for full parameter docs and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!--).*"
+            }
+          },
+          "copy": {
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 120000
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "open_file",
+      "description": "Surface an existing vault file as the focused, visible, active file in the running Obsidian workspace — markdown notes AND any other recognised type (canvas, PDF, image, attachment). Decouples the open/hand-off affordance from `write_note` (which only opens what it just wrote): `open_file` opens a file you merely located.\n\n**Cross-vault — opens in the vault you name, and switches focus to it.** The open lands in the `vault` you request whether it is the currently focused vault, an open-but-unfocused (background) vault, or a closed-but-registered vault, and Obsidian's focus moves to that vault. You do NOT need to pre-focus the vault. The previously focused vault stays open (focus just moves). A closed vault is brought up and a fully-quit app is launched automatically (inherited recovery) — a single call, no caller retry. No Obsidian setting or config is changed.\n\nTargeting: `vault` (required — the vault to open in) + EXACTLY ONE of `path` (vault-relative path, any type) or `file` (bare name resolved by Obsidian's link resolver — resolves attachments too; MUST NOT contain `[[`/`]]` brackets — supply `My Note`, not `[[My Note]]`). The locator resolves IN the requested vault; a same-named file in another vault is never opened by mistake.\n\nOptions:\n- `new_tab` (boolean, default `false`) — `true` opens a fresh tab and leaves the previously focused file open in its own tab (a new tab is created even if the file was already open). `false` focuses an existing tab for the file if one is open (no duplicate), else opens in the active tab.\n\nSuccess shape — IDENTICAL across all file types: `{ opened, vault, new_tab, placement }`. `opened` is the resolved vault-relative path (canonicalised from whichever locator you supplied); `vault` is the vault the file was opened in; `placement` is exactly one of `new_tab_created` (a fresh tab was opened), `existing_tab_reused` (an already-open tab for the file was focused, no duplicate), or `active_tab_used` (the file opened into the active tab). The response carries no file-type field and no pane/leaf ids; do not branch on type.\n\nAfter a successful open, the opened file becomes the active file: a subsequent `target_mode: \"active\"` tool call operates on it.\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR` (missing `vault`; both/neither `path`/`file`; bracketed `file`; structurally-unsafe `path`/`file`; unknown field; non-boolean `new_tab`); `CLI_REPORTED_ERROR` with sub-discriminators (`VAULT_NOT_FOUND`/`unknown` — the sole hard vault error — for an unregistered name, `FILE_NOT_FOUND` for no such file/a folder in the requested vault, `UNSUPPORTED_FILE_TYPE` when Obsidian has no view for the extension — distinct from `FILE_NOT_FOUND`); `CLI_NON_ZERO_EXIT`/`details.reason: \"obsidian-not-running\"` (app down and could not be launched, e.g. `OBSIDIAN_AUTO_LAUNCH=0`); `CLI_BINARY_NOT_FOUND` (the `obsidian` binary is missing); `INTERNAL_ERROR` (malformed eval result). A registered vault that is merely closed or unfocused is NOT an error — it is a success path.\n\nOut of scope: does NOT open files outside the vault (external paths), create or delete a vault, close/split/move/rearrange tabs (only the `new_tab` opt-in), edit file content, or scroll to a heading/block within the file. Call `help({ tool_name: \"open_file\" })` for worked examples and the full error roster with recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "vault": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "new_tab": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "vault"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "outline",
+      "description": "Return the flat ordered list of every heading in a Markdown note (returns { count, headings: [{ level, text, line }] }) — structural-discovery primitive that replaces \"full read plus client-side parse\" for the outline case at one to two orders of magnitude less token cost. Discriminated by target_mode. Specific mode: target_mode + vault + exactly one of file/path. Active mode: target_mode only (operates on the focused note in the focused vault). Setting total:true populates count and returns headings:[] for a token-economical pre-flight read; the envelope shape is uniform across both modes. Zero-heading files return { count: 0, headings: [] } in both modes. Setext underline-style headings AND ATX headings both appear in the output (defers to upstream). Non-Markdown filetypes (.canvas, .pdf, attachments) are rejected at the upstream CLI as CLI_REPORTED_ERROR. Call help({ tool_name: \"outline\" }) for full parameter docs, the count-only mode example, the multi-vault default-ambiguity note, the Setext-included note, and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "total": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "patch_block",
+      "description": "Surgically replace the body content tied to a named `^block-id` block-reference marker inside a markdown note. The marker itself stays byte-stable, and every byte outside the targeted block is unchanged.\n\nPick `patch_block` for block-id-targeted edits. Pick `patch_heading` for body-under-named-heading edits. Pick `append_note` / `prepend` for additive writes. Pick `write_note` to replace the whole file. Pick `find_and_replace` for vault-wide pattern replacement.\n\nThree success block shapes the targeting recognises:\n- **paragraph** — marker trailing on the paragraph's final line.\n- **list item** — marker trailing on the item's line; list-marker bytes + indentation preserved.\n- **separately-placed** — marker on a standalone line immediately following a table / callout / blockquote / indented-code block; marker line preserved verbatim.\n\nTargeting: `target_mode: \"specific\"` + `vault` + EXACTLY ONE of `file` / `path` + `block_id` + `content`. Or `target_mode: \"active\"` + `block_id` + `content` (wrapper resolves the focused note).\n\n`block_id` is the bare identifier (no leading `^`), alphanumeric + hyphen, case-sensitive, capped at 1000 UTF-16 code units. First-match-wins on duplicate ids in the same note. Markers inside fenced code blocks are content, NOT eligible targets.\n\n`content` empty is accepted as a legitimate \"clear the body\" operation. No wrapper-imposed size cap.\n\nBlock-id that resolves to a heading-attached marker (ATX or setext) short-circuits to `BLOCK_ON_HEADING` — route those to `patch_heading` instead.\n\nConcurrent calls against the same note resolve **last-write-wins**.\n\nTyped errors via `UpstreamError.details.code`: `BLOCK_NOT_FOUND`, `BLOCK_ON_HEADING` (use `patch_heading`), `NOTE_NOT_FOUND`, `INVALID_BLOCK_ID`, `EXTERNAL_EDITOR_CONFLICT` (file locked — ask user to save and close, retry). Plus the standard `VALIDATION_ERROR`, `PATH_ESCAPES_VAULT`, `FS_WRITE_FAILED`, `VAULT_NOT_FOUND`, `ERR_NO_ACTIVE_FILE`. Call `help({ tool_name: \"patch_block\" })` for worked examples, per-shape gotchas, and recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "block_id": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_mode",
+          "block_id",
+          "content"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "patch_heading",
+      "description": "Surgically rewrite the body under a named heading inside a markdown note, addressed by its full hierarchical path through the heading hierarchy.\n\nPick `patch_heading` for body-under-named-heading edits. Pick `patch_block` for `^block-id` marker edits. Pick `append_note` / `prepend` for additive writes. Pick `write_note` to replace the whole file. Pick `find_and_replace` for vault-wide pattern replacement.\n\n**Three placement modes**:\n- **append** — insert at end of the heading's full reach (before the next equal-or-higher-rank heading).\n- **prepend** — insert immediately after the heading marker line.\n- **replace** — swap the direct body, preserving the marker and child subtrees.\n\nTargeting: `target_mode: \"specific\"` + `vault` + EXACTLY ONE of `file` / `path` + `heading_path` + `mode` + `content`. Or `target_mode: \"active\"` + `heading_path` + `mode` + `content` (wrapper resolves the focused note).\n\n`heading_path` uses `#` as the segment separator. **Minimum two segments** — top-level headings are out of scope (the wrapper exposes no top-level patch surface; use `write_note` for that). First match wins on duplicate sibling headings. Headings whose literal text contains `#` are permanently unreachable through this tool.\n\n`content` empty is REJECTED for `append` / `prepend` (you must supply something to insert). Empty content is ACCEPTED for `replace` (legitimate \"clear the body\" operation). No wrapper-imposed size cap.\n\nConcurrent calls against the same note publish a `HEADING_RACE` discriminator when both calls target the same heading and a race is detected — callers can branch on it and retry. (Sibling `patch_block` does NOT publish a race discriminator; it just resolves last-write-wins.)\n\nTyped errors via `UpstreamError.details.code`: `HEADING_NOT_FOUND` (use [`outline`](./outline.md) to enumerate the file's actual headings, then retry with a valid path), `HEADING_RACE`, `EXTERNAL_EDITOR_CONFLICT` (file locked — ask user to save and close, retry), `INVALID_HEADING_PATH`, `EMPTY_CONTENT`. Plus the standard `VALIDATION_ERROR`, `NOTE_NOT_FOUND`, `PATH_ESCAPES_VAULT`, `FS_WRITE_FAILED`, `VAULT_NOT_FOUND`, `ERR_NO_ACTIVE_FILE`. Call `help({ tool_name: \"patch_heading\" })` for worked examples, per-mode gotchas, and recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "heading_path": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "append",
+              "prepend",
+              "replace"
+            ]
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_mode",
+          "heading_path",
+          "mode",
+          "content"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "paths",
+      "description": "Flat path list under a vault folder (recursive). Returns { count, paths: string[] }; folder entries end with \"/\", file entries do not. Required target_mode (\"specific\"|\"active\"). Supply vault in specific mode; active mode uses the focused vault. Optional folder (defaults to vault root), depth (positive integer; unbounded by default), ext (filter, e.g. \"md\"), total (true returns only the count). Call help({ tool_name: \"paths\" }) for full parameter docs, inherited limitations, and the error roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "folder": {
+            "type": "string",
+            "minLength": 1
+          },
+          "depth": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "ext": {
+            "type": "string",
+            "minLength": 1
+          },
+          "total": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "pattern_search",
+      "description": "ECMAScript-regex search across every Markdown note in a vault (or under a sub-folder). Returns `{ count, matches: [{ path, line, offset, match, text }], truncated? }`.\n\nPick `pattern_search` when you need regex. Pick `context_search` for literal substring with simpler payload. Pick `search` for path-only matches. Pick `smart_connections_query` for semantic similarity.\n\n**CRITICAL — case-sensitivity default flips from `context_search`.** `pattern_search` defaults to **case-sensitive** matching; `context_search` defaults to case-insensitive. Opt into case-insensitive matching explicitly via `case_sensitive: false` when porting predicates between the two tools.\n\nVault-scoped — NO `target_mode` discriminator. The optional `vault` field routes to a named vault; omitted routes to the focused vault.\n\nRequired `pattern` (string, 1..1000 chars): ECMAScript regex (Node `RegExp`, V8). Supports `\\d`, `\\w`, `\\b`, character classes, alternation, quantifiers, named captures `(?<name>…)`, lookahead `(?=…)` / `(?!…)`, lookbehind `(?<=…)` / `(?<!…)`. The `i` flag is applied when `case_sensitive: false`. The `u` flag is NOT exposed — `\\d` is ASCII-only, `\\b` is the ASCII word boundary. Other flags (`m`, `s`, `y`, `d`) are NOT exposed. Invalid regex syntax is rejected at the schema boundary with `VALIDATION_ERROR` carrying the engine's SyntaxError message verbatim — no partial matches are returned alongside the error.\n\nOptional `folder` (string): vault-relative subtree prefix; recursive subtree-prefix match (case-sensitive byte-equal).\n\nOptional `limit` (integer 1..10000, default 1000): caps the response `matches` array.\n\nOptional `case_sensitive` (boolean, **default true**).\n\nOptional `vault` (string): routes to a named vault; omitted routes to the focused vault.\n\n`match` is the substring matched by the regex — NEVER capped, emitted verbatim. `text` is the full line capped at 500 UTF-16 code units + `…` ellipsis marker. `offset` is the 0-based start of the match within the line. Sort: `(path, line, offset)` ascending. Per-occurrence emission — three matches on the same line produce three entries differing only in `offset`. Zero-length matches (`^`, `$`, `a*`, `\\b`, lookarounds) are SKIPPED — they never emit entries.\n\n**Read-only** — find-and-replace is out of scope; use [`find_and_replace`](./find_and_replace.md) for that. Plain-text scanning — matches inside fenced code blocks, frontmatter, or HTML comments ARE returned same as any other position; markdown-aware exclusion is out of scope. Line-scoped — a regex containing `\\n` cannot match across line boundaries.\n\nZero-match valid pattern returns `{ count: 0, matches: [] }` (never an error). With `folder` supplied, a missing folder surfaces as `CLI_REPORTED_ERROR` with `details.code: \"FOLDER_NOT_FOUND\"` (distinguishes wrong-folder from no-matches).\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR` (including invalid regex), `CLI_REPORTED_ERROR` (with sub-discriminators `FOLDER_NOT_FOUND` / `VAULT_NOT_FOUND` / json-parse / envelope-parse), `CLI_NON_ZERO_EXIT`, `CLI_TIMEOUT`, `CLI_OUTPUT_TOO_LARGE`, `CLI_BINARY_NOT_FOUND`. Call `help({ tool_name: \"pattern_search\" })` for ECMAScript-dialect notes, worked examples, and the full failure roster with recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "folder": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "prepend",
+      "description": "Add content to the TOP of an existing markdown note. Frontmatter-aware: when the note starts with a YAML block (`---` ... `---`), new content lands after the closing `---` so the frontmatter is preserved. Otherwise lands at byte zero.\n\nPick `append_note` for end-of-file. Pick `write_note` to replace the whole file — write_note has no size cap, use it for content > 3072 chars or to create new notes; this tool only updates existing notes.\n\nTargeting: `target_mode: \"specific\"` + `vault` + ONE of `path` (vault-relative) or `file` (bare wikilink name, no `[[...]]` brackets). Or `target_mode: \"active\"` + `content` to write to whatever note is open in Obsidian.\n\nSeparator: a newline is auto-inserted between your content and the existing body, matching the file's LF/CRLF convention. Pass `inline: true` to skip the separator and fuse onto the existing first line.\n\nContent: preserved byte-for-byte, non-empty, max 3072 characters. Over-cap fails fast with `VALIDATION_ERROR`. The cap is bounded by an upstream Obsidian CLI defect that hangs the host process around 4 KB on Windows; chunking does not help.\n\nTyped errors via `UpstreamError.code`: `NOTE_NOT_FOUND`, `EXTERNAL_EDITOR_CONFLICT`, `FS_WRITE_FAILED`, `ERR_NO_ACTIVE_FILE`, `PATH_ESCAPES_VAULT`, `VALIDATION_ERROR`. Call `help({ tool_name: \"prepend\" })` for recovery hints, worked examples, and the full schema.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3072
+          },
+          "inline": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_mode",
+          "content"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "properties",
+      "description": "Vault-wide catalogue of frontmatter property names with per-property note counts. Returns `{ count, properties: [{ name, noteCount }] }`. Replaces \"obsidian_exec plus full-vault grep plus client-side dedup\" at one to two orders of magnitude less token cost.\n\nPick `properties` for the property-name catalogue. Pick `read_property` to read one value in one note. Pick `find_by_property` to find notes by a property value. Pick `set_property` to write one. Pick `obsidian_exec` for frequency-ordered (`sort=count`) or other native upstream output.\n\nVault-only — NO `target_mode` discriminator.\n\nOptional `vault` (string): routes to a named vault; omitted routes to the focused vault. Honoured by upstream — unregistered names surface as `CLI_REPORTED_ERROR` with `details.message: \"Vault not found.\"`.\n\nOptional `total: true`: returns `{ count, properties: [] }` for a token-economical pre-flight read; `count` is invariant across both modes for the same vault state.\n\nNames sort alphabetically ascending, case-insensitive. Upstream applies case-insensitive collapse — two notes carrying `AaTest` and `aatest` produce one merged entry with `noteCount` summing both contributors (reported casing is upstream's choice, typically first-encountered). Empty vaults return `{ count: 0, properties: [] }` in both modes.\n\nUpstream's per-entry `type` field (`aliases`, `text`, `date`, `multitext`, `number`, `tags`, `checkbox`, etc.) is dropped — type-aware enumeration is out of scope; route through `obsidian_exec` if you need it.\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR` (unknown top-level key, empty `vault`, non-boolean `total`); `CLI_REPORTED_ERROR` (`Vault not found.`); `CLI_NON_ZERO_EXIT` / `CLI_OUTPUT_TOO_LARGE` (pathologically large inventories — use `total: true` to bypass); `CLI_BINARY_NOT_FOUND`. No `ERR_NO_ACTIVE_FILE` — this tool has no active mode.\n\nCall `help({ tool_name: \"properties\" })` for worked examples, the case-variant collapse semantics, and recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "total": {
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "description": "Return the vault-wide catalogue of frontmatter property names with per-property note counts.\n\nDedup contract (BI-041 FR-011): The `properties` tool returns the union of frontmatter property names across all notes in the vault, deduplicated under upstream's case-insensitive convention. Two property names differing only in case (e.g. `AaTest` and `aatest`) collapse to a single entry with noteCount summing both contributors. The reported casing in the merged entry is upstream's choice (typically the first-encountered casing in upstream's iteration order, NOT an alphabetical or wrapper-imposed rule). The wrapper does not invent a tiebreaker; the previously-documented case-sensitive dedup claim was incorrect and is retired as of BI-041."
+      }
+    },
+    {
+      "name": "query_base",
+      "description": "Run a named view from an Obsidian Bases (`.base`) file and return its matched rows as a structured JSON envelope. Siblings in the Bases family: `bases` (enumerate `.base` files), `views_base` (enumerate views inside one), `create_base` (create a new one).\n\nRequired `base_path` (string, 1..1000 chars): vault-relative path to the `.base` file; MUST end with `.base` (case-insensitive on the extension). Required `view_name` (string, 1..1000 chars): exact case-sensitive match — no trim, no fuzzy. Optional `vault` (string): routes to a named vault; omitted routes to the focused vault.\n\nResponse: `{ columns: string[], rows: Array<Record<string, unknown>>, truncated: boolean, total_rows?: number }`.\n\n- The reserved key `path` always occupies `columns[0]` and is present on every row as the vault-relative source-note locator. A view-defined column named `path` is renamed to `path_view` per the reserved-key collision rule.\n- Empty views (zero rows matched) return `{ columns: [\"path\"], rows: [], truncated: false }` — only the reserved `path` column appears; view-declared columns only surface when at least one row matches.\n- `total_rows` is present only when `truncated: true` (matched > 1000 rows); when ≤ 1000 rows, `truncated: false` and `total_rows` is omitted.\n\n**Type-preservation caveat**: frontmatter values are stringified by upstream regardless of declared YAML type. Integer YAML `count: 42` surfaces as the string `\"42\"`; boolean YAML `done: true` surfaces as `\"true\"`. Parse client-side if numeric / boolean semantics are required — the wrapper does NOT coerce.\n\n**`file.X` column emission caveat**: source-property column names declared as `file.X` are emitted by upstream as the display label `\"file X\"` with embedded space — `file.path` → `\"file path\"`, `file.name` → `\"file name\"`. Index by the exact emitted string. The reserved `path` column (sourced from row metadata) is distinct from `\"file path\"` (the display label).\n\nRead-only — the tool never mutates vault contents.\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR` (`INVALID_BASE_PATH` with sub-reasons `empty`/`too-long`/`wrong-extension`/`path-traversal`; `INVALID_VIEW_NAME` with sub-reasons `empty`/`too-long`); `CLI_REPORTED_ERROR` (`BASE_NOT_FOUND`; `BASE_MALFORMED` with sub-reasons `empty`/`invalid-yaml`/`missing-required-key`/`unsupported-schema-version`/`unknown`; `VIEW_NOT_FOUND`; `VAULT_NOT_FOUND` with sub-reasons `unknown`/`not-open`); `PATH_ESCAPES_VAULT`. Call `help({ tool_name: \"query_base\" })` for worked examples and recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "base_path": {
+            "type": "string"
+          },
+          "view_name": {
+            "type": "string"
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "base_path",
+          "view_name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "description": "Query a named view from an Obsidian Bases (.base) file and return its matched rows.\n\nResponse shape: { columns: string[], rows: object[], truncated: boolean, total_rows?: number }.\n\nEmpty-view columns (FR-006): When a view matches zero rows, `columns` carries only `[\"path\"]` —\nthe wrapper has no signal for view-declared column names absent row data, and does NOT parse the\n`.base` YAML client-side to enumerate them (out-of-scope per BI-041). Agents writing parsing code\nMUST handle the zero-row case without assuming the full column set.\n\nType-preservation passthrough (FR-007): Frontmatter values are stringified by upstream regardless\nof their declared YAML type. The wrapper is passthrough — it does NOT coerce back to native JSON\ntypes. An integer YAML frontmatter value `count: 42` surfaces in the response as the string `\"42\"`.\nA boolean `done: true` surfaces as `\"true\"`. Agents must parse the string value if numeric or\nboolean semantics are required.\n\n`file.*` column-name emission (FR-008): Source-property column names declared as `file.X` are emitted\nby upstream as the display label `\"file X\"` (with embedded space) — including `file.path` → `\"file path\"`\nand `file.name` → `\"file name\"`. The wrapper does NOT remap these display labels back to YAML\nsegment names (out-of-scope per BI-041). Independent of the view's column declarations, the wrapper\nalways injects a reserved `path` column at index 0 of every row carrying the source note's\nvault-relative path. A view declaring `file.path` and `file.name` therefore produces three columns:\n`[\"path\", \"file path\", \"file name\"]` — the wrapper's reserved locator plus both display labels.\nAgents indexing rows by column name MUST use the exact emitted string, including the embedded space."
+      }
+    },
+    {
+      "name": "read",
+      "description": "Read a note from an Obsidian vault. Returns the note's raw UTF-8 text as { content: <stdout> }. Specific mode: vault + exactly one of file (wikilink) or path (vault-relative). Active mode: no locator — reads the focused note. Call help({ tool_name: \"read\" }) for full parameter docs and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "read_heading",
+      "description": "Read the body of a single named heading from a vault note. Returns { content: string } — the body bytes between the matched heading and the next heading marker of any depth (or EOF). Replaces the agent's \"full-file read_note + client-side Markdown parse\" sequence (5–50k tokens for long documents) with a single typed call returning the named section's body bytes (typically 100–500 tokens). Specific mode: vault + exactly one of file (wikilink) or path (vault-relative) + heading. Active mode: just heading (reads the focused note). The heading field is a `::`-separated path with at least two non-empty segments (e.g. \"H1::H2\" or \"H1::H2::H3\"); single-segment H1-only reads, headings whose text contains `::` literally, and Setext-style headings are out-of-reach (documented fallback: full-file read_note plus client-side parse). ATX-only; child subtrees are excluded; segment matching is case-sensitive byte equality with closing-ATX and surrounding whitespace stripped by Obsidian (inline markdown and anchor markers survive verbatim). Call help({ tool_name: \"read_heading\" }) for full parameter docs and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "heading": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "target_mode",
+          "heading"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "read_property",
+      "description": "Read a single named frontmatter property from a vault note. Returns { value, type } with the property's native YAML type preserved (text / list / number / checkbox / date / datetime / unknown). Specific mode: vault + exactly one of file (wikilink) or path (vault-relative) + name. Active mode: just name (reads the focused note). Absent properties and frontmatter-less files return { value: null, type: \"unknown\" } without error. Call help({ tool_name: \"read_property\" }) for full parameter docs and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "target_mode",
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "description": "Read a single named frontmatter property from a vault note. Returns { value, type } with value typed natively (string | number | boolean | array | object | null) and type one of seven labels.\n\nMalformed YAML frontmatter (BI-041 FR-010): When the wrapper handles a note whose YAML frontmatter cannot be parsed by Obsidian, the response carries { value: null, type: \"unknown\" } — the same shape as an absent property or a note with no frontmatter block at all. The type: \"unknown\" discriminator signals the failed-read; the wrapper successfully reached the note but could not extract the property's typed value. Agents recovering from this surface should treat type: \"unknown\" as the failed-read signal and avoid assuming the property is absent. Conflation with absent-property / no-frontmatter is intentional and inherited from upstream (no signal differentiates these three sub-states in Obsidian's `properties` JSON output)."
+      }
+    },
+    {
+      "name": "rename",
+      "description": "Rename a note in an Obsidian vault in place. Honours the vault's \"Automatically update internal links\" setting; link-rewriting is vault-config-dependent. Scoped to .md notes — non-.md targets use obsidian_exec rename directly. Call help({ tool_name: \"rename\" }) for full parameter docs and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/\\\\]+$"
+          }
+        },
+        "required": [
+          "target_mode",
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "search",
+      "description": "Vault-wide literal substring search. Returns just the file paths that contain the query (default mode: `{ count, paths }`). Lightest payload of the search tools.\n\nPick `search` when you only need to know WHICH files contain the phrase. Pick `context_search` when you need per-match line context. Pick `pattern_search` for regex queries. Pick `smart_connections_query` for semantic similarity.\n\n**DEPRECATION**: `context_lines: true` mode is retained for backward compatibility but is **deprecated** — call `context_search` instead for per-line-context queries. The dedicated tool ships CRLF normalisation, structured folder-not-found errors, and a cleaner shape.\n\nVault-scoped — NO `target_mode` discriminator. The optional `vault` field routes to a named vault; omitted routes to the focused vault.\n\nRequired `query` (string, 1..1000 chars, non-empty post-trim; whitespace-only rejected).\n\nOptional `folder` (string): vault-relative folder prefix; leading/trailing `/` stripped; case-sensitive segment-boundary match enforced by upstream.\n\nOptional `limit` (integer 1..10000, default 1000): caps the response array.\n\nOptional `case_sensitive` (boolean, default false): ASCII fold only when false — `É` does NOT match `é`.\n\nOptional `context_lines` (boolean, default false, **DEPRECATED — prefer `context_search`**): when true, returns line-level matches as `{ count, matches: [{ path, line, text }], truncated? }` instead of paths.\n\nOptional `vault` (string): routes to a named vault; omitted routes to the focused vault.\n\nResponse carries `count` plus the array (`paths` or `matches`) plus optional `truncated: true` (present only when truncation fired). Sort: UTF-16 ascending. Non-`.md` paths filtered out. Files matched only by filename/metadata (not body text) do NOT appear in line mode — `context_search`'s count can be less than `search`'s default-mode count for the same query.\n\nZero-match returns the empty envelope (never an error). Unknown vault → `CLI_REPORTED_ERROR` with `details.code: \"VAULT_NOT_FOUND\"`. CLI parse failures → `CLI_REPORTED_ERROR` with `details.stage: \"json-parse\"` or `\"wire-parse\"`.\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR`, `CLI_REPORTED_ERROR`, `CLI_NON_ZERO_EXIT`, `CLI_TIMEOUT`, `CLI_OUTPUT_TOO_LARGE`, `CLI_BINARY_NOT_FOUND`. Call `help({ tool_name: \"search\" })` for worked examples and the full failure roster with recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "folder": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "context_lines": {
+            "type": "boolean"
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "description": "Search vault Markdown notes for a literal substring; default mode returns matching paths, line mode returns per-line matches.\n\nError roster (Cowork pathway reachability):\n- VALIDATION_ERROR — Cowork-reachable for: missing / empty / whitespace-only / oversize `query`; non-integer `limit`; empty `vault` / `folder`.\n- VALIDATION_ERROR(unrecognized_keys) — *(strict-rich pathway only, per BI-0086 — Cowork strips unknown top-level keys client-side per `additionalProperties: false`, so this code never fires on Cowork)*\n- Out-of-range `limit` — *(strict-rich pathway only, per BI-0086 — Cowork surfaces this as MCP transport error `-32602` (Invalid Params), not as the wrapper's wrapped `VALIDATION_ERROR`)*\n- CLI_REPORTED_ERROR — Cowork-reachable: (a) CLI stdout was not JSON AND not the zero-match sentinel (`details.stage: \"json-parse\"`); (b) CLI JSON failed wire-schema parse (`details.stage: \"wire-parse\"`); (c) unknown vault (`details.code: \"VAULT_NOT_FOUND\"`).\n- CLI_NON_ZERO_EXIT — Cowork-reachable: CLI exited non-zero (typical cause: output-cap kill on extreme result sets).\n- CLI_BINARY_NOT_FOUND — Cowork-reachable: the obsidian CLI binary is not on PATH and OBSIDIAN_BIN was unset/invalid.\n- CLI_OUTPUT_TOO_LARGE — Cowork-reachable: the CLI's stdout exceeded the cli-adapter's 10 MiB output cap.\n\nThe two carve-out flags above are pinned at exactly two entries per spec FR-009 / SC-004 / Assumption A10; any future addition is a new BI."
+      }
+    },
+    {
+      "name": "set_property",
+      "description": "Write a single named frontmatter property to a vault note. Surgical single-property write — flips one field without the full-file read + write_note round-trip. Returns `{ written: true, path, name }`.\n\nPick `set_property` to write one frontmatter value. Pick `read_property` to read one. Pick `properties` for the vault-wide property catalogue. Pick `find_by_property` to find notes by a property value.\n\nTargeting: `target_mode: \"specific\"` + `vault` + EXACTLY ONE of `file` (wikilink) or `path` (vault-relative) + `name` + `value` + optional `type`. Or `target_mode: \"active\"` + `name` + `value` + optional `type` (writes the focused note).\n\n`value` accepts `string | number | boolean | string[]`. `type` is one of `text` / `list` / `number` / `checkbox` / `date` / `datetime` — inferred from value's shape when omitted. `date` / `datetime` REQUIRE explicit `type` (the inferrer can't distinguish them from a plain string). Empty array writes an empty YAML list. Cross-type overwrite is supported (the resolved type wins).\n\n**Cowork-pathway caveat**: on the Cowork MCP client, non-string `value` payloads (numbers, booleans, arrays) may be coerced to strings client-side before reaching the wrapper. To force the wrapper to write the intended YAML type, **pass an explicit `type`** for list / number / checkbox writes. Without it, the wrapper sees a string and may write the wrong YAML shape.\n\nCall `help({ tool_name: \"set_property\" })` for the type-inference table, worked examples, and the error roster with recovery hints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "list",
+              "number",
+              "checkbox",
+              "date",
+              "datetime"
+            ]
+          }
+        },
+        "required": [
+          "target_mode",
+          "name",
+          "value"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "smart_connections_query",
+      "description": "Semantic search: return the block-level vault matches nearest to a free-text natural-language query via the Smart Connections plugin's lookup API. Returns `{ count, matches: [{ path, headingPath, score }] }`.\n\nUse this when the agent has a QUESTION and needs notes related to it. Use `smart_connections_similar` when the agent has a SOURCE NOTE and needs notes related to it. Use `search` / `context_search` for literal-string content search.\n\nRequired `query` (string, trimmed, 1..2000 chars — over-cap rejected fast with VALIDATION_ERROR). The cap is bounded by an upstream Obsidian CLI defect that hangs the host process around 4 KB of base64-encoded eval payload on Windows; queries above ~2000 chars trigger `CLI_TIMEOUT` at 10 s and a 30–60 s recovery window during which subsequent calls timeout. For longer text, summarise client-side before querying.\n\nOptional `vault` (string, min 1 char; routes to the focused vault when omitted). Optional integer `limit` (1..100, default 20) caps the matches list AND the count. Setting `total: true` returns just the count with `matches: []` for a token-economical pre-flight read.\n\nPer-match fields: `path` is the source file's vault-relative path with `.md` extension. `headingPath` is an array of heading segments — empty `[]` for source-level matches, literal `[\"---frontmatter---\"]` for frontmatter-block matches (plugin sentinel preserved verbatim), multi-segment for nested-heading blocks. `score` is the raw plugin-returned number — embedding-model-dependent semantics, pass-through (no clamp / normalise / round); non-finite scores (NaN / Infinity / null / missing) are silently dropped. Sort: primary score descending, secondary path byte-ascending, tertiary headingPath.join('#') byte-ascending.\n\nRuntime dependency: the Smart Connections plugin (by Brian Petro; ≥ v4.5.0) must be installed in the target vault AND have completed initial indexing AND have an embed model configured. Missing / not-ready states surface as typed CLI_REPORTED_ERROR codes (`SMART_CONNECTIONS_NOT_INSTALLED` or `SMART_CONNECTIONS_NOT_READY` with `details.reason: \"api-missing\"` or `\"embed-failed\"`).\n\nClosed-but-registered vaults: when `vault` is in `obsidian vaults` but not currently open, the CLI transparently begins opening it as a side effect — error returned with `details.code: VAULT_NOT_FOUND`, `details.reason: \"not-open\"`. Retry after a brief delay.\n\nError-precedence (outer to inner): VAULT_NOT_FOUND(unknown) → VAULT_NOT_FOUND(not-open) → SMART_CONNECTIONS_NOT_INSTALLED → SMART_CONNECTIONS_NOT_READY(api-missing) → SMART_CONNECTIONS_NOT_READY(embed-failed) → success.\n\nCall `help({ tool_name: \"smart_connections_query\" })` for worked examples, full error roster with recovery hints, and inherited-limitation details (indexing freshness, folder exclusions, local-model silent truncation, score-band caveats).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "smart_connections_similar",
+      "description": "Return semantically-similar block-level matches for a single source note via the Smart Connections plugin's similarity API. Returns { count, matches: [{ path, headingPath, score }] }.\n\nTargeting: target_mode discriminator. Specific mode: target_mode + vault + exactly one of file/path. Active mode: target_mode only (operates on the focused note in the focused vault).\n\nCaps: optional integer limit (1..100, default 20) caps the matches list AND the count. Setting total:true populates count and returns matches:[] for a token-economical pre-flight read; the envelope shape is uniform across both modes.\n\nPer-match shape: path is the source file's vault-relative path with .md extension (everything before the first # in the plugin's match key); headingPath is an array of heading segments after the first # (empty [] for source-level matches, literal [\"---frontmatter---\"] for frontmatter-block matches with the plugin's sentinel preserved verbatim, multi-segment for nested-heading blocks); score is the raw plugin-returned number with embedding-model-dependent semantics (pass-through; no clamp/normalise/round).\n\nSort order: primary score descending, secondary path byte-ascending, tertiary headingPath.join('#') byte-ascending. Non-finite scores (NaN / Infinity / null / missing) are silently dropped; source-path-keyed self-exclusion removes the source note AND any block inside the source from the result list.\n\nPlugin dependency: requires the Smart Connections plugin (by Brian Petro; minimum probed v4.5.0) to be installed AND its indexing to have completed in the target vault; otherwise surfaces SMART_CONNECTIONS_NOT_INSTALLED / SMART_CONNECTIONS_NOT_READY / SOURCE_NOT_INDEXED via CLI_REPORTED_ERROR(stage:'envelope-error').\n\nVault states: VAULT_NOT_FOUND carries a details.reason sub-discriminator — \"unknown\" (vault not registered) vs \"not-open\" (registered but not currently open in Obsidian — the CLI transparently opens the vault as a side effect; retry after a brief delay). In practice closing a vault unloads the Integrated CLI plugin too, so the \"not-open\" path may surface as CLI_REPORTED_ERROR with stderr Error: Command 'eval' not found.; treat both as \"vault unavailable, retry after Obsidian opens it\".\n\nError-precedence chain (outer-to-inner, cheapest-first): VAULT_NOT_FOUND(unknown) → VAULT_NOT_FOUND(not-open) → SMART_CONNECTIONS_NOT_INSTALLED → NO_ACTIVE_FILE / FILE_NOT_FOUND → NOT_MARKDOWN → SMART_CONNECTIONS_NOT_READY → SOURCE_NOT_INDEXED → success.\n\nCall help({ tool_name: \"smart_connections_similar\" }) for full parameter docs, the count-only example, the closed-vault retry pattern, the documented inherited limitations (embedding-model-dependent score bands; indexing freshness; folder exclusions; plugin-version drift; multi-vault basename ambiguity), and the full error roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tag",
+      "description": "Find every Markdown note in a vault carrying a given tag. Returns `{ count, paths: string[] }` (default mode) or a bare integer (count-only mode).\n\nPick `tag` for tag-index lookups. Pick `find_by_property` for frontmatter property value lookups. Pick `search` / `context_search` for content-text matching.\n\nVault-only — NO `target_mode` discriminator.\n\nRequired `tag` (string): wrapper trims whitespace, strips a single leading `#`, then enforces non-empty / ≤200 chars / no empty hierarchical segments (rejects `\"/foo\"`, `\"foo/\"`, `\"foo//bar\"`). Unicode and symbols flow through verbatim — no charset regex.\n\n**Hierarchical child-tag subsumption**: querying `\"project\"` returns notes tagged `\"project\"`, `\"project/alpha\"`, `\"project/alpha/v1\"` (segment-bounded; `\"projectile\"` is NOT a match).\n\n**Case-insensitive matching** via ASCII lower-fold — query `\"ALPHA\"` matches stored `#alpha`. (Note: Obsidian's native `tag` subcommand is case-sensitive — the wrapper restores the tag-pane UX expectation.)\n\nBoth body inline tags (`#tag`) and frontmatter tag arrays (`tags: [...]`) contribute equally. Per-note de-duplication — a body that says `#dup #dup` contributes once.\n\nOptional `vault` (string): routes to a named vault even when it is open but unfocused (B1 falsified — BI-0134 / ADR-031); omitted routes to the focused vault. Residual limit: genuine same-display-name collision (focus does not fix it — give colliding vaults distinct display names).\n\nOptional `total: true` returns the bare integer count (token-economical pre-flight); the count is invariant across both modes for the same vault state.\n\nPaths sort byte-ascending. Zero-match returns `{ count: 0, paths: [] }` (or `0` in count-only mode) — NEVER an error.\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR`; `CLI_REPORTED_ERROR` (`VAULT_NOT_FOUND` with sub-reasons `unknown` / `not-open`); `CLI_TIMEOUT`; `CLI_OUTPUT_TOO_LARGE`; `CLI_BINARY_NOT_FOUND`. Call `help({ tool_name: \"tag\" })` for worked examples, the inherited-limitation details (ASCII-only fold; metadataCache freshness; no pagination), and the full failure roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tag": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 220
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "total": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tag"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "views_base",
+      "description": "List the views defined inside an Obsidian Bases (`.base`) file. Siblings in the Bases family: `bases` (enumerate `.base` files), `query_base` (query rows from a view), `create_base` (create a new item in a base).\n\nTwo modes. **Named Base** — pass `base_path` (a vault-relative `.base` path, the same identifier `bases` emits and `query_base`/`create_base` accept) to list THAT Base's views, regardless of what is focused in Obsidian; the named Base is focused as a side effect and always wins over the open Base. **Open Base** — omit `base_path` to list the views of the Base currently focused in Obsidian (no human re-focus needed when you name one).\n\nOptional `vault` (string): with `base_path`, routes to that vault (cross-vault — the named Base is reached whether its vault is focused, open-but-unfocused, or closed). Without `base_path`, `vault` is an inherited no-op (the underlying active subcommand does not honour it).\n\nResponse: `{ views: string[], count: number }`. Each name is a CLEAN, query-ready view name — the injected type label is stripped and internal spaces/punctuation are preserved, so a returned name is accepted verbatim as `query_base`'s `view_name` for the same Base. Names are returned in CLI emission order. An empty declared-views set lists whatever Obsidian materialises (a default view).\n\nRead-only — the tool never mutates vault contents (naming a Base changes which file is focused; no vault content is created, modified, or deleted).\n\nTyped errors via `UpstreamError.code`: `VALIDATION_ERROR` (malformed input; `INVALID_BASE_PATH` sub-issues for an empty / too-long / path-traversal / non-`.base` `base_path`); `CLI_REPORTED_ERROR` with `details.code` — `BASE_NOT_FOUND` (`details.reason: \"named-missing\"` when a named Base does not exist, `\"not-open\"` when no Base is focused — distinct, never a silent open-Base substitution), `BASE_MALFORMED` (the named `.base` is unusable), `VAULT_NOT_FOUND` (`details.reason: \"unknown\"` for an unregistered `vault`). Call `help({ tool_name: \"views_base\" })` for worked examples and the error-code roster.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "base_path": {
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "write_note",
+      "description": "Create a new note in an Obsidian vault, or replace an existing one when overwrite=true. No content-size cap — writes go to the vault filesystem directly, bypassing the upstream Obsidian CLI argv-IPC defect that crashes the host process above ~4 KB on Windows.\n\nSpecific mode: vault + exactly one of file (vault-root basename) or path (vault-relative) + content; defaults overwrite=false (collision returns FILE_EXISTS) and open=false. Active mode: just content + overwrite:true (rewrites the focused note).\n\nFor larger-than-cap appends, prepends, or heading/block patches that need fs-direct semantics, this tool's siblings (append_note, prepend, patch_heading, patch_block) handle the same pipeline; write_note is for fresh creation and full-file replacement.\n\nThe legacy `template` parameter is no longer accepted; use obsidian_exec for template-based creation. Call help({ tool_name: \"write_note\" }) for full parameter docs, the error-code roster, and migration notes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "specific",
+              "active"
+            ]
+          },
+          "vault": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "open": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_mode",
+          "content"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "obsidian-cli-mcp",
+    "version": "0.8.11"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 8276,
+  "stderr": "{\"event\":\"bridge.shutdown\",\"ts\":\"2026-10-16T15:52:46.638Z\",\"reason\":\"transport_closed\",\"inFlightKilled\":false,\"queuedDropped\":0}\n"
+}
