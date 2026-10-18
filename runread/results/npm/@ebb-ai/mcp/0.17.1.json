@@ -1,0 +1,392 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@ebb-ai/mcp",
+  "version": "0.17.1",
+  "integrity": {
+    "dist": "sha512-SBqFep4Qitaj8Uojfdmi9UHTQ93923LVXm3EBXTDcwIbCtwdOumtQBgVDGtJcY+96DSYuJHHZfeXqVnH2xztyQ==",
+    "installed": "sha512-SBqFep4Qitaj8Uojfdmi9UHTQ93923LVXm3EBXTDcwIbCtwdOumtQBgVDGtJcY+96DSYuJHHZfeXqVnH2xztyQ=="
+  },
+  "bin": "node_modules/@ebb-ai/mcp/./bin.js",
+  "main": null,
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-17T11:52:36.235Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_grid_forecast",
+      "description": "Return the projected electricity-grid carbon intensity for a region, hour by hour. Use this when deciding whether to run an expensive AI task now or defer it — intensity is reported in grams CO2-equivalent per kWh with a categorical band (very_clean / clean / average / dirty / very_dirty). Read-only; does not touch the task queue.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "region": {
+            "type": "string",
+            "description": "Electricity Maps grid zone code (e.g. 'US-CAL-CISO', 'US-TEX-ERCO', 'GB', 'FR', 'DE'). On hosts that allow omitting it, defaults to the configured region, else a host-timezone guess, else GB."
+          },
+          "hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 72,
+            "description": "Forecast horizon in hours (1-72). Defaults to 24."
+          }
+        },
+        "required": [
+          "region"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "recommend_window",
+      "description": "Return the optimal carbon-aware execution window for a task WITHOUT scheduling it. Use this for non-committal planning — to see when the cleanest grid moment falls inside the deadline (and the savings vs running now) before deciding whether to commit via schedule_task. Returns the chosen window, top alternatives, a batch_eligible flag, the grid_source (which feed produced the forecast — 'mock' means synthetic data), and a one-line reasoning string. Read-only; does not touch the task queue.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 timestamp (e.g. '2026-05-13T08:00:00-04:00') by which the task must have completed. Must be in the future. Required."
+          },
+          "region": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Electricity Maps grid zone code (e.g. 'US-CAL-CISO', 'FR') the recommendation reasons over. On hosts that allow omitting it, defaults to the configured region, else a host-timezone guess, else GB."
+          },
+          "carbon_budget_g": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Optional hard cap on estimated grams CO2-equivalent for this task. Windows above the cap are dropped before the cleanest is chosen; if none inside the deadline meets the cap the task fails rather than dispatching to a dirty window."
+          },
+          "model": {
+            "type": "string",
+            "description": "Optional vendor model name (e.g. 'claude-sonnet-5'). Affects the reasoning string only."
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional cross-provider routing candidates: 'provider:model' strings (e.g. ['anthropic:claude-haiku-4-5','openai:gpt-6-luna','ollama:llama-3-1-8b']) the caller EXPLICITLY allows. With >= 2 entries the scheduler scores them at the chosen dispatch window on a weighted blend of carbon, cost and latency and dispatches the winner (recording the full scored list on the signed receipt). No silent model swaps — routing only ever picks from this list. Absent or a single entry leaves the provider/model behavior unchanged. Every candidate model must exist in the price table or the task is rejected loudly."
+          },
+          "route_weights": {
+            "type": "object",
+            "properties": {
+              "carbon": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Weight on estimated grams CO2e at the chosen window (non-negative)."
+              },
+              "cost": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Weight on estimated USD list cost, batch discount applied when eligible (non-negative)."
+              },
+              "latency": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Weight on the static latency tier: local < hosted-sync < hosted-batch (non-negative)."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Optional routing weights {carbon, cost, latency}, non-negative and normalized internally. Default {carbon:0.6, cost:0.3, latency:0.1}. Only used when 'candidates' has >= 2 entries."
+          }
+        },
+        "required": [
+          "deadline",
+          "region"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "schedule_task",
+      "description": "Queue an AI task to run during off-peak hours inside the given deadline. Three parallel wins: (1) lighter on the electricity grid — deferring non-urgent tasks smooths projected AI compute demand; (2) 50% of sync list price (projected) — auto-routes through Anthropic/OpenAI Batch APIs when the deadline allows; (3) lower carbon — dispatch at the cleanest electricity-grid hour. Invoke this tool whenever the user phrases a request with deferral language: \"do this later\", \"by tomorrow\", \"tonight\", \"overnight\", \"by EOD\", \"sometime this week\", \"when you have a moment\", \"remind me to\", \"queue this up\", \"schedule this\", \"no rush\", \"not urgent\". Convert the user's wording to an ISO-8601 deadline and pass the task as the prompt. Returns a task_id you can later check with check_queue_status. Good fits: nightly digests, batch summaries, research sweeps, evaluator runs, multi-step report generation — anything the user is fine waiting on. Do NOT use for live chat, interactive code edits, or any task the user is actively waiting to see complete.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The prompt or task description to dispatch when the chosen window arrives."
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 timestamp (e.g. '2026-05-13T08:00:00-04:00') by which the task must have completed. Must be in the future. Required unless deadline_kind is 'quota_reset', in which case it is ignored."
+          },
+          "region": {
+            "type": "string",
+            "description": "Grid-region override (Electricity Maps zone code such as 'US-CAL-CISO'). Defaults to the host's configured region, else a host-timezone guess, else GB."
+          },
+          "carbon_budget_g": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Optional hard cap on estimated grams CO2-equivalent for this task. Windows above the cap are dropped before the cleanest is chosen; if none inside the deadline meets the cap the task fails rather than dispatching to a dirty window."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model to dispatch with (e.g. 'claude-sonnet-5' for Anthropic, 'gpt-6-sol' for OpenAI). Defaults per provider: anthropic 'claude-sonnet-5' (TIDEGAP_DEFAULT_MODEL overrides it), openai 'gpt-6-sol', gemini 'gemini-3.8-flash', ollama 'llama3.1'. When >= 2 'candidates' are supplied, routing may overwrite this with the winning candidate."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai",
+              "gemini",
+              "ollama"
+            ],
+            "description": "Which provider to dispatch this task through: 'anthropic', 'openai', 'gemini', or 'ollama' (local). Defaults to 'anthropic'. 'anthropic' and 'openai' can auto-route through a 50%-cheaper Batch API when the deadline allows; 'gemini' and 'ollama' always dispatch synchronously."
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional cross-provider routing candidates: 'provider:model' strings (e.g. ['anthropic:claude-haiku-4-5','openai:gpt-6-luna','ollama:llama-3-1-8b']) the caller EXPLICITLY allows. With >= 2 entries the scheduler scores them at the chosen dispatch window on a weighted blend of carbon, cost and latency and dispatches the winner (recording the full scored list on the signed receipt). No silent model swaps — routing only ever picks from this list. Absent or a single entry leaves the provider/model behavior unchanged. Every candidate model must exist in the price table or the task is rejected loudly."
+          },
+          "route_weights": {
+            "type": "object",
+            "properties": {
+              "carbon": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Weight on estimated grams CO2e at the chosen window (non-negative)."
+              },
+              "cost": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Weight on estimated USD list cost, batch discount applied when eligible (non-negative)."
+              },
+              "latency": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Weight on the static latency tier: local < hosted-sync < hosted-batch (non-negative)."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Optional routing weights {carbon, cost, latency}, non-negative and normalized internally. Default {carbon:0.6, cost:0.3, latency:0.1}. Only used when 'candidates' has >= 2 entries."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, return the planned dispatch (recommended window + carbon estimate) WITHOUT persisting anything. Useful for confirmation flows."
+          },
+          "dispatch": {
+            "type": "boolean",
+            "description": "If true (default), persist a provider_call task body that `tidegap tick` (CLI) or scheduler.tick (library) can dispatch. Set to false only to enqueue a placeholder prompt without a dispatchable body (legacy in-memory mode)."
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Optional absolute file path. When the task completes, Tidegap writes { taskId, result, receipt } as JSON to this path."
+          },
+          "redact_in_receipt": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional regex patterns to strip from the prompt before storing it on the receipt. Omit to use the default redaction of API-key-looking strings."
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional short title for the task (shown in queue lists). Defaults to the first line of the prompt, cut to 80 characters. API-key-looking strings are redacted."
+          },
+          "deadline_kind": {
+            "type": "string",
+            "enum": [
+              "absolute",
+              "quota_reset"
+            ],
+            "description": "How the deadline is chosen. 'absolute' (default): use 'deadline'. 'quota_reset': run before the next weekly subscription-quota reset, minus a safety margin, as configured in ~/.tidegap/config (TIDEGAP_QUOTA_RESET_<LABEL>=<weekday> <HH:MM> [<IANA zone>], optional TIDEGAP_QUOTA_MARGIN_H_<LABEL>=<hours>, default 2). Use it when the user says 'before my weekly limit resets' or similar. A deadline more than 24 hours away can route the task through the provider Batch API."
+          },
+          "quota_provider": {
+            "type": "string",
+            "description": "Quota label for deadline_kind 'quota_reset' (e.g. 'claude', 'codex'). Optional when exactly one label is configured."
+          },
+          "repeat": {
+            "type": "string",
+            "enum": [
+              "none",
+              "daily",
+              "weekly",
+              "quota_reset"
+            ],
+            "description": "Repeat rule. Defaults to 'none' (a one-off), also for deadline_kind 'quota_reset'; pass 'weekly' (or 'daily') to repeat. 'quota_reset' follows the weekly quota reset and needs deadline_kind 'quota_reset'. When an occurrence finishes (or is cancelled as a skip), the next one is queued automatically with the same prompt; each occurrence costs one provider call. Stop the series with cancel_task series=true."
+          },
+          "origin_session_id": {
+            "type": "string",
+            "description": "Claude Code session id of the conversation that queued the task, so the task detail can show `claude --resume <id>`. Pass it only when the host substitutes it (e.g. ${CLAUDE_SESSION_ID} in a slash command); values that are not 8-128 letters, digits, '-' or '_' are ignored."
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "check_queue_status",
+      "description": "Report on the Tidegap task queue. With no arguments, returns a summary of all known tasks (including tasks persisted by previous sessions — the queue survives host restarts). With task_id, returns full detail for one task, including its title, prompt, result and any carbon receipt (estimated vs actual grams, grid_source, energy_source); viewing a completed or failed task marks it read. Never changes a task's status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "If present, return only this task. If omitted, return a queue summary."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cancel_task",
+      "description": "Cancel a queued or scheduled task. Idempotent — if the task is already completed/failed/cancelled this returns the existing status without error. Throws only if task_id is unknown. Cancelling one occurrence of a repeating task skips it and queues the next one; pass series=true to end the series.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The id of the task to cancel."
+          },
+          "series": {
+            "type": "boolean",
+            "description": "If true and the task repeats, also end its series: no further occurrence is queued. Default false (skip only this occurrence)."
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "expedite_task",
+      "description": "Dispatch a queued or scheduled provider-call task immediately, bypassing the scheduler's chosen carbon window. The resulting receipt records intensitySource='expedited'. Only provider-call tasks still queued/scheduled can be expedited; running, submitted (awaiting Batch API results), or terminal (completed/failed/cancelled) tasks are rejected with an explanatory error.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The id of the task to dispatch now."
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_deadline",
+      "description": "Re-score and reschedule a queued or scheduled task against a new deadline; the scheduler re-picks the cleanest window inside it. Throws if the task is already running or terminal, or if the new deadline is invalid or in the past.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The id of the task to reschedule."
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "New ISO-8601 deadline. Must be in the future."
+          }
+        },
+        "required": [
+          "task_id",
+          "deadline"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "reply_task",
+      "description": "Continue a completed task's conversation: creates a NEW task that sends the earlier prompt, the model's reply and this text to the same provider and model, and runs at the next clean window before its deadline (default one hour). Costs one provider call. Only completed tasks accept a reply; failed or cancelled tasks are rejected. Returns the new task id and its scheduled time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The id of the completed task to reply to."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The follow-up message (1 to 32000 characters)."
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Optional ISO-8601 deadline for the reply. Defaults to one hour from now."
+          }
+        },
+        "required": [
+          "task_id",
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "retry_task",
+      "description": "Re-dispatch a failed provider-call task. Only valid when the task's current status is 'failed' — queued/scheduled/running/submitted/completed tasks are rejected with an explanatory error. The new run's receipt overwrites the old.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The id of the failed task to retry."
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cancel_all",
+      "description": "Bulk-cancel every task in the queue that is still cancellable (status queued or scheduled). Running/completed/failed/cancelled tasks are left untouched. Optionally filter by status. Returns the number of tasks cancelled.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "scheduled"
+            ],
+            "description": "Optional. If set, cancel only tasks in this status. Valid: 'queued', 'scheduled'. Defaults to both."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "tidegap",
+    "version": "0.18.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 7979,
+  "stderr": "@ebb-ai/mcp is now @tidegap/mcp; install @tidegap/mcp (this package stops receiving updates). In your MCP host config use \"tidegap\": { \"command\": \"npx\", \"args\": [\"-y\", \"@tidegap/mcp\"] }.\n[tidegap-mcp] ready (stdio, v0.18.0) — region=GB, grid feed=mock, db=/tmp/.tidegap/queue.db\n(node:1) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n"
+}

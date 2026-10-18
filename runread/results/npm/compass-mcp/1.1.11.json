@@ -1,0 +1,741 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "compass-mcp",
+  "version": "1.1.11",
+  "integrity": {
+    "dist": "sha512-sIdvjYAitylR1ikGEJHk+2r5tuXhEXrwElyUe+1TtFTUWEzES+k93DGABG9Ekn0/ZqDKYPMVlifxICybBfv3NA==",
+    "installed": "sha512-sIdvjYAitylR1ikGEJHk+2r5tuXhEXrwElyUe+1TtFTUWEzES+k93DGABG9Ekn0/ZqDKYPMVlifxICybBfv3NA=="
+  },
+  "bin": "node_modules/compass-mcp/dist/bundle.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "COMPASS_WS_PORT",
+    "COMPASS_COMMUNITIES_FILE"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-17T11:33:44.404Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "compass_search_properties",
+      "description": "Search Compass listings by location (city, ZIP, neighborhood) and optional filters. Resolves free-text via slugification into Compass's URL routing, then fetches the SSR search-results page and extracts the embedded listings array. Compass server-renders ~41 listings into that page (its `num`), and `total_items` reports the full market count. PAGINATION (issue #87): Compass no longer paginates the SSR search via any URL — `/page-N/`, `?page=N`, and `?start=N` all canonicalize back to page 1 and return the identical listings, so only the first SSR page (~41 listings) is reachable through this primitive. `offset` is honored WITHIN that page, and `next_offset` is emitted only when more listings remain within it — it is never a false cursor that re-fetches page 1. TO REACH BEYOND THE FIRST PAGE, narrow with `price_min` / `price_max` / `beds_min`/`beds_max` to bucket the result set into <~41-listing bands (price-banding), then search each band. Returns each matching listing's address, price, beds/baths, sqft, lat/lng, the Compass homedetails URL (`_lid/` form, content-addressed by `listing_id_sha`), and the stable `_pid/` URL via `property_url` and the surfaced `pid` field. The per-listing `primary_photo_url` / `primary_thumbnail_url` are omitted in the default `compact` view (they are Compass CDN URLs a model cannot see); pass `view: \"full\"` to get them, or `compass_get_property_photos` for the whole gallery. USE `pid`/`_pid/` FOR LONG-LIVED REFERENCES (trackers, sheets, bookmarks) — sha-based `_lid/` URLs change when a property is delisted and relisted. Use the sha-based URL to fetch the current listing record. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Compass's payload untouched. No field projection: this server has no verified record of which Compass fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "location": {
+            "type": "string",
+            "description": "Free-text location: city, ZIP, neighborhood (e.g. \"Brooklyn, NY\", \"94110\", \"Park Slope\")"
+          },
+          "price_min": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "price_max": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "beds_min": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "beds_max": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "home_type": {
+            "description": "Restrict to a single property type.",
+            "type": "string",
+            "enum": [
+              "house",
+              "condo",
+              "townhouse",
+              "multi_family",
+              "land",
+              "rental"
+            ]
+          },
+          "limit": {
+            "description": "Max listings to return (default 40). Only the first SSR page (~41 listings) is reachable (#87), so a limit above that is capped by the page; use price/beds banding to reach more.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "offset": {
+            "description": "Zero-based offset into the reachable first SSR page. Honored only within that page (#87); use the `next_offset` value from a previous response to continue within it. An offset at or beyond the page returns no results — narrow with price/beds bands to reach more. Default 0.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "location"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Search Compass listings",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_get_property",
+      "description": "Fetch a property's full Compass record. Pass either `url` (a full Compass homedetails URL or path from a compass_search_properties result) or `listing_id_sha` alone — when only the sha is supplied, the tool fetches /listing/<sha>/view, which redirects to the canonical /homedetails/<slug>/<sha>_lid/ page. Returns address, neighborhood, beds/baths, sqft, lot size (`lot_size_sqft` plus the derived `lot_size_acres` = round(sqft / 43560, 2), null — never 0 — for condos / missing lots), price + price-per-sqft, monthly charges, MLS status, amenities, schools, parcel number, and the canonical Compass URL. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) keyword-parsed from the description.\n\nDESCRIPTION HANDLING: The raw `description` (Compass marketing copy) is omitted by default — pass `include_description: true` to keep it. `extracted_features` is always populated and usually sufficient.\n\nURL FORMS: Compass exposes two URL shapes for a listing. `_lid/` (content-addressed by `listing_id_sha`) — what this tool fetches and what `url` returns — is the form to use for reading the current listing record. `_pid/` (opaque short ID, in `property_url` and the surfaced `pid` field) is **stable across re-listings** and is the right choice for any long-lived reference (trackers, sheets, bookmarks); sha-based URLs go stale when a property is delisted and relisted. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "Compass homedetails URL or path (e.g. /homedetails/162-04-12th-Rd-Queens-NY-11357/2109718971930079225_lid/). One of `url` or `listing_id_sha` is required; pass `url` when you have it (no resolver fetch needed).",
+            "type": "string"
+          },
+          "listing_id_sha": {
+            "description": "Compass listing identifier (the SHA inside `<sha>_lid`). Sufficient on its own — the tool fetches /listing/<sha>/view, which 302-redirects to the slugged homedetails page (no extra lookup; the fetch follows the redirect).",
+            "type": "string"
+          },
+          "include_description": {
+            "description": "Include the raw `description` (Compass marketing copy) in the response. Defaults to `false` — `extracted_features` is always populated and usually covers the common needs.",
+            "type": "boolean"
+          },
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Compass's payload untouched. No field projection: this server has no verified record of which Compass fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get Compass property details",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_get_saved_homes",
+      "description": "Not yet supported — Compass renders /overview/favorites via an auth-scoped GraphQL we have not yet identified. Throws a clear error explaining the limitation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get my saved (favorited) Compass homes",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_get_saved_searches",
+      "description": "Not yet supported — Compass renders saved searches via an auth-scoped GraphQL we have not yet identified. Throws a clear error explaining the limitation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get my saved Compass searches",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_calculate_mortgage",
+      "description": "Local-only mortgage payment calculator. Returns a full PITI breakdown (principal + interest, property tax, insurance, HOA, PMI) and total interest over the life of the loan. No network call — fully deterministic, safe to use for scenario comparison without burning a fetch. Provide either `down_payment` OR `down_payment_percent`; defaults to 20%. Property tax can be given as `property_tax_annual` or `property_tax_rate` (% of home price). PMI applies automatically when LTV > 80% and `pmi_rate` is provided.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "home_price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "down_payment": {
+            "type": "number",
+            "minimum": 0
+          },
+          "down_payment_percent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "interest_rate": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Annual %, e.g. 6.5"
+          },
+          "loan_term_years": {
+            "description": "Default 30, max 50",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50
+          },
+          "property_tax_annual": {
+            "type": "number",
+            "minimum": 0
+          },
+          "property_tax_rate": {
+            "description": "Annual % of home price",
+            "type": "number",
+            "minimum": 0
+          },
+          "insurance_annual": {
+            "type": "number",
+            "minimum": 0
+          },
+          "hoa_monthly": {
+            "type": "number",
+            "minimum": 0
+          },
+          "pmi_rate": {
+            "description": "Annual %, applied when LTV > 80%",
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "home_price",
+          "interest_rate"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Calculate mortgage payment (local)",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "compass_get_price_history",
+      "description": "Full listing history for a Compass property — Listed / Sold / Pending / Price Change / Delisted events with date, price, and MLS attribution. Returns three arrays: `events` covers this listing's events, `history` aggregates events from prior listings of the same property, and `events_normalized` merges both into a shared cross-MCP schema (`{date, type, price?, price_change_pct?, source_mls?}` with a fixed type enum: Listed | PriceChange | Pending | Contingent | Sold | Withdrawn | Relisted | Delisted). Pass either `url` (the full Compass homedetails URL or path) or `listing_id_sha` alone — sha-only calls fetch /listing/<sha>/view, which redirects to the homedetails page. Note: most of this data is already returned inline on `compass_get_property` (the events[] / history[] arrays live on the same listing record); call this tool only when you want the merged + normalized timeline. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "Compass homedetails URL or path (preferred — no resolver round-trip needed).",
+            "type": "string"
+          },
+          "listing_id_sha": {
+            "description": "Compass listing identifier (the SHA inside `<sha>_lid`). Sufficient on its own — the tool fetches /listing/<sha>/view, which 302-redirects to the slugged homedetails page (no extra lookup).",
+            "type": "string"
+          },
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Compass's payload untouched. No field projection: this server has no verified record of which Compass fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get Compass listing-history events",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_compare_properties",
+      "description": "Fetch 2 or more Compass properties and align their facts side-by-side. Each target may supply `url` (a full Compass homedetails URL or path) or `listing_id_sha` alone — sha-only targets fetch /listing/<sha>/view, which redirects to the homedetails page. Returns the full per-property record per row (with `extracted_features` populated). Per-target errors are captured per-row — one bad target will not fail the whole call; a failed row carries `status` = `error_kind` (`timeout` / `bridge_down` / `protocol` / `other`), `retryable` and `error`, and the envelope reports `count` / `ok` / `errored`. Calls are concurrent, and the whole call is bounded by an overall deadline: any row still unsettled when it is reached comes back as `{ status: \"pending\", retryable: true, error }` with a top-level `pending` count — re-run just those targets. The raw `description` is omitted from each row by default — pass `include_description: true` to keep it. The redundant `summary` table is also opt-in via `include_summary: true` — by default only `results[]` is returned, which already carries every fact.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targets": {
+            "minItems": 2,
+            "maxItems": 25,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "description": "Compass homedetails URL or path (preferred — no resolver round-trip needed).",
+                  "type": "string"
+                },
+                "listing_id_sha": {
+                  "description": "Compass listing identifier (the SHA inside `<sha>_lid`). Sufficient on its own — the tool fetches /listing/<sha>/view, which 302-redirects to the slugged homedetails page (no extra lookup).",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "Array of 2–25 properties to compare. (Cap raised from 8 to 25 in #53; for unbounded structured fetch without the summary table, use `compass_bulk_get`.)"
+          },
+          "include_description": {
+            "description": "Include the raw `description` (Compass marketing copy) on each row. Defaults to `false` — `extracted_features` is always populated.",
+            "type": "boolean"
+          },
+          "include_summary": {
+            "description": "Include the pivoted `summary` table (one row per compared field, one column per listing). Defaults to `false` — `results[].property.*` already carries every fact and the summary was roughly 30% of response weight. Useful only for human-readable rendering.",
+            "type": "boolean"
+          },
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Compass's payload untouched. No field projection: this server has no verified record of which Compass fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "targets"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Compare Compass properties side-by-side",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_calculate_affordability",
+      "description": "Solve for the maximum home price you can afford under the standard 28/36 DTI rule. Inputs: monthly income, recurring monthly debts (car loans, student loans, etc.), down payment, interest rate, and optional property-tax rate / insurance / HOA / loan term. Output: max home price, the binding constraint (front-end vs back-end), and the full PITI breakdown at that price. Same math across the realty MCP cohort (@chrischall/realty-core). No network — pure local math.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "monthly_income": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "monthly_debts": {
+            "description": "Sum of monthly debt payments (car, student loans, etc.)",
+            "type": "number",
+            "minimum": 0
+          },
+          "down_payment": {
+            "type": "number",
+            "minimum": 0
+          },
+          "interest_rate": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Annual %, e.g. 6.5"
+          },
+          "loan_term_years": {
+            "description": "Default 30, max 50",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50
+          },
+          "property_tax_rate": {
+            "description": "Annual % of home price, default 1.1",
+            "type": "number",
+            "minimum": 0
+          },
+          "insurance_annual": {
+            "type": "number",
+            "minimum": 0
+          },
+          "hoa_monthly": {
+            "type": "number",
+            "minimum": 0
+          },
+          "front_end_dti": {
+            "description": "Front-end DTI cap as decimal, default 0.28",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "back_end_dti": {
+            "description": "Back-end DTI cap as decimal, default 0.36",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "monthly_income",
+          "down_payment",
+          "interest_rate"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Calculate max affordable home price",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "compass_get_property_photos",
+      "description": "The full photo gallery for a Compass listing — every image in listing.media[]. Each entry returns the original CDN URL plus a thumbnail URL and pixel dimensions. Pass either `url` (the full Compass homedetails URL or path) or `listing_id_sha` alone — sha-only calls fetch /listing/<sha>/view, which redirects to the homedetails page. By default only photos (category 0) are returned; set `include_all_categories: true` to also include floorplans and other media. Returns `{ listing_id_sha, count, photos }`. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "Compass homedetails URL or path (preferred — no resolver round-trip needed).",
+            "type": "string"
+          },
+          "listing_id_sha": {
+            "description": "Compass listing identifier (the SHA inside `<sha>_lid`). Sufficient on its own — the tool fetches /listing/<sha>/view, which 302-redirects to the slugged homedetails page (no extra lookup).",
+            "type": "string"
+          },
+          "include_all_categories": {
+            "description": "Include non-photo media (floorplans, etc.). Default false.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get Compass property photo gallery",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_healthcheck",
+      "description": "Round-trips a small public www.compass.com URL (/robots.txt) through ContextMint Bridge (your signed-in browser tab) and returns diagnostics: the bridge's role (host/peer/null), port, version, the extension link (linked / pair pending / not attached / never answered), the elapsed round-trip time, and a plain-English hint distinguishing 'bridge never came up' from 'extension not connected' from 'this browser can't serve a capability' from 'real www.compass.com-side problem'. Read-only, no auth required. Call this when a real tool fails and you want to know which hop broke.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Verify the ContextMint Bridge connection end-to-end",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_get_by_address",
+      "description": "Resolve a free-text street address to a Compass listing's canonical URL and identifiers in one call. Walks three rungs: first the structured typeahead `POST /api/v3/omnisuggest/autocomplete` (the primary rung — Compass's address-suggest API, which routes around the AWS WAF that 403s the SSR free-text path, issues #78/#79), then `/homes-for-sale/?q=<address>` (the free-text rung) and — when those return no verified match — a slug-based search at `/homes-for-sale/<city-state-or-zip>/` (the search-fallback rung, issue #71). Each candidate is verified against the query (case + street-type abbreviation normalization, then whole-token equality, issue #45) before being accepted. Returns `{ url, listing_id_sha, pid, address, resolved, matched_via }` where `matched_via` is `\"typeahead\"`, `\"freetext\"`, or `\"search_fallback\"` so callers can see which rung found the match. When no rung matches, returns `{ resolved: false, error: \"no listing matched\" }` rather than leaking a wrong URL. When the lookup was blocked by a sign-in / AWS WAF challenge instead, it returns `{ resolved: false, status: \"auth_required\", error, hint }` — NOT a miss: sign in to compass.com in the browser and retry. The `url` is the stable `_pid/` form when Compass provides a `navigationPageLink` (preferred for trackers/bookmarks — sha URLs go stale on relisting), falling back to the `_lid/` form otherwise. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Compass's payload untouched. No field projection: this server has no verified record of which Compass fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Street address line, e.g. \"126 Sleeping Bear Ln\"."
+          },
+          "city": {
+            "description": "e.g. \"Lake Lure\"",
+            "type": "string"
+          },
+          "state": {
+            "description": "Two-letter state abbreviation, e.g. \"NC\"",
+            "type": "string"
+          },
+          "zip": {
+            "description": "ZIP code, e.g. \"28746\"",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Resolve a Compass listing by street address",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_bulk_get",
+      "description": "Fetch up to 200 Compass listings in a single call. Returns one structured row per input target (no side-by-side summary table — use `compass_compare_properties` for that). Each row is either `{ listing_id_sha, url, status: \"ok\", property }` on success or `{ listing_id_sha, url, status, error_kind, retryable, error }` on failure (`status` = `error_kind`) — one bad target never fails the whole call. `retryable: true` (a bridge `timeout` after one retry, an unreachable `bridge_down`, issue #73) is NOT a missing listing, so retry it (a cold bridge usually succeeds on the second call) rather than concluding Compass has no record; `protocol` / `other` are real misses. Targets accept the same `url` / `listing_id_sha` shape as `compass_get_property`. Calls fan out concurrently. The whole call is bounded by an overall deadline: a slow or hung row never wedges it — any row still unsettled when the deadline is reached comes back as `{ status: \"pending\", retryable: true, error }` alongside a top-level `pending` count, so re-run just those targets. The envelope also reports `count` / `ok` / `errored`. `extracted_features` is populated per row. The raw `description` is omitted by default — pass `include_description: true` to keep it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targets": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "description": "Compass homedetails URL or path (preferred — no resolver round-trip needed).",
+                  "type": "string"
+                },
+                "listing_id_sha": {
+                  "description": "Compass listing identifier. Sufficient on its own — the tool fetches /listing/<sha>/view, which 302-redirects to the slugged homedetails page (no extra lookup).",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "Up to 200 targets to fetch. For higher counts, batch into multiple calls."
+          },
+          "include_description": {
+            "description": "Include the raw `description` on each row. Defaults to `false` — `extracted_features` is always populated.",
+            "type": "boolean"
+          },
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Compass's payload untouched. No field projection: this server has no verified record of which Compass fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "targets"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Bulk-fetch Compass listings",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_resolve_addresses",
+      "description": "Resolve up to 100 street addresses to Compass listing URLs in a single call. Returns one row per input, either `{ resolved: true, url, listing_id_sha, pid, address, matched_via }`, `{ resolved: false, error, query }` for a genuine no-match, or — when the bridge timed out / was unreachable (issue #85) — `{ resolved: false, status: \"timeout\" | \"bridge_down\", retryable: true, error, query }`. A `status` row is NOT a miss: the lookup never completed, so retry it (a cold bridge usually succeeds on the second call) rather than concluding Compass has no listing. A row with `status: \"auth_required\"` (plus `error` and `hint`) means the browser session was signed out or stuck on an AWS WAF challenge: sign in to compass.com, then retry. Each row walks the same three rungs as `compass_get_by_address` — first the structured typeahead `POST /api/v3/omnisuggest/autocomplete` (the primary rung that routes around the AWS WAF, issues #78/#79), then `/homes-for-sale/?q=<address>` (freetext), then `/homes-for-sale/<locality-slug>/` (search_fallback, issue #71) — and verifies candidates against the same whole-token address-match policy (#45). The `matched_via` field on each resolved row indicates which rung found it. Compass's search degrades into far-away top hits when the local market has no match, and bulk amplifies the corruption surface, so a miss returns `resolved: false` with no URL rather than leaking the wrong property. Calls fan out concurrently server-side, and the whole call is bounded by an overall deadline: any row still unsettled when it is reached comes back as `{ resolved: false, status: \"pending\", retryable: true, error, query }` with a top-level `pending` count — that is NOT a miss, so re-run just those addresses. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Street address line, e.g. \"126 Sleeping Bear Ln\"."
+                },
+                "city": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "zip": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "address"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Up to 100 address inputs. For higher counts, batch into multiple calls."
+          }
+        },
+        "required": [
+          "addresses"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Bulk-resolve Compass listings by street address",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_register_session",
+      "description": "Record (or refresh) which Compass account the signed-in session belongs to, keyed by `account_identity`. Re-registering the same identity updates the existing entry. Returns a `session_id`; pass `mark_active: true` to mark it as the current account in the same call. The registry is a label only: it does not change which Compass account requests use. Every compass tool call goes through whichever browser tab the ContextMint Bridge extension is signed into; to read a different account, sign that tab into it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account_identity": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Caller-supplied identifier for the signed-in account (typically the saved-account email)."
+          },
+          "auth_expires_at": {
+            "description": "Optional ISO timestamp at which the session expires.",
+            "type": "string"
+          },
+          "mark_active": {
+            "default": false,
+            "description": "When true, immediately make the newly-registered session the active one.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "account_identity"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Register a signed-in Compass session",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "compass_set_active_session",
+      "description": "Mark a previously registered `session_id` as the current account label, for your own bookkeeping across a conversation. The registry is a label only: it does not change which Compass account requests use. Every compass tool call goes through whichever browser tab the ContextMint Bridge extension is signed into; to read a different account, sign that tab into it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Session id to make active."
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Set the active Compass session",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "compass_get_session_context",
+      "description": "List every registered account label plus the current `active_session_id`. When none are registered, `sessions` is empty and `active_session_id` is null. The registry is a label only: it does not change which Compass account requests use. Every compass tool call goes through whichever browser tab the ContextMint Bridge extension is signed into; to read a different account, sign that tab into it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "List all registered Compass sessions",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "compass_get_comparable_rentals",
+      "description": "Surface nearby rental listings for a Compass property — useful for evaluating STR (short-term-rental) viability in vacation markets. Lifts the target's city/state/zip from the homedetails page, then searches Compass's `type-rental/` filter in the same locality and returns each rental's address, monthly price (in `price_formatted`), beds/baths, sqft, and the Compass URL. Honest-by-default: when no rentals come back, `rentals: []` with the target locality preserved so the caller can decide to widen. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "Compass homedetails URL or path of the target property (preferred).",
+            "type": "string"
+          },
+          "listing_id_sha": {
+            "description": "Compass listing identifier (the SHA inside `<sha>_lid`). Sufficient on its own — the tool fetches /listing/<sha>/view, which 302-redirects to the slugged homedetails page (no extra lookup).",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max rental candidates to return. Default 20.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Compass's payload untouched. No field projection: this server has no verified record of which Compass fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "List nearby rental listings for a Compass property",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "compass_get_agent_listings",
+      "description": "Fetch the listings represented by a Compass agent from their profile page (/agents/<slug>/). Pass either `slug` (e.g. \"paige-mcguirk\") or `profile_url` (a full https://www.compass.com/agents/<slug>/ URL — both forms are accepted). Returns `{ agent: {name, slug}, active_listings: [...] }`, where each active listing carries the SAME normalized fields as compass_get_property (address, beds/baths, sqft, lot size, price + price-per-sqft, MLS status, the canonical Compass URL + stable pid, extracted_features, etc.).\n\nCLOSED DEALS: the agent's sold/closed deals are opt-in — pass `include_closed: true` to add a `closed_deals` array (same normalized shape). Omitted by default to keep the payload lean.\n\nCHAINING: the agent slug is surfaced on each property's `listing_agent.profile_slug` in compass_get_property results (compass_search_properties results don't carry the listing agent), so you can go property → agent → their other listings. Read-only; safe to call repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns Compass's payload untouched. No field projection: this server has no verified record of which Compass fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "slug": {
+            "description": "Compass agent profile slug — the `<slug>` in /agents/<slug>/ (e.g. \"paige-mcguirk\"). One of `slug` or `profile_url` is required.",
+            "type": "string"
+          },
+          "profile_url": {
+            "description": "Full Compass agent profile URL (e.g. https://www.compass.com/agents/paige-mcguirk/) or an /agents/<slug>/ path. Accepted as an alternative to `slug`.",
+            "type": "string"
+          },
+          "include_closed": {
+            "description": "Include the agent's closed/sold deals as a `closed_deals` array. Defaults to `false` to keep the response lean.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "title": "Get a Compass agent's listings",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "compass-mcp",
+    "version": "1.1.11"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 7065,
+  "stderr": "[compass-mcp:bridge] ready — 127.0.0.1:37149 binds on the first request (version=1.1.11)\n[compass-mcp] v1.1.11 — WebSocket bridge via @fetchproxy/server on 127.0.0.1:37149. Install the ContextMint Bridge extension (see https://github.com/nullnet-app/contextmint-bridge/releases) and sign into compass.com. This project was developed and is maintained by AI (Claude). Use at your own discretion.\n"
+}

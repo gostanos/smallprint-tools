@@ -1,0 +1,761 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "opentable-mcp",
+  "version": "1.3.4",
+  "integrity": {
+    "dist": "sha512-F+cSYpr0sFZ9YVc8LYTYSoriFq5YzNZS6WfSYPkBsDPMO/3sh54Cvf2URTRRuRWEi4d2grs4L7/Tt8d8W9bRkQ==",
+    "installed": "sha512-F+cSYpr0sFZ9YVc8LYTYSoriFq5YzNZS6WfSYPkBsDPMO/3sh54Cvf2URTRRuRWEi4d2grs4L7/Tt8d8W9bRkQ=="
+  },
+  "bin": "node_modules/opentable-mcp/dist/bundle.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "OT_BRIDGE",
+    "OT_MCP_CHROME_URL",
+    "OT_WS_PORT",
+    "FETCHPROXY_WS_HOST",
+    "FETCHPROXY_IDENTITY_DIR"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-17T11:27:00.023Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "opentable_list_reservations",
+      "description": "List the authenticated user's OpenTable reservations. Defaults to upcoming; pass scope=\"past\" or scope=\"all\" to broaden. Each entry includes the security_token needed to cancel or modify.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns OpenTable's payload untouched. No field projection: this server has no verified record of which OpenTable fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "past",
+              "all"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_find_slots",
+      "description": "List available reservation slots at a specific OpenTable restaurant for a date + party size. Returns each slot's reservation_token (use it with opentable_book — tokens expire quickly, book promptly). Slots may be attributes=['default'|'bar'|'highTop'|'outdoor'] and type=Standard|Experience|POP. You can pass a slot's reservation_token + slot_hash straight to opentable_book without a separate opentable_get_restaurant call — book auto-resolves the dining area. (OpenTable's availability response carries only the seating category, not the numeric dining-area id, so that id is resolved at book time from the booking-details page.) If this errors with \"operation ... not yet observed on this tab\", open any OpenTable restaurant page in your browser once (the graphql bridge needs to see the page's own availability query fire first), then retry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns OpenTable's payload untouched. No field projection: this server has no verified record of which OpenTable fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "restaurant_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$",
+            "description": "YYYY-MM-DD"
+          },
+          "time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "HH:MM (24h) — anchor time; slots come back relative to this"
+          },
+          "party_size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "database_region": {
+            "description": "OpenTable's sharded-database region for the restaurant. Defaults to 'NA' (North America). Pass the venue's region (e.g. for UK/EU/APAC restaurants) when booking or cancelling outside North America — slot-lock, availability, and cancel route to the wrong database shard, or fail opaquely, when this is wrong. LIMITATION: not auto-derived from restaurant data (OpenTable's availability/booking responses don't surface the shard id), so non-NA bookings must set it explicitly.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "restaurant_id",
+          "date",
+          "time",
+          "party_size"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_book_preview",
+      "description": "Preview an OpenTable booking BEFORE committing. Fetches the /booking/details SSR page and the slot-lock to surface: the cancellation policy (including any credit-card no-show fee), the saved payment card that would be charged/held, and a short-lived `booking_token` that opentable_book consumes. REQUIRED for CC-required slots — opentable_book refuses to commit without the token. Safe to call for standard slots too (the token skips a redundant re-lock in book). Holds the slot for ~60-90s; preview → book should happen within a minute. For Listing-type restaurants (Le Bernardin, etc.) this tool can't fetch a slot at all — callers should check `opentable_get_restaurant.bookable` first and surface the restaurant's phone/URL instead. For Experience-mandatory slots (find_slots returned booking_type=experience_mandatory), pass `experience_id` from the slot's `experience_ids` to route through the Experience slot-lock. Slots that charge the card at booking (a Deposit policy, or a prepaid/priced Experience) are refused with a link to book on opentable.com directly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "restaurant_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$",
+            "description": "YYYY-MM-DD"
+          },
+          "time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "HH:MM (24h) — must match a slot returned by find_slots"
+          },
+          "party_size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "reservation_token": {
+            "type": "string",
+            "description": "slot_availability_token from opentable_find_slots"
+          },
+          "slot_hash": {
+            "type": "string",
+            "description": "slot_hash from opentable_find_slots"
+          },
+          "dining_area_id": {
+            "description": "Optional dining-area (room) id. When omitted, auto-resolved to the default dining area from OpenTable's booking-details page — so you can go straight from find_slots to book without calling opentable_get_restaurant. Pass explicitly only to pin a specific room.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "experience_id": {
+            "description": "For Experience-mandatory slots: which experience to book (from slot.experience_ids). Required when find_slots returned an Experience slot.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "experience_ids": {
+            "description": "Pass-through from find_slots.experience_ids. When non-empty, experience_id must also be set.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "database_region": {
+            "description": "OpenTable's sharded-database region for the restaurant. Defaults to 'NA' (North America). Pass the venue's region (e.g. for UK/EU/APAC restaurants) when booking or cancelling outside North America — slot-lock, availability, and cancel route to the wrong database shard, or fail opaquely, when this is wrong. LIMITATION: not auto-derived from restaurant data (OpenTable's availability/booking responses don't surface the shard id), so non-NA bookings must set it explicitly.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "restaurant_id",
+          "date",
+          "time",
+          "party_size",
+          "reservation_token",
+          "slot_hash"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_modify_preview",
+      "description": "Preview a MODIFICATION to an existing OpenTable reservation. Takes the existing reservation's identity (restaurant_id + confirmation_number + security_token from opentable_list_reservations or the original opentable_book result) plus the NEW slot args (from a fresh opentable_find_slots call) and returns the new cancellation_policy, CC re-hold details, and a `modify_token` that opentable_modify consumes. Mirrors opentable_book_preview, but the /booking/details URL includes confirmationNumber + securityToken + isModify=true so OpenTable's SSR returns the modify state. dining_area_id is OPTIONAL — omitted, it's auto-resolved from the booking-details page like book_preview does. REQUIRED before opentable_modify — no shortcut path. For Listing-type restaurants the modify can't proceed (no slot picker); check opentable_get_restaurant.bookable first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "restaurant_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "confirmation_number": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "security_token": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$",
+            "description": "YYYY-MM-DD (the NEW date)"
+          },
+          "time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "HH:MM (24h) — the NEW time"
+          },
+          "party_size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "reservation_token": {
+            "type": "string",
+            "description": "slot_availability_token from opentable_find_slots for the NEW slot"
+          },
+          "slot_hash": {
+            "type": "string",
+            "description": "slot_hash from opentable_find_slots for the NEW slot"
+          },
+          "dining_area_id": {
+            "description": "Optional dining-area (room) id for the NEW slot. When omitted, auto-resolved to the default dining area from OpenTable's booking-details page — the same resolution opentable_book_preview uses. Pass explicitly only to pin a specific room.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "experience_id": {
+            "description": "For Experience-mandatory slots; required when the new slot has experience_ids.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "experience_ids": {
+            "description": "Pass-through from find_slots.experience_ids. When non-empty, experience_id must also be set.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "database_region": {
+            "description": "OpenTable's sharded-database region for the restaurant. Defaults to 'NA' (North America). Pass the venue's region (e.g. for UK/EU/APAC restaurants) when booking or cancelling outside North America — slot-lock, availability, and cancel route to the wrong database shard, or fail opaquely, when this is wrong. LIMITATION: not auto-derived from restaurant data (OpenTable's availability/booking responses don't surface the shard id), so non-NA bookings must set it explicitly.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "restaurant_id",
+          "confirmation_number",
+          "security_token",
+          "date",
+          "time",
+          "party_size",
+          "reservation_token",
+          "slot_hash"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_book",
+      "description": "Book an OpenTable reservation. Requires a fresh slot_hash + reservation_token from opentable_find_slots (tokens expire within minutes — call find_slots just before book). dining_area_id is OPTIONAL: when omitted it's auto-resolved to the default dining area from OpenTable's booking-details page, so find_slots → book works without a separate opentable_get_restaurant call. For CC-required slots (prime-time at busy restaurants), opentable_book refuses without a `booking_token` from opentable_book_preview — the preview step surfaces the cancellation policy and the saved card that would be held. Auto-fetches the user's profile (name/email/phone) from /user/dining-dashboard. Returns confirmation_number + security_token; save both — they're required to cancel. For Listing-type restaurants there's no slot to lock — callers should check `opentable_get_restaurant.bookable` first and surface the restaurant's phone/URL instead. Asks the user to confirm first: a confirmation prompt where the client supports one; otherwise the first call returns a preview and a confirmToken, and only a repeat call with that token proceeds; the prompt names the restaurant, the card that will be held and the cancellation policy (see MCP_CONFIRM_MODE).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "restaurant_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$",
+            "description": "YYYY-MM-DD"
+          },
+          "time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "HH:MM (24h) — must match the slot returned by find_slots"
+          },
+          "party_size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "reservation_token": {
+            "type": "string",
+            "description": "slot_availability_token from opentable_find_slots"
+          },
+          "slot_hash": {
+            "type": "string",
+            "description": "slot_hash from opentable_find_slots"
+          },
+          "dining_area_id": {
+            "description": "Optional dining-area (room) id. When omitted, auto-resolved to the default dining area from the booking-details page — no opentable_get_restaurant call needed. Pass explicitly only to pin a specific room. Ignored on the booking_token path (the token already carries the resolved area).",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "booking_token": {
+            "description": "Opaque token from opentable_book_preview. REQUIRED for CC-required slots (book will refuse otherwise). Optional for standard slots — when present, skips a redundant re-lock.",
+            "type": "string"
+          },
+          "experience_ids": {
+            "description": "Pass-through from find_slots.experience_ids. When non-empty, book refuses without a booking_token from opentable_book_preview.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "experience_id": {
+            "description": "Tamper-check signal for Experience tokens. When set, must match the experienceId baked into the booking_token by preview — agents that re-state the experience choice here get refused if it drifted from preview.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "database_region": {
+            "description": "OpenTable's sharded-database region for the restaurant. Defaults to 'NA' (North America). Pass the venue's region (e.g. for UK/EU/APAC restaurants) when booking or cancelling outside North America — slot-lock, availability, and cancel route to the wrong database shard, or fail opaquely, when this is wrong. LIMITATION: not auto-derived from restaurant data (OpenTable's availability/booking responses don't surface the shard id), so non-NA bookings must set it explicitly.",
+            "type": "string"
+          },
+          "confirmToken": {
+            "description": "ONLY for the two-step confirmation fallback (a client without MCP elicitation). The confirmToken from this same tool's phase-1 \"confirmation-required\" response, passed back ONLY after the user has seen that preview and explicitly approved it in chat — never on the first call, never invented, never reused. Call again with the same arguments. Ignored when the client supports elicitation.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "restaurant_id",
+          "date",
+          "time",
+          "party_size",
+          "reservation_token",
+          "slot_hash"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_modify",
+      "description": "Modify an existing OpenTable reservation in place. Requires the existing reservation's identity (restaurant_id + confirmation_number + security_token) plus a fresh modify_token from opentable_modify_preview — preview is mandatory because the new slot's cancellation policy / CC re-hold can differ from the original. Submits /dapi/booking/make-reservation with isModify: true + the existing confirmation_number + security_token; OpenTable preserves confirmation_number across modifies but may regenerate reservation_id and security_token. dining_area_id is OPTIONAL — the modify_token already carries the area opentable_modify_preview resolved; pass it only to restate it (mismatch is refused). Returns the same shape as opentable_book plus was_modified: true so the agent can phrase the user confirmation accurately. For Listing-type restaurants there's no slot to lock — agents should check opentable_get_restaurant.bookable first. Asks the user to confirm first: a confirmation prompt where the client supports one; otherwise the first call returns a preview and a confirmToken, and only a repeat call with that token proceeds; the prompt names the restaurant, the current and new slot, and the card re-hold (see MCP_CONFIRM_MODE).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "restaurant_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "confirmation_number": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "security_token": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$",
+            "description": "YYYY-MM-DD (the NEW date)"
+          },
+          "time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "HH:MM (24h) — the NEW time"
+          },
+          "party_size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "reservation_token": {
+            "type": "string",
+            "description": "slot_availability_token from opentable_find_slots for the NEW slot"
+          },
+          "slot_hash": {
+            "type": "string",
+            "description": "slot_hash from opentable_find_slots for the NEW slot"
+          },
+          "dining_area_id": {
+            "description": "Optional. The modify_token carries the dining area preview resolved; when restated here it must match the token.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "modify_token": {
+            "description": "REQUIRED. From opentable_modify_preview. No no-token path — the new slot's policy + CC re-hold can differ from the original.",
+            "type": "string"
+          },
+          "experience_id": {
+            "description": "Optional tamper-check signal. When set, must match the experienceId baked into modify_token.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "confirmToken": {
+            "description": "ONLY for the two-step confirmation fallback (a client without MCP elicitation). The confirmToken from this same tool's phase-1 \"confirmation-required\" response, passed back ONLY after the user has seen that preview and explicitly approved it in chat — never on the first call, never invented, never reused. Call again with the same arguments. Ignored when the client supports elicitation.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "restaurant_id",
+          "confirmation_number",
+          "security_token",
+          "date",
+          "time",
+          "party_size",
+          "reservation_token",
+          "slot_hash"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_cancel",
+      "description": "Cancel an OpenTable reservation. Requires restaurant_id, confirmation_number, and security_token — all three come from opentable_list_reservations or opentable_book. Asks the user to confirm first: a confirmation prompt where the client supports one; otherwise the first call returns a preview and a confirmToken, and only a repeat call with that token proceeds; the prompt names the restaurant, date, time and party size from your dining dashboard (see MCP_CONFIRM_MODE). Refused when the confirmation_number belongs to a different restaurant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "restaurant_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "confirmation_number": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "security_token": {
+            "type": "string"
+          },
+          "database_region": {
+            "description": "OpenTable's sharded-database region for the restaurant. Defaults to 'NA' (North America). Pass the venue's region (e.g. for UK/EU/APAC restaurants) when booking or cancelling outside North America — slot-lock, availability, and cancel route to the wrong database shard, or fail opaquely, when this is wrong. LIMITATION: not auto-derived from restaurant data (OpenTable's availability/booking responses don't surface the shard id), so non-NA bookings must set it explicitly.",
+            "type": "string"
+          },
+          "confirmToken": {
+            "description": "ONLY for the two-step confirmation fallback (a client without MCP elicitation). The confirmToken from this same tool's phase-1 \"confirmation-required\" response, passed back ONLY after the user has seen that preview and explicitly approved it in chat — never on the first call, never invented, never reused. Call again with the same arguments. Ignored when the client supports elicitation.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "restaurant_id",
+          "confirmation_number",
+          "security_token"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_get_profile",
+      "description": "Get the authenticated OpenTable user's profile: name, email, phones, loyalty points and tier, home metro, member-since date. Payment and credit-card details are never exposed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns OpenTable's payload untouched. No field projection: this server has no verified record of which OpenTable fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_list_favorites",
+      "description": "List the user's saved restaurants from OpenTable (Saved Restaurants list). Returns each entry's numeric restaurant_id (a number, or null when OpenTable omits it — the same id opentable_get_restaurant, opentable_find_slots and opentable_remove_favorite take), name, cuisine, neighborhood, price band, rating, and OpenTable URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns OpenTable's payload untouched. No field projection: this server has no verified record of which OpenTable fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_add_favorite",
+      "description": "Add a restaurant to the user's Saved Restaurants list.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "restaurant_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "restaurant_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_remove_favorite",
+      "description": "Remove a restaurant from the user's Saved Restaurants list.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "restaurant_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "restaurant_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_search_restaurants",
+      "description": "Search OpenTable for restaurants. Returns matching restaurants with cuisine, neighborhood, price band, rating, description, and URL. Does NOT include bookable slot tokens — use opentable_find_slots for a specific venue to check availability.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns OpenTable's payload untouched. No field projection: this server has no verified record of which OpenTable fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "term": {
+            "description": "Free-text query (cuisine or restaurant name)",
+            "type": "string"
+          },
+          "location": {
+            "description": "City / neighborhood / address — appended to the term. Prefer lat/lng when precise.",
+            "type": "string"
+          },
+          "date": {
+            "description": "YYYY-MM-DD. Affects search ranking but not returned slots.",
+            "type": "string"
+          },
+          "time": {
+            "description": "HH:MM (24h). Default 19:00 when date is set.",
+            "type": "string"
+          },
+          "party_size": {
+            "description": "Number of guests. Default 2.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "metro_id": {
+            "description": "OpenTable metro id (e.g. 8 = SF Bay Area, 31 = Charlotte).",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_get_restaurant",
+      "description": "Get full details for a single OpenTable restaurant: cuisine, price band, description, address, hours, phone, payment options, features, rating/review count, and availability_token (used internally when booking). Accepts the numeric restaurant_id, a slug, a path, or the full URL from opentable_search_restaurants — passing the search result's \"url\" verbatim always resolves, including legacy venues served at /{slug} instead of /r/{slug}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns OpenTable's payload untouched. No field projection: this server has no verified record of which OpenTable fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "restaurant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            ],
+            "description": "Numeric restaurant_id (as returned by opentable_list_reservations / opentable_list_favorites), slug (\"state-of-confusion-charlotte\"), path, or full URL from opentable_search_restaurants. Passing the search result's \"url\" verbatim resolves both /r/{slug} and legacy /{slug} venues; a numeric id resolves via /restaurant/profile/{id}."
+          }
+        },
+        "required": [
+          "restaurant_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_get_menu",
+      "description": "Large menus return bounded pages of whole items; follow pagination.next_offset with the same filters. Optional section_name selects an exact section; offset/limit paginate items. view=full without paging is uncapped. Get published menus for an OpenTable restaurant, including sections, dishes, prices, variations, currency, provider and updated timestamps. Accepts the same numeric id/slug/path/URL as opentable_get_restaurant. Optional menu_name selects an exact title case-insensitively (e.g. Dinner). Returns available_menus and status: available, menu_not_found, external_only or not_available. External menu_url links are returned but never fetched. Prices describe OpenTable's published menu, not a live quote from the restaurant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "description": "Response shape: \"compact\" (default) drops fields the response already carries elsewhere; \"full\" returns every field this server understands. compact strips image/avatar URLs from the response; \"full\" returns OpenTable's payload untouched. No field projection: this server has no verified record of which OpenTable fields matter, and inventing one would risk dropping a field a caller needs.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "restaurant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            ],
+            "description": "Numeric restaurant id, slug, path, or exact URL from opentable_search_restaurants."
+          },
+          "section_name": {
+            "description": "Exact section title, case-insensitive (e.g. Appetizers). Returns only that section's items; available_sections lists the titles.",
+            "type": "string",
+            "minLength": 1
+          },
+          "offset": {
+            "description": "Item offset to resume from: pass the previous page's pagination.next_offset, with the same menu_name/section_name. Default 0.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "description": "Maximum whole items per page (1-50, default 20). A page may return fewer to stay within the response budget.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "menu_name": {
+            "description": "Exact published menu title, case-insensitive. Omit to return all menus; available_menus lists titles when a selection is not found.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "restaurant_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "opentable_healthcheck",
+      "description": "Round-trips a small public www.opentable.com URL (/robots.txt) through ContextMint Bridge (your signed-in browser tab) and returns diagnostics: the bridge's role (host/peer/null), port, version, the extension link (linked / pair pending / not attached / never answered), the elapsed round-trip time, and a plain-English hint distinguishing 'bridge never came up' from 'extension not connected' from 'this browser can't serve a capability' from 'real www.opentable.com-side problem'. Read-only, no auth required. Tests bridge transport only. Search/menus/availability are reported only from observed real reads; booking is never probed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "opentable-mcp",
+    "version": "1.3.4"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 8201,
+  "stderr": "[opentable-mcp] v1.3.4 — WebSocket bridge via @fetchproxy/server on 127.0.0.1:37149. Install the ContextMint Bridge extension (see https://github.com/nullnet-app/contextmint-bridge/releases) and sign in at opentable.com. (To use hangwin/mcp-chrome as the bridge instead, set OT_BRIDGE=mcp-chrome.)\n"
+}
