@@ -1,0 +1,1113 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@ethora/mcp-server",
+  "version": "26.10.0",
+  "integrity": {
+    "dist": "sha512-/n4oKTdpFJd9jw9/EWKs7MNf8k/Hqc1S+b/ibyFB/LBWB+iEKpTb9EwzXb+Nvpw7JRJ7WZPCEp1OJv8VXyzJoA==",
+    "installed": "sha512-/n4oKTdpFJd9jw9/EWKs7MNf8k/Hqc1S+b/ibyFB/LBWB+iEKpTb9EwzXb+Nvpw7JRJ7WZPCEp1OJv8VXyzJoA=="
+  },
+  "bin": "node_modules/@ethora/mcp-server/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "ETHORA_API_URL",
+    "ETHORA_BASE_URL",
+    "ETHORA_APP_JWT",
+    "ETHORA_B2B_TOKEN",
+    "ETHORA_MCP_ENABLE_DANGEROUS_TOOLS"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-18T12:41:43.991Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "ethora-status",
+      "description": "Report the current Ethora MCP session state: configured API URL, active auth mode, which credentials are present (booleans like `hasAppJwt` — values never echoed), the selected appId/agentId, and `hosted`/`sessionId` on the hosted (Streamable HTTP) server.\nAuth: none required. Errors: effectively none. Related: `ethora-doctor` for an active connectivity check.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Session Status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ethora-help",
+      "description": "Task-oriented orientation for this MCP server: explains the three Ethora auth modes (user / app-token / B2B) and recommends next tool calls + recipes based on current session state.\nAuth: none required — inspects state, no API calls. Errors: effectively none. Related: pass a recommended recipe id to `ethora-recipe-run`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "new-app",
+              "in-app-chat",
+              "multi-agent-room",
+              "widget",
+              "chat-test",
+              "b2b-bootstrap-ai",
+              "broadcast",
+              "sources-ingest",
+              "files-upload",
+              "bot-manage",
+              "user-login"
+            ],
+            "description": "What you are trying to do: `new-app` (a new chat app: create, brand, rooms, users, where it lives), `in-app-chat` (chat inside your existing product with your own UI and users), `multi-agent-room` (several AI agents in one room, talking to people and each other), `widget` (AI chat widget on a website), `chat-test` (post and read messages), `b2b-bootstrap-ai` (server-side provisioning), `broadcast`, `sources-ingest`, `files-upload`, `bot-manage`, `user-login`. Omit or use `auto` for recommendations inferred from the current session state."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Help and Next Steps",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ethora-app-select",
+      "description": "Set the current app context for this session so app-scoped tools can omit their `appId` argument. Stores `currentAppId` and, if given, `appToken` (which defaults the auth mode to app-token unless `authMode` overrides).\nAuth: none required to set the context. Errors: effectively none — a non-existent `appId` is not validated here; the first app-scoped API call surfaces the 404. Related: pairs with `ethora-auth-mode-set`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "24-char hex Ethora appId to set as the current context. Get it from `ethora-app-list`, `ethora-app-create`, or a B2B create/provision response."
+          },
+          "appToken": {
+            "type": "string",
+            "description": "Per-app appToken to store alongside the appId. If provided, the active auth mode switches to app-token (unless `authMode` says otherwise). Secret."
+          },
+          "authMode": {
+            "type": "string",
+            "enum": [
+              "app",
+              "user",
+              "b2b"
+            ],
+            "description": "Auth mode to keep after selecting the app. Omit to let the mode default to app-token when an `appToken` is given, or stay unchanged otherwise."
+          }
+        },
+        "required": [
+          "appId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Select App",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ethora-source-site-crawl-wait",
+      "description": "Crawl a website URL and wait for the crawl to finish: enqueues the job, then polls it until it reports `completed` or `failed`. Returns `{ done, status, jobId, polls, durationMs, result }`; `done: false` with a `note` means the budget ran out while the job was still running (it usually finishes server-side anyway).\nRequires: a selected app (`ethora-app-select`) or an explicit `appId`.\nAuth: app-token mode OR B2B mode with an explicit `appId`. Errors: 401/403 wrong auth; 400 malformed `url`; 504/timeout if it takes longer than `timeoutMs` (the job may still complete server-side — check with `ethora-source-site-list`).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "24-char hex appId to ingest into. Required in B2B mode unless already set via `ethora-app-select`; ignored in app-token mode."
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute URL to crawl, e.g. `https://example.com/docs`."
+          },
+          "followLink": {
+            "type": "boolean",
+            "description": "If true, also crawl in-domain links reachable from `url`. Can ingest many pages — use with care."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 600000,
+            "description": "How long to poll for the crawl to finish, in milliseconds. Default 45000, chosen to stay under the ~60s request timeout most MCP clients enforce. Caps at 600000 (10 min) for clients that allow longer calls."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Crawl Website Source and Wait",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-source-doc-upload",
+      "description": "Upload documents (1–5; PDF, text, etc.) into an app's RAG sources (app-token / B2B variant of `ethora-source-doc-upload-legacy`). Async — content becomes queryable once indexing finishes; files passed as base64, 50MB max each.\nRequires: a selected app (`ethora-app-select`) or an explicit `appId`.\nAuth: app-token mode OR B2B mode with an explicit `appId`. Errors: 401/403 wrong auth; 404 unknown `appId`; 413 too large; 422 unsupported document type. Related: `ethora-source-doc-list`, `ethora-source-doc-delete`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "24-char hex appId to ingest into. Required in B2B mode unless already set via `ethora-app-select`; ignored in app-token mode."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Document file name including extension, e.g. `handbook.pdf`."
+                },
+                "mimeType": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "MIME type, e.g. `application/pdf`, `text/plain`, `text/markdown`."
+                },
+                "base64": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Document content, base64-encoded. A `data:...;base64,` prefix is accepted. Max 50MB decoded per file."
+                }
+              },
+              "required": [
+                "name",
+                "mimeType",
+                "base64"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 5,
+            "description": "1 to 5 documents to ingest in this call."
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Upload Knowledge Document",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-user-login",
+      "description": "Authenticate as an existing Ethora user with email + password. Stores the user session token in this MCP session and unlocks user-auth tools (`ethora-app-list`, `ethora-files-*`, `ethora-wallet-*`).\nAuth: user-auth mode (`ethora-auth-mode-set` first) and a configured `appJwt`. Errors: 401/403 bad credentials; 404 email not registered; 429 per-IP rate limit — retry with backoff.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "User's registered email address (RFC 5322). Must match an account created via `ethora-user-register`."
+          },
+          "password": {
+            "type": "string",
+            "description": "Plain-text password the user set during registration. Sent over TLS to the Ethora API; never echoed back or logged."
+          },
+          "createApiKey": {
+            "type": "boolean",
+            "description": "When true, also mint a long-lived API key for this user and return it once, so headless clients / agents can reconnect with `Authorization: Bearer <key>` instead of logging in again. Default false."
+          },
+          "apiKeyName": {
+            "type": "string",
+            "description": "Label for the API key when `createApiKey` is true (e.g. `claude-code-laptop`)."
+          },
+          "apiKeyTtlDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "description": "Lifetime of the API key in days when `createApiKey` is true. Server default applies when omitted."
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Log In",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-user-register",
+      "description": "Create a new Ethora user account by email + first/last name, then log in and bind the session. A password is generated when omitted and returned once. By default also mints a long-lived API key so an agent can reconnect later with `Authorization: Bearer <key>` (no human step needed).\nAuth: user-auth mode and a configured `appJwt` (on a hosted server this is preset). Errors: 401 no `appJwt`; 422 email already registered or password shorter than 6 chars; 429 rate limited. Related: bulk provisioning uses `ethora-user-batch-create`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email address for the new user. Must be RFC-5322 valid and not already registered within this app. No confirmation click is required to log in; the address is used for password reset."
+          },
+          "firstName": {
+            "type": "string",
+            "description": "First name shown in the user's profile and message attributions across chat rooms and the app UI."
+          },
+          "lastName": {
+            "type": "string",
+            "description": "Last name shown in the user's profile."
+          },
+          "password": {
+            "type": "string",
+            "minLength": 6,
+            "description": "Password for the account (min 6 chars). Omit to have a strong random password generated and returned once in the result."
+          },
+          "createApiKey": {
+            "type": "boolean",
+            "description": "Mint a long-lived API key right after signup and return it once. Default true. Set false if you only need this session."
+          },
+          "apiKeyName": {
+            "type": "string",
+            "description": "Label for the API key (default `mcp-signup`)."
+          },
+          "apiKeyTtlDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "description": "API key lifetime in days. Server default applies when omitted."
+          }
+        },
+        "required": [
+          "email",
+          "firstName",
+          "lastName"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Register Account",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-api-key-create",
+      "description": "Mint a long-lived, revocable API key for the currently logged-in user. The key is a user token: send it as `Authorization: Bearer <key>` to the hosted MCP endpoint (or set it in the stdio client) to skip `ethora-user-login`. Shown once.\nAuth: user auth (logged in). Errors: 401 not logged in; 404 on backends without API key support.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Label to recognise the key later (e.g. `ci-runner`, `claude-desktop`)."
+          },
+          "ttlDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "description": "Lifetime in days. Server default applies when omitted."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create API Key",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-feedback-submit",
+      "description": "Send feedback about Ethora to the Ethora team: something that does not work, behaves differently from what the tool description promised, is missing, or is badly documented. It reaches the team directly, so prefer it over guessing or silently giving up when a tool fails. Recent failures in this session (tool, error code, request id) are attached automatically when `includeRecentErrors` is true, which is what makes a report from here more useful than a web form: the team can join it to the server-side log. Works whether or not you are signed in, so a problem that blocks sign-up can still be reported. Do not put credentials, API keys or end-user personal data in `message`; credential-shaped values in the attached context are redacted before sending.\nRequires: nothing.\nAuth: none. Works anonymously; when the session is authenticated the report is attributed to that account. Errors: 422 if `message` is shorter than 5 characters or looks like spam; 429 if too many reports were sent from this address.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "bug",
+              "unexpected",
+              "feature",
+              "docs",
+              "other"
+            ],
+            "description": "What kind of report this is: `bug` (something is broken), `unexpected` (it works but not as described), `feature` (a request), `docs` (a description or guide is wrong or missing), `other`. Defaults to `other`."
+          },
+          "message": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 4000,
+            "description": "What happened, in the user's own words where possible: what was attempted, what was expected, what occurred instead. No credentials or end-user personal data."
+          },
+          "email": {
+            "type": "string",
+            "description": "Reply address. Only useful when the session is not signed in; an authenticated report already carries the account, so leave this out unless the user offers an address."
+          },
+          "includeRecentErrors": {
+            "type": "boolean",
+            "description": "Attach this session's last few tool failures (tool name, error code, request id) so the team can trace them. Default true; set false if the report is unrelated to a failure."
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Send Feedback",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-widget-snippet-get",
+      "description": "Generate the <script> tag that embeds the Ethora AI chat widget (the floating launcher + chat panel that website visitors use) for an app, plus the prerequisites that must hold before it answers. No API call; pure generator using this deployment's hosted widget URL and public API base. The widget answers with the app's ACTIVE bot: for API-created apps run `ethora-agent-create` -> `ethora-agent-invite` -> `ethora-agent-activate { agentId, chatJid }` first, otherwise `POST /v2/widget/sessions` returns 422 and the widget stays silent.\nRequires: an activated agent on the app (`ethora-agent-activate`); without it the widget opens but never answers.\nAuth: none required (uses the selected app when `appId` is omitted). Errors: effectively none; when no hosted widget is configured the snippet carries a `<WIDGET_URL>` placeholder. Related: `ethora-agent-activate`, `ethora-bot-widget-get` (legacy per-app bot only).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "App the widget belongs to (24-char hex). Defaults to the app from `ethora-app-select`."
+          },
+          "botName": {
+            "type": "string",
+            "description": "Display name shown in the widget header (`data-bot-name`), e.g. the agent's name."
+          },
+          "botAvatar": {
+            "type": "string",
+            "description": "Avatar image URL shown for the bot (`data-bot-avatar`)."
+          },
+          "botId": {
+            "type": "string",
+            "description": "Legacy `data-bot-id` (bot XMPP address); only for old embeds. Prefer `appId`: the backend picks the active agent from the app."
+          },
+          "primaryColor": {
+            "type": "string",
+            "description": "Brand colour for launcher and bubbles (`data-primary-color`), e.g. `#0052CC`."
+          },
+          "locale": {
+            "type": "string",
+            "description": "UI locale (`data-locale`), e.g. `en`, `fr`, `es`."
+          },
+          "greeting": {
+            "type": "string",
+            "description": "Greeting shown when the panel opens (`data-greeting-message`)."
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "right",
+              "left"
+            ],
+            "description": "Launcher corner (`data-position`)."
+          },
+          "apiBase": {
+            "type": "string",
+            "description": "Override the public API base (`data-api-base`). Defaults to this deployment's public API URL."
+          },
+          "widgetUrl": {
+            "type": "string",
+            "description": "Override the widget bundle base URL (the script is `<widgetUrl>/assistant.js`)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Widget Embed Snippet",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ethora-app-list",
+      "description": "List all Ethora apps (tenants) owned by the currently logged-in user. Returns an array with `appId` (24-char hex), `displayName`, `domainName`, ownership and bot-status metadata. Credential fields (appSecret, tenantSecret, appToken, passwords) are redacted in the result; call `ethora-app-credentials-reveal { appId, confirm: true }` to reveal an app's appToken.\nAuth: user-auth mode, active session (`ethora-user-login` first). Errors: 401 not logged in; empty list if the user owns no apps. Related: feed `appId` into `ethora-app-update` / `ethora-app-select`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "List Apps",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-app-create",
+      "description": "Create a new Ethora app (tenant) owned by the currently logged-in user. Allocates a fresh 24-char hex `appId` and sets the caller as owner; counts against the owner's plan limit. Returns the new app object including `appId`. The returned app has its credential fields redacted; call `ethora-app-credentials-reveal { appId, confirm: true }` when a snippet needs the appToken.\nAuth: user-auth mode, active session (`ethora-user-login` first). Errors: 401 not logged in; 402/403 plan limit reached; 422 invalid `displayName`. Related: server-side provisioning uses `ethora-b2b-app-create`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "description": "Human-readable app name shown to users in the app picker and on the public landing page. Not required to be unique across accounts."
+          }
+        },
+        "required": [
+          "displayName"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create App",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-app-update",
+      "description": "Update mutable fields on an app the caller owns (displayName, domainName, appTagline, primaryColor, botStatus). Partial update — omitted fields are left unchanged.\nRequires: an `appId` from `ethora-app-list` or `ethora-app-create`.\nAuth: user-auth mode, active session; the caller must own the app. Errors: 401 not logged in; 403 not owner; 404 unknown `appId`; 422 validation (e.g. `domainName` taken, `primaryColor` not `#RRGGBB`).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "24-char hex ObjectId of the app to update. Optional — defaults to the app most recently passed to `ethora-app-select`."
+          },
+          "displayName": {
+            "type": "string",
+            "description": "New human-readable app name. Visible in the app picker and on the public landing page."
+          },
+          "domainName": {
+            "type": "string",
+            "description": "Subdomain to host the web app at. Setting `abcd` makes the web app available at `abcd.ethora.com`. Must be unique across all Ethora apps; lower-case alphanumerics and dashes only."
+          },
+          "appTagline": {
+            "type": "string",
+            "description": "Short tagline shown on the public app landing page."
+          },
+          "appDescription": {
+            "type": "string",
+            "description": "Deprecated alias for `appTagline`, kept so older callers keep working. Prefer `appTagline`."
+          },
+          "primaryColor": {
+            "type": "string",
+            "description": "Primary brand color in hex `#RRGGBB` format (e.g. `#F54927`). Used throughout the app UI."
+          },
+          "botStatus": {
+            "type": "string",
+            "enum": [
+              "on",
+              "off"
+            ],
+            "description": "`on` enables the AI bot for new conversations (requires a configured prompt — see `ethora-bot-update`); `off` disables it. Does not change the bot's configured prompt or sources."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Update App",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-chat-create",
+      "description": "Create a new chat room (MUC room) inside an app the caller owns. Every room created this way is listed in the app's rooms (`defaultRooms`); `pinned: true` additionally makes new users auto-join it (existing users are not added), `pinned: false` (default) keeps it opt-in. Returns the new room object including its JID.\nRequires: a selected app (`ethora-app-select`) or an explicit `appId`.\nAuth: user-auth mode, active session; the caller must own the app. Errors: 401 not logged in; 403 not owner; 404 unknown `appId`; 422 invalid `title`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "24-char hex ObjectId of the app to create the chat room in. Optional — defaults to the app most recently passed to `ethora-app-select`."
+          },
+          "title": {
+            "type": "string",
+            "description": "Display name for the new chat room. Visible to all members; not required to be unique within the app."
+          },
+          "pinned": {
+            "type": "boolean",
+            "default": false,
+            "description": "If `true`, the room is added to the app's default rooms list — every new user of the app auto-joins it. If `false`, the room exists but users must be added explicitly."
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create Chat Room",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-agent-list",
+      "description": "List the reusable saved agents of an app (`GET /v2/apps/:appId/agents`, or `GET /v2/agents` for the token's own app) — a saved agent is a reusable bot definition. Returns an array of agents with ids, names, and config.\nAuth: app-token mode (after `ethora-app-select` + `ethora-auth-mode-set`). Errors: 401/403 not in app-token mode or invalid appToken; empty list if the app has no saved agents.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "24-char hex appId whose agents to list (`GET /v2/apps/:appId/agents`). Defaults to the app selected with `ethora-app-select`; without either, lists the agents of the token's own app."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Agents",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-agent-create",
+      "description": "Create a reusable AI agent (POST /v2/apps/:appId/agents). Works in user auth mode (the normal hosted mode) or B2B mode; app-token mode is not accepted by the backend. Each agent is a persona — name, avatar, system prompt, LLM config, plus response-gate settings (responseMode, cooldownSec) that control when it speaks in a room. For multi-agent scenarios (two or more personas conversing in one chat) create each one separately, then `ethora-agent-invite` them into the same room. See the `ethora-agents-quickstart` prompt for the end-to-end recipe.\nRequires: a selected app (`ethora-app-select`) or an explicit `appId`; the agent is owned by that app.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "24-char hex appId the agent belongs to (`POST /v2/apps/:appId/agents`). Defaults to the app selected with `ethora-app-select`. Pass it when you just created an app so the agent lands there rather than in the token's own app."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short display name. For multi-agent scenarios, prefer single-word names (e.g. 'Hannibal', 'Varro') — the @-mention matcher uses the exact display name with word-boundary matching."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL-safe slug (auto-generated from name if omitted)."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short bio shown in agent lists."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "System prompt — the agent's persona, role, style of speech, and behaviour rules. For multi-agent scenarios, instruct the agent to end every message with an @-mention of who speaks next; that's how turn-handoff works through the response gate."
+          },
+          "greetingMessage": {
+            "type": "string",
+            "description": "Optional message the agent posts when it first joins a room."
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "any_message",
+              "/bot"
+            ],
+            "description": "Legacy trigger field. Prefer the newer `responseMode` for new agents."
+          },
+          "responseMode": {
+            "type": "string",
+            "enum": [
+              "always",
+              "mentioned",
+              "smart",
+              "probability"
+            ],
+            "description": "When the agent decides to reply. 'always' = every room message; 'mentioned' = only when @-mentioned by display name or via /bot (recommended for multi-agent turn-taking); 'smart' = a mini LLM gate decides per-message; 'probability' = coin-flip per message using `responseProbability`."
+          },
+          "responseProbability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "If responseMode='probability', odds (0-1) of replying to each message. Damped 0.6x for bot-to-bot messages."
+          },
+          "cooldownSec": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Minimum seconds between this agent's replies in a given room. Damped 2x for bot-to-bot. Set 0 for quick turn-taking in multi-agent scenarios."
+          },
+          "botDisplayName": {
+            "type": "string",
+            "description": "Display name used inside the chat UI. Defaults to `name`."
+          },
+          "botAvatarUrl": {
+            "type": "string",
+            "description": "URL of the avatar image shown next to bot messages."
+          },
+          "isRAG": {
+            "type": "boolean",
+            "description": "Enable retrieval-augmented generation from indexed sources."
+          },
+          "ragTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Optional RAG tag filter — restrict retrieval to sources matching these tags."
+          },
+          "llmProvider": {
+            "type": "string",
+            "description": "LLM provider override (e.g. 'openai'). Defaults to the app's configured provider."
+          },
+          "llmModel": {
+            "type": "string",
+            "description": "LLM model override (e.g. 'gpt-4o-mini')."
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "description": "'private' (only invitable inside the owning app) or 'public' (cross-app invitable)."
+          },
+          "isPublished": {
+            "type": "boolean",
+            "description": "Convenience alias for setting visibility='public'."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Free-form category tags for agent directory listings."
+          },
+          "flowsYaml": {
+            "type": "string",
+            "description": "Deterministic scripted conversation for this agent, as YAML. Drives the agent through a fixed sequence (opening menu, appointment request, intake questionnaire, survey) instead of leaving every turn to the model. Compiled and validated server-side on save: an invalid script is rejected with code `FLOWS_INVALID` and per-line details, and nothing is stored. A flow named `start` is reserved and fires when a conversation opens. Buttons are authored here (`buttons:` on a `say` step, or `options:` on an `ask` step). Call `fetch` with id `doc:agent-flows` for the full authoring format before writing one. Pass an empty string to clear the script."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create Agent",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-agent-update",
+      "description": "Update a saved AI agent (PUT /v2/agents/:agentId). All fields are optional — only what you pass is updated. Common uses: tune the system `prompt` after a test run, switch `responseMode` to control turn-taking in multi-agent rooms, or adjust `cooldownSec`. See `ethora-agents-quickstart` prompt for the end-to-end recipe.\nRequires: an agent id or address from `ethora-agent-list` or `ethora-agent-create`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Mongo _id (24 hex chars) of the agent to update."
+          },
+          "name": {
+            "type": "string",
+            "description": "New display name. For multi-agent scenarios prefer single-word names — the @-mention matcher uses exact display-name match with word-boundary."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL-safe slug."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short bio."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Updated system prompt (persona + behaviour). For multi-agent rooms instruct the agent to end every message with an @-mention of the next speaker — that's how turn-handoff works through the response gate."
+          },
+          "greetingMessage": {
+            "type": "string",
+            "description": "Message the agent posts when it first joins a new room."
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "any_message",
+              "/bot"
+            ],
+            "description": "Legacy trigger field. Prefer `responseMode`."
+          },
+          "responseMode": {
+            "type": "string",
+            "enum": [
+              "always",
+              "mentioned",
+              "smart",
+              "probability"
+            ],
+            "description": "When the agent replies. 'always' = every message; 'mentioned' = only @-mention or /bot (best for multi-agent turn-taking); 'smart' = mini-LLM decides; 'probability' = coin-flip using `responseProbability`."
+          },
+          "responseProbability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "If responseMode='probability', odds (0-1) of replying. Damped 0.6x for bot-to-bot."
+          },
+          "cooldownSec": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Minimum seconds between this agent's replies in a given room. Damped 2x for bot-to-bot. Set 0 for quick turn-taking."
+          },
+          "botDisplayName": {
+            "type": "string",
+            "description": "Display name in chat UI."
+          },
+          "botAvatarUrl": {
+            "type": "string",
+            "description": "Avatar image URL."
+          },
+          "isRAG": {
+            "type": "boolean",
+            "description": "Enable RAG retrieval."
+          },
+          "ragTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "RAG tag filter."
+          },
+          "llmProvider": {
+            "type": "string",
+            "description": "LLM provider override."
+          },
+          "llmModel": {
+            "type": "string",
+            "description": "LLM model override."
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "description": "'private' or 'public' (cross-app invitable)."
+          },
+          "isPublished": {
+            "type": "boolean",
+            "description": "Convenience alias for visibility='public'."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Category tags for directory listings."
+          },
+          "flowsYaml": {
+            "type": "string",
+            "description": "Deterministic scripted conversation for this agent, as YAML. Drives the agent through a fixed sequence (opening menu, appointment request, intake questionnaire, survey) instead of leaving every turn to the model. Compiled and validated server-side on save: an invalid script is rejected with code `FLOWS_INVALID` and per-line details, and nothing is stored. A flow named `start` is reserved and fires when a conversation opens. Buttons are authored here (`buttons:` on a `say` step, or `options:` on an `ask` step). Call `fetch` with id `doc:agent-flows` for the full authoring format before writing one. Pass an empty string to clear the script."
+          },
+          "agentIdOrAddress": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Alias for `agentId` - either name is accepted, pass whichever you have."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Update Agent",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-agent-activate",
+      "description": "Make an agent the app's ACTIVE widget bot: sets `App.defaultBotInstanceId` (and `botStatus: on`), which is what `POST /v2/widget/sessions` uses to decide who answers website visitors. Required before an embedded widget can answer on an API-created app. Preconditions: the agent was invited into a room of this app with `ethora-agent-invite` (that creates its bot instance). Works in user auth (app update route); falls back to the app-token `/v2/agents/:id/activate` route when an appToken is stored.\nRequires: an agent already invited into a room of the selected app (`ethora-agent-create` -> `ethora-chat-create` -> `ethora-agent-invite`); the invite creates the bot instance this tool binds as the app's default responder.\nAuth: user session (owner of the app). Errors: 404 no bot instance for this agent in the app (invite first); 403 not the app owner. Related: `ethora-widget-snippet-get` next, `ethora-bot-instance-list` to inspect.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Id (or address) of the agent to activate. Get it from `ethora-agent-list` / `ethora-agent-create`."
+          },
+          "chatJid": {
+            "type": "string",
+            "description": "Room JID `${appId}_${chatId}` (with or without `@conference...`) that becomes the widget chat. Required for API-created apps; omit only for dashboard-created apps that already have an AI Widget chat bound."
+          },
+          "appId": {
+            "type": "string",
+            "description": "App to activate the agent for. Defaults to the app from `ethora-app-select`."
+          },
+          "agentIdOrAddress": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Alias for `agentId` - either name is accepted, pass whichever you have."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Activate Agent for Widget",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-agent-invite",
+      "description": "Invite an Agent into a chat room. Multiple agents can coexist in the same room — call this tool once per agent and they will all appear as members able to converse. Lazily creates a per-App BotInstance (an Ethora user with isBot:true) if one does not already exist for (agent, app). Spawns the XMPP client live; no ai-service restart required. For the full multi-agent recipe see the `ethora-agents-quickstart` prompt.\nRequires: an agent (`ethora-agent-create`) and a room (`ethora-chat-create`) in the selected app.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentIdOrAddress": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Either Mongo _id (24 hex chars) or EOA-style address."
+          },
+          "appId": {
+            "type": "string",
+            "description": "Required in B2B mode unless already selected via ethora-app-select."
+          },
+          "chatId": {
+            "type": "string",
+            "description": "Mongo Chat _id (preferred when invoking from admin)."
+          },
+          "chatJid": {
+            "type": "string",
+            "description": "Room JID `${appId}_${chatId}` (optionally with `@conference.<host>`), exactly the `jid` returned by `ethora-chat-create`. Preferred over `chatId`."
+          },
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Alias for `agentIdOrAddress` - either name is accepted, pass whichever you have."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Invite Agent to Chat",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-message-send",
+      "description": "Post a message into a chat room of an app (POST /v2/apps/:appId/chats/broadcast targeting one room). The message is attributed to the app's broadcast sender (override the shown name with `senderName`). Use it to seed or test a conversation, e.g. right after `ethora-agent-invite`, and set `waitForReplySec` (up to 60) to wait for an AI agent's answer; replies are returned in `replies`. Identify the room by `roomJid` (`${appId}_${chatId}`, exactly what `ethora-chat-create` returns as `jid`) or by the bare `chatId` plus the selected app.\nRequires: a room in the selected app (`ethora-chat-create`); for `replies`, an agent invited into it (`ethora-agent-invite`).\nAuth: user auth (the default on the hosted server) or B2B; app-token mode is not accepted by this route. Errors: 401 not logged in; 403 not the app owner; 404 unknown app/room; 422 empty text. Reply detection needs the message archive (MAM) on the deployment; when it is unavailable `replies` is null and `historyUnavailable` is true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Message body to post (1-4000 chars)."
+          },
+          "roomJid": {
+            "type": "string",
+            "description": "Room JID `${appId}_${chatId}` (optionally with `@conference.<host>`), as returned by `ethora-chat-create`. Either this or `chatId` is required."
+          },
+          "chatId": {
+            "type": "string",
+            "description": "Chat id: either the Mongo chat `_id` (as listed by the app's chat list) or the suffix after `${appId}_` in the room JID. Needs an app: pass `appId` or select one with `ethora-app-select`."
+          },
+          "appId": {
+            "type": "string",
+            "description": "24-char hex appId. Optional when `roomJid` carries it or an app is selected."
+          },
+          "senderName": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "Display name shown as the message sender (defaults to the app's broadcast sender / app name)."
+          },
+          "waitForReplySec": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60,
+            "description": "Seconds to wait for a reply from someone else in the room (an AI agent, typically). 0 (default) returns right after posting."
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Send Chat Message",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-chat-history",
+      "description": "Read the archived messages of a chat room (GET /v2/apps/:appId/chats/:chatId/messages, newest last). Returns `results` with `from`, `nick`, `body`, `ts` (ms) plus a `nextBefore` cursor for older pages. Identify the room by `roomJid` (`${appId}_${chatId}`) or bare `chatId` plus the selected app.\nRequires: a room in the selected app (`ethora-chat-create`).\nAuth: user auth (default on the hosted server) or B2B; app-token mode is not accepted. Errors: 401 not logged in; 403 not the app owner; 404 unknown app/room; 502 MAM_READ_FAILED or `mamUnavailable: true` when the deployment has no message archive.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "roomJid": {
+            "type": "string",
+            "description": "Room JID `${appId}_${chatId}` (optionally with `@conference.<host>`). Either this or `chatId` is required."
+          },
+          "chatId": {
+            "type": "string",
+            "description": "Bare chat id. Needs an app: pass `appId` or select one with `ethora-app-select`."
+          },
+          "appId": {
+            "type": "string",
+            "description": "24-char hex appId. Optional when `roomJid` carries it or an app is selected."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Maximum number of most-recent messages to return (default 100)."
+          },
+          "before": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Pagination cursor: only messages older than this timestamp (ms), from a previous `nextBefore`."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get Chat History",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ethora-tools-enable",
+      "description": "Only the core tools are listed by default. Call this to enable another group for this session; the tool list refreshes automatically (tools/list_changed). Without `group` it returns the catalogue: each group's summary, tool count and whether it is enabled. Groups: keys, session, apps-admin, rooms, agents-admin, sources, users-files, legacy-bot, b2b, wallet; `all` enables everything. Hidden tools are still described by `search` / `fetch`, and each doc names its group.\nAuth: none. Errors: UNKNOWN_GROUP for a name outside the list.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "type": "string",
+            "enum": [
+              "keys",
+              "session",
+              "apps-admin",
+              "rooms",
+              "agents-admin",
+              "sources",
+              "users-files",
+              "legacy-bot",
+              "b2b",
+              "wallet",
+              "all"
+            ],
+            "description": "Group to enable, or `all`. Omit to list the groups."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Enable More Tools",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "search",
+      "description": "Search the Ethora documentation and tool reference: auth model (app JWT vs app token vs B2B token vs API keys), hosted-server getting started, chat-component and backend SDK quickstarts, recipes, and a reference entry for every tool with its inputs. Use it for any \"how do I ...\" question about Ethora before guessing; then call `fetch` with a result id to read the full text.\nAuth: none required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Free-text query, e.g. 'create an app', 'invite agent to chat', 'api key bearer header'. Empty returns the getting-started guides."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Search Docs",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "fetch",
+      "description": "Fetch the full text of a documentation section or tool reference entry by the id returned from `search` (e.g. `tool:ethora-app-create`, `doc:auth-map#app-jwt`, `doc:hosted-guide`).\nAuth: none required. Errors: unknown id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Document id from a `search` result."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Fetch Doc",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "Ethora MCP Server",
+    "version": "26.10.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Ethora MCP Server (local stdio): create and manage Ethora chat/messaging apps, users, chats, AI agents and bots through the Ethora API.\nConfiguration comes from env vars: ETHORA_API_URL (API base, defaults to Ethora Cloud), ETHORA_APP_JWT (app JWT needed by login/register), optional ETHORA_B2B_TOKEN for server-to-server automation. `ethora-session-configure` can set them at runtime.\nAuth: call `ethora-status`, then `ethora-user-login` (email + password) or `ethora-user-register`; or switch to app/B2B auth with `ethora-auth-mode-set` / `ethora-auth-mode-set` when you hold those tokens.\nTypical flow after auth: `ethora-app-create`, `ethora-app-select`, then chats/users/agents tools. Use `search` and `fetch` for documentation and `ethora-help` for recommended next calls.\nApp credentials (appSecret, tenantSecret, appToken, passwords) are redacted from tool results; use `ethora-app-credentials-reveal { appId, confirm: true }` for the appToken.\nNever print API keys, tokens or passwords unless the user explicitly asks. Destructive tools are gated behind ETHORA_MCP_ENABLE_DANGEROUS_TOOLS=true and delete data owned by the current user; confirm before calling them.\nOnly the core tools are listed at first (sign in, apps, rooms, messages, agents, knowledge base, widget). More exist in groups: keys, session, apps-admin, rooms, agents-admin, sources, users-files, legacy-bot, b2b. Call `ethora-tools-enable` with no arguments to see them, or `ethora-tools-enable { group }` (or `{ group: \"all\" }`) to add one; the tool list refreshes by itself. `search` and `fetch` describe hidden tools too, and each doc names its group.",
+  "durationMs": 6554,
+  "stderr": "Attempting to start Ethora MCP Server.\nSuccessfully started Ethora MCP Server.\n"
+}

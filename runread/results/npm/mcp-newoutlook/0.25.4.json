@@ -1,0 +1,953 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "mcp-newoutlook",
+  "version": "0.25.4",
+  "integrity": {
+    "dist": "sha512-6mzIw4KOl7ep6dQW+sysqQ7JuPVG+bcCMy7giNJAQy+gnJepHhnwBwWXHVWPur8gCnRpU+r20AD69F6+iwW7GA==",
+    "installed": "sha512-6mzIw4KOl7ep6dQW+sysqQ7JuPVG+bcCMy7giNJAQy+gnJepHhnwBwWXHVWPur8gCnRpU+r20AD69F6+iwW7GA=="
+  },
+  "bin": "node_modules/mcp-newoutlook/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-18T13:30:40.294Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_version",
+      "description": "Shows the mcp-newoutlook server version, the browser extension version, and whether New Outlook is reachable.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "reload_extension",
+      "description": "Reloads the mcp-newoutlook browser extension from disk, e.g. after an update changed it, and waits until it is connected again. Returns the extension version before and after. Refused while a send confirmation window is open.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_folders",
+      "description": "Lists every mail folder, including subfolders, with its path (e.g. 'Inbox/Projects/Northwind'), total and unread counts. Use the path as the folder for search_emails and move_emails.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "include_ids": {
+            "default": false,
+            "description": "Also return each folder's id (long; paths are enough to address folders)",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_emails",
+      "description": "Lists emails, newest first: by default those in Inbox, Sent Items and all their subfolders. With `query`, searches Outlook's full-text index (subject, body, people, attachment contents; search: 'fulltext'), or matches fields when that isn't available (search: 'substring', searchNote says why). Full-text search reads only its first 25 matches: a page past them (offset) matches fields instead, and a full-text result that stops there says so in searchNote. A folder is searched with its subfolders; folder 'all' searches every folder. Each result carries its folder path when several folders were searched. total is null when not every match was counted (includesLastItem still says whether there are more). When nothing is found, emptyNote says what that doesn't rule out. Returns ids for read_email / download tools (ids from Microsoft Graph, with '-' and '_', work too) and each email's conversationId, the same for every email of a thread. offset goes up to 1000: to reach older emails, narrow the query or the date range.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Search text, all terms must match. Free words, \"phrases\", subject:, body:, from:, to:, cc:, hasattachment:yes|no; dates (local, YYYY-MM-DD, today, yesterday): received:D, after:D, before:D, received>=D, received<D. Omit to list the folder.",
+            "type": "string"
+          },
+          "order": {
+            "default": "newest",
+            "description": "Full-text search only: 'relevance' puts the best matches first",
+            "type": "string",
+            "enum": [
+              "newest",
+              "relevance"
+            ]
+          },
+          "preview": {
+            "default": false,
+            "description": "Also return each email's To line and the start of its body",
+            "type": "boolean"
+          },
+          "folder": {
+            "default": [
+              "inbox",
+              "sentitems"
+            ],
+            "description": "Where to search, with subfolders: 'inbox', 'sentitems', 'drafts', 'deleteditems', 'junkemail', 'archive', 'outbox', a folder path/id from list_folders (e.g. 'Inbox/Projects/Northwind'), a list of these, or 'all' (every folder). Default: Inbox and Sent Items.",
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "minItems": 1,
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ]
+          },
+          "subfolders": {
+            "default": true,
+            "description": "Also search the folders' subfolders",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 25,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "default": 0,
+            "description": "Where the page starts, at most 1000. For older emails, narrow the query or the date range (after:/before:) instead",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_email",
+      "description": "Reads an email: headers, recipients, body and attachment list. Pass a list of ids to read several at once. Text bodies drop the quoted history of earlier messages (body.quotedRemoved) and collapse repeated disclaimers; longer than max_length is cut (body.truncated, body.fullLength). webLink opens the email in Outlook on the web; conversationId is the same for every email of a thread.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ],
+            "description": "Email id from search_emails, or a list of up to 50 ids (Graph ids work too)"
+          },
+          "body_format": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          },
+          "include_quoted": {
+            "default": false,
+            "description": "Keep the quoted history of earlier messages (text format)",
+            "type": "boolean"
+          },
+          "max_length": {
+            "default": 20000,
+            "description": "Maximum body length per email, in characters",
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_thread",
+      "description": "Reads the conversation an email belongs to, in every folder (Sent Items included, Deleted Items and Drafts not), oldest first. Each message's body is shortened like read_email, so the quoted history isn't repeated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Id of any email in the conversation (Graph ids work too)"
+          },
+          "max_messages": {
+            "default": 20,
+            "description": "Newest messages to return; omitted says how many older ones were left out",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "max_length": {
+            "default": 5000,
+            "description": "Maximum body length per message",
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 100000
+          },
+          "body_format": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_contacts",
+      "description": "Looks people up by name, email address or domain in your contacts, the organization directory and your mail (external partners too). Returns name and email plus what is known: title, department, company, phones, address; for people from mail also email count, lastEmail, lastReceived (lastReceivedId for read_email), folders and the signature of their latest email. Directory and contacts match word starts; mail matches any part of the sender (a domain lists everyone from that company). Groups are kind: 'group'. If Outlook is throttling, mail results can be incomplete: partial: true with a partialNote.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "pattern": "[^\\s\"]",
+            "description": "Name, part of a name, an email address or a domain"
+          },
+          "source": {
+            "default": "all",
+            "description": "'all' searches mail only when contacts and directory find nobody (mailSkipped); 'mail' takes 5-15 s",
+            "type": "string",
+            "enum": [
+              "all",
+              "contacts",
+              "directory",
+              "mail"
+            ]
+          },
+          "limit": {
+            "default": 10,
+            "description": "Maximum matches per source",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "include_signature": {
+            "default": true,
+            "description": "For people found in mail, read their latest email and return its signature",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_events",
+      "description": "Lists calendar appointments and meetings between start and end, recurring meetings expanded, optionally only those matching query (when attendees can't all be read, they match the other fields and searchNote says why). Times in UTC (start/end) and local time (startLocal/endLocal). Default: the next 7 days; widen end to search further ahead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Words that must all appear in the subject, location, organizer or attendees (names or addresses), e.g. 'fabrikam review' or 'novak'",
+            "type": "string"
+          },
+          "start": {
+            "description": "YYYY-MM-DD, today, tomorrow, yesterday or an ISO date-time (local time). Default: today",
+            "type": "string"
+          },
+          "end": {
+            "description": "Same formats; a date includes that whole day. Default: 7 days after start",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_meeting_times",
+      "description": "Suggests meeting times when you and the attendees are all free, from their free/busy and your calendar, inside working hours (local time). Lists, per attendee, how many busy blocks were found or why their free/busy couldn't be read.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "attendees": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (looked up like recipients); your own calendar is always included"
+          },
+          "duration_minutes": {
+            "default": 30,
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 480
+          },
+          "start": {
+            "description": "YYYY-MM-DD, today, tomorrow or an ISO date-time (local time). Default: now",
+            "type": "string"
+          },
+          "end": {
+            "description": "Same formats; a date includes that whole day. Default: 7 days after start",
+            "type": "string"
+          },
+          "work_start": {
+            "default": "09:00",
+            "description": "Earliest start, local HH:MM",
+            "type": "string"
+          },
+          "work_end": {
+            "default": "17:00",
+            "description": "Latest end, local HH:MM",
+            "type": "string"
+          },
+          "include_weekends": {
+            "default": false,
+            "type": "boolean"
+          },
+          "allow_tentative": {
+            "default": false,
+            "description": "Treat tentative meetings as free",
+            "type": "boolean"
+          },
+          "max_suggestions": {
+            "default": 5,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "attendees"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_event",
+      "description": "Reads one appointment or meeting from list_events: time, location, organizer, attendees with their responses, and the description (shortened like read_email).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Event id from list_events"
+          },
+          "body_format": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          },
+          "max_length": {
+            "default": 20000,
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "respond_to_event",
+      "description": "Answers a meeting invitation from list_events / read_event, optionally with a note to the organizer. A confirmation window opens in the browser showing exactly what will happen. Nothing is sent unless the user clicks its button; the call waits for that decision.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Event id from list_events"
+          },
+          "response": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "tentative",
+              "decline"
+            ]
+          },
+          "comment": {
+            "default": "",
+            "description": "Optional note to the organizer",
+            "type": "string"
+          },
+          "send_response": {
+            "default": true,
+            "description": "Tell the organizer; false only records the answer in your calendar",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "response"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_event",
+      "description": "Creates a calendar event. Without attendees it is your own appointment and is created at once (nothing is sent). With attendees the invitation needs the user's confirmation: A confirmation window opens in the browser showing exactly what will happen. Nothing is sent unless the user clicks its button; the call waits for that decision. Use find_meeting_times to pick a time. If a call timed out, retrying it unchanged within 10 minutes returns the first result instead of acting twice. An invitation the user did not approve is asked again.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start": {
+            "type": "string",
+            "description": "Local date-time, e.g. 2026-10-12T10:00 (or ISO with Z)"
+          },
+          "end": {
+            "description": "Same format; default: start + duration_minutes",
+            "type": "string"
+          },
+          "duration_minutes": {
+            "default": 30,
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 1440
+          },
+          "attendees": {
+            "description": "Required attendees: addresses or names (looked up like recipients)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "optional_attendees": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "teams_meeting": {
+            "description": "Add a Microsoft Teams link. Default: yes for meetings with attendees, no for your own appointments",
+            "type": "boolean"
+          },
+          "location": {
+            "default": "",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "description": "Description",
+            "type": "string"
+          },
+          "body_format": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          }
+        },
+        "required": [
+          "subject",
+          "start"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_draft",
+      "description": "Creates a draft in the Drafts folder. Nothing is sent. Use add_attachment to attach files and send_draft to request sending. If a call timed out, retrying it unchanged within 10 minutes returns the first result instead of acting twice.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "body_format": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_reply_draft",
+      "description": "Creates a reply (or reply all) to an email as a draft, with the original quoted below your text. Nothing is sent. Returns the draft's recipients so you can check them; use add_attachment to attach files and send_draft to request sending. If a call timed out, retrying it unchanged within 10 minutes returns the first result instead of acting twice.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Id of the email to reply to"
+          },
+          "body": {
+            "type": "string",
+            "description": "Your reply text, placed above the quoted original"
+          },
+          "reply_all": {
+            "default": false,
+            "description": "Reply to the sender and all other recipients",
+            "type": "boolean"
+          },
+          "cc": {
+            "description": "Extra Cc recipients",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "body_format": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "body"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_forward_draft",
+      "description": "Creates a forward of an email as a draft, including its attachments and the original below your note. Nothing is sent. Use send_draft to request sending. If a call timed out, retrying it unchanged within 10 minutes returns the first result instead of acting twice.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Id of the email to forward"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "body": {
+            "default": "",
+            "description": "Optional note placed above the forwarded email",
+            "type": "string"
+          },
+          "body_format": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "to"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "add_attachment",
+      "description": "Attaches one or more local files (max 25 MB each) to a draft. All files are checked before anything is attached. If a call timed out, retrying it unchanged within 10 minutes returns the first result instead of acting twice.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draft_id": {
+            "type": "string"
+          },
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ],
+            "description": "Absolute path of a local file, or a list of paths"
+          }
+        },
+        "required": [
+          "draft_id",
+          "file_path"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "download_email",
+      "description": "Saves the full email (MIME, including attachments) as an .eml file. Pass a list of ids to save several emails.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ],
+            "description": "Email id, or a list of ids (Graph ids work too)"
+          },
+          "dir": {
+            "description": "Target folder. Defaults to the configured download folder.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "download_attachments",
+      "description": "Saves all file attachments of an email to disk (optionally only selected attachment ids). Pass a list of email ids to download from several emails; each email's files then go into their own subfolder named after its subject.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ],
+            "description": "Email id, or a list of ids (Graph ids work too)"
+          },
+          "attachment_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include_inline": {
+            "default": false,
+            "description": "Also save inline images",
+            "type": "boolean"
+          },
+          "dir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mark_emails",
+      "description": "Marks one or more emails as read or unread, and/or sets their flag (flagged, complete, none).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email ids from search_emails (Graph ids work too)"
+          },
+          "read": {
+            "description": "true = mark as read, false = mark as unread",
+            "type": "boolean"
+          },
+          "flag": {
+            "type": "string",
+            "enum": [
+              "flagged",
+              "complete",
+              "none"
+            ]
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "move_emails",
+      "description": "Moves one or more emails to another folder: a standard folder ('inbox', 'archive', 'deleteditems', ...) or a folder path/id from list_folders. Moving to 'deleteditems' is how emails are deleted; they can be moved back from there. Returns a result per email; it includes newId only when the mailbox gave the moved email a different id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email ids from search_emails (Graph ids work too)"
+          },
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Target folder: a standard name or a path/id from list_folders"
+          }
+        },
+        "required": [
+          "ids",
+          "folder"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_draft",
+      "description": "Changes an existing draft. Only the fields you give change; an empty cc or bcc list removes those recipients. remove_attachment_ids removes attachments (ids from read_email). Returns the updated recipients and attachments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draft_id": {
+            "type": "string"
+          },
+          "to": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "description": "Replaces the whole body",
+            "type": "string"
+          },
+          "body_format": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          },
+          "remove_attachment_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "draft_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "send_draft",
+      "description": "Requests sending an existing draft. A confirmation window opens in the browser showing recipients, subject, body and attachments. The email is sent ONLY if the user clicks Send there; the call waits for that decision.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draft_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compose_and_send",
+      "description": "Creates a draft, attaches local files, then requests sending. A confirmation window opens in the browser showing recipients, subject, body and attachments. The email is sent ONLY if the user clicks Send there; the call waits for that decision. If the user declines, the draft stays in Drafts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Email addresses or names (e.g. 'Daniel Kowalski'). A name is looked up in contacts and the directory, and in mail only when they don't give exactly one exact match. It must match exactly one person, else nothing happens and the matches are listed; resolvedRecipients shows what names became."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "body_format": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          },
+          "attachments": {
+            "default": [],
+            "description": "Absolute paths of local files",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "mcp-newoutlook",
+    "version": "0.25.4"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 5665,
+  "stderr": "[mcp-newoutlook 0.25.4] bridge listening on ws://127.0.0.1:47391 (config: /tmp/.mcp-newoutlook/config.json)\n"
+}

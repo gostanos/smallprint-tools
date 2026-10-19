@@ -1,0 +1,2298 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@naumu/mcp",
+  "version": "0.18.3",
+  "integrity": {
+    "dist": "sha512-jR+JLyvGxlv0bmUNaNOnfM6SOzTt8dL5OMR+fMktAd33x/X7OITt81uLOLUTohI+X5b+6ACafw+a83bJaMHo1Q==",
+    "installed": "sha512-jR+JLyvGxlv0bmUNaNOnfM6SOzTt8dL5OMR+fMktAd33x/X7OITt81uLOLUTohI+X5b+6ACafw+a83bJaMHo1Q=="
+  },
+  "bin": "node_modules/@naumu/mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "NAUMU_API_KEY",
+    "NAUMU_API_URL",
+    "NAUMU_IDENTITY_ID"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-18T12:25:41.721Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "naumu_list_graphs",
+      "description": "List all knowledge graphs (spaces) the authenticated user has access to. Returns graph IDs, names, and roles.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_list_members",
+      "description": "List the members of a Naumu space (graph): each member's userId, name, email, and role. Use it to discover teammates and to get the id you pass when @mentioning a human via naumu_post_message (their userId or email both work).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The space (graph) ID to list members of. You must be a member of this space."
+          }
+        },
+        "required": [
+          "graphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_create_graph",
+      "description": "Create a new, empty knowledge graph (space) owned by the authenticated user; use when you need a fresh space to populate. Returns `{id, name, slug, role, memberRole, createdAt, onboardingThreadId}` - use the returned `id` as `graphId` for subsequent tool calls. The space starts empty (no schema, no nodes); follow up with `naumu_update_schema` to register types before any `naumu_add_node` calls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Display name for the new space. A URL slug is generated from this name."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_get_schema",
+      "description": "Get the schema definition for a knowledge graph; call this before classifying a new node into a type, before picking an attribute value, or before extending the schema. Returns a ROUND-TRIPPABLE structural schema: each `types[]` entry has the SAME shape `naumu_update_schema` ingests (type, description, structured `connections: { parent?, required, suggested }` with parent NESTED - not a string, and structured attributes), so you can copy a type straight back into naumu_update_schema without losing data (notably the parent relation). Descriptions are short, contrastive notes from the schema author explaining what each type/attribute/value is for and how it differs from similar-sounding ones.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          }
+        },
+        "required": [
+          "graphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_update_schema",
+      "description": "Replace the graph schema with a new full definition; use to bootstrap an empty graph (cold-start) or fully replace mid-build. STRUCTURAL RULES (load-bearing): (1) HIERARCHICAL with a single root - exactly ONE type has no parent; every other type MUST declare a parent. (2) Each parent / required / suggested connection is XOR: ONE concrete target_node OR polymorphic=true - never both, never a list of multiple targets. (3) DEFAULT TO CONCRETE target_node. Polymorphic is the ESCAPE HATCH - reserve for genuinely cross-cutting concepts like Comment or Tag (entities that validly attach to many distinct types). If you find yourself making most parents polymorphic, you are avoiding the design work - pick concrete relationships instead. If you can't pick a concrete parent, you may be missing a type - add the missing type first. (4) Same-type nesting is implicit: a node can be placed under another of its same type using the existing parent relation - never add a self-relation just to enable nesting. (5) Always provide `description` on every node type, attribute, and select value - one short, contrastive sentence (what it IS and what it is NOT vs sibling types/attrs/values). This is the single strongest disambiguation signal for future agents classifying nodes. When replacing mid-build, call naumu_get_schema first (it returns a round-trippable structural schema you can copy back) and send the FULL new schema; anything you omit is removed. PARENT PRESERVATION: omitting a type's `connections.parent` PRESERVES its existing parent (so a round-trip never silently orphans a type). To intentionally remove a parent and make a type a root, send `parent: null` explicitly. (A parent whose target type you delete is dropped automatically.) Conventions: type names PascalCase, relation names UPPER_SNAKE_CASE. Bias toward general types - refine via attributes or nested children, not type proliferation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "schema": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "Schema-level description / domain summary. Omit to keep the current space-wide description; send an empty string to clear it. Max 4,000 chars."
+              },
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "description": "Type name in PascalCase (e.g. TypeA, TypeB)"
+                    },
+                    "connections": {
+                      "type": "object",
+                      "properties": {
+                        "parent": {
+                          "type": "object",
+                          "properties": {
+                            "relation": {
+                              "type": "string",
+                              "description": "UPPER_SNAKE_CASE relation name (e.g. WORKS_AT, BUILT_BY, BELONGS_TO)"
+                            },
+                            "target_node": {
+                              "type": "string",
+                              "description": "Target type name. Omit when polymorphic=true."
+                            },
+                            "polymorphic": {
+                              "type": "boolean",
+                              "description": "Set true when this relation can target multiple types."
+                            }
+                          },
+                          "required": [
+                            "relation"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Optional parent relation (this type nests under another via this connection)."
+                        },
+                        "required": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/schema/properties/nodes/items/properties/connections/properties/parent"
+                          },
+                          "default": [],
+                          "description": "Required outgoing connections to other types."
+                        },
+                        "suggested": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/schema/properties/nodes/items/properties/connections/properties/parent"
+                          },
+                          "default": [],
+                          "description": "Suggested-but-optional outgoing connections."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "attributes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "Attribute key (e.g. \"stage\", \"status\", \"category\")"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "select",
+                              "multiselect",
+                              "string",
+                              "number",
+                              "boolean",
+                              "date",
+                              "person"
+                            ],
+                            "description": "Attribute type (required). select/multiselect define a closed set of categories with values; string/number/boolean/date/person hold per-node data with values []. Calendar dates use \"date\", not select values. \"person\" references one space member (owner, assignee), or several when `multiple` is true."
+                          },
+                          "values": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "label": {
+                                  "type": "string",
+                                  "description": "Display label for this enum value"
+                                },
+                                "color": {
+                                  "type": "string",
+                                  "description": "Optional hex color (e.g. \"#ff5722\")"
+                                },
+                                "description": {
+                                  "type": "string",
+                                  "description": "Short note distinguishing this value from sibling values (e.g. \"closed-won - signed and revenue committed\"). Encouraged when the label alone is ambiguous."
+                                }
+                              },
+                              "required": [
+                                "label"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "Allowed enum values for select/multiselect; pass [] for every other type."
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "Short note explaining what this attribute captures and how it differs from similarly-named attributes elsewhere in the schema. Strongly encouraged."
+                          },
+                          "requiredOnWrite": {
+                            "type": "boolean",
+                            "description": "True when every write that creates or updates a node of this type must also set this attribute."
+                          },
+                          "multiple": {
+                            "type": "boolean",
+                            "description": "person only - allow several members. The node value becomes a list of members (write it as an array or a comma-separated list of names/emails)."
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type",
+                          "values"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Type-level attributes for instances of this type."
+                    },
+                    "defaultVisibility": {
+                      "type": "string",
+                      "enum": [
+                        "restricted",
+                        "internal",
+                        "open"
+                      ],
+                      "description": "Default visibility for NEW nodes of this type when no explicit visibility is passed on creation. Does NOT retroactively change visibility on existing nodes. \"open\" = visible to anyone with the space link (including non-members), \"internal\" = visible to all space members, \"restricted\" = only members explicitly granted access. Omit to leave the type unset - it then falls back to the space-level defaultVisibility."
+                    },
+                    "color": {
+                      "type": "string",
+                      "description": "Optional hex color for instances of this type."
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "Short one-sentence description of what this type represents AND how it differs from semantically similar types (e.g. \"Type A - distinct from Type B, which is broader\"). Strongly encouraged on every type. Future agents rely on this when classifying a new node into one of several similar-sounding types."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "connections"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "All node types in the schema."
+              }
+            },
+            "required": [
+              "nodes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "graphId",
+          "schema"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_add_node_type",
+      "description": "Add one new node type to the schema; use to extend an existing schema without resending the whole thing (cheaper than naumu_update_schema). STRUCTURAL RULES: (1) Schemas are hierarchical with a single root. If schema is empty, the first type IS the root - omit `parent`. Every subsequent type MUST set `parent`. (2) DEFAULT TO CONCRETE - pass {relation, target_node: <existing type>}. Polymorphic is the ESCAPE HATCH - use {relation, polymorphic: true} ONLY for genuinely cross-cutting concepts like Comment or Tag (types that validly attach to many distinct parents). If you can't pick a concrete parent, you may be missing a type - add the missing type first instead of falling back to polymorphic. (3) Required/suggested connections also each take ONE concrete target_node OR polymorphic - never a list. Default concrete there too. (4) Type name PascalCase. Relation names UPPER_SNAKE_CASE. (5) ALWAYS provide `description` - one short sentence that says what this type is AND what it is NOT relative to semantically close types (e.g. \"Type A — distinct from Type B, which is broader\"). This is the single strongest signal future agents have when classifying a node into one of several similar-sounding types. Returns an error if the type already exists - use naumu_add_attribute / naumu_add_connection to extend it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "PascalCase type name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Short one-sentence description of what this type represents and how it differs from sibling types. Contrastive (say what it IS and what it is NOT) is most useful. Strongly encouraged on every new type - agents reading the schema later rely on this to classify nodes."
+          },
+          "parent": {
+            "type": "object",
+            "properties": {
+              "relation": {
+                "type": "string",
+                "description": "UPPER_SNAKE_CASE relation name (WORKS_AT, BELONGS_TO)."
+              },
+              "target_node": {
+                "type": "string",
+                "description": "Target type name. Omit when polymorphic=true."
+              },
+              "polymorphic": {
+                "type": "boolean",
+                "description": "True when this relation can target many types."
+              }
+            },
+            "required": [
+              "relation"
+            ],
+            "additionalProperties": false,
+            "description": "Optional parent connection - sets this type as a child of another type."
+          },
+          "required": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/parent"
+            }
+          },
+          "suggested": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/parent"
+            }
+          },
+          "attributes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "select",
+                    "multiselect",
+                    "string",
+                    "number",
+                    "boolean",
+                    "date",
+                    "person"
+                  ],
+                  "description": "Attribute type (required). select/multiselect define a closed set of categories with values; string/number/boolean/date/person hold per-node data with values []. Calendar dates use \"date\", not select values. \"person\" references one space member (owner, assignee), or several when `multiple` is true."
+                },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "color": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string",
+                        "description": "Short note distinguishing this value from sibling values (e.g. for status=\"closed-won\", \"signed and revenue committed\"). Encouraged when the label alone is ambiguous."
+                      }
+                    },
+                    "required": [
+                      "label"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "default": []
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Short note explaining what this attribute captures and how it differs from similarly-named attributes on other types (e.g. \"stage on Type A\" vs \"stage on Type B\"). Strongly encouraged."
+                },
+                "requiredOnWrite": {
+                  "type": "boolean",
+                  "description": "True when every write that creates or updates a node of this type must also set this attribute."
+                },
+                "multiple": {
+                  "type": "boolean",
+                  "description": "person only - allow several members. The node value becomes a list of members (write it as an array or a comma-separated list of names/emails)."
+                }
+              },
+              "required": [
+                "name",
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "color": {
+            "type": "string"
+          },
+          "defaultVisibility": {
+            "type": "string",
+            "enum": [
+              "restricted",
+              "internal",
+              "open"
+            ],
+            "description": "Default visibility for NEW nodes of this type when no explicit visibility is passed on creation. Does NOT retroactively change existing nodes. \"open\" = visible to anyone with the space link, \"internal\" = visible to all space members, \"restricted\" = only members explicitly granted access. Omit to fall back to the space-level defaultVisibility."
+          }
+        },
+        "required": [
+          "graphId",
+          "type"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_add_connection",
+      "description": "Add one connection from an existing node type to another; use to extend a type's relations without resending the whole schema. `kind`: \"parent\" (sets/replaces - every non-root type needs exactly one parent; only ONE type in the whole schema has no parent), \"required\" (must exist on instances), \"suggested\" (optional). Each connection is XOR: ONE concrete target_node OR polymorphic=true - never both. DEFAULT TO CONCRETE target_node. Polymorphic is the ESCAPE HATCH - reserve for genuinely cross-cutting relations (e.g. a Tag-style relation that validly applies to many distinct types). If you can't pick a concrete target, you may be missing a type - add it first instead of falling back to polymorphic. Same-type nesting (e.g. Type A under Type A) does NOT need a new connection - use the existing parent relation. Relation name UPPER_SNAKE_CASE.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string"
+          },
+          "source_type": {
+            "type": "string",
+            "description": "Existing node type to add the connection to."
+          },
+          "relation": {
+            "type": "string",
+            "description": "UPPER_SNAKE_CASE relation name."
+          },
+          "target_node": {
+            "type": "string",
+            "description": "Target type. Omit when polymorphic=true."
+          },
+          "polymorphic": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "required",
+              "suggested",
+              "parent"
+            ],
+            "default": "suggested"
+          }
+        },
+        "required": [
+          "graphId",
+          "source_type",
+          "relation"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_add_attribute",
+      "description": "Add or extend an attribute on an existing node type; use to add a field or merge new enum values into an existing one. If the attribute name doesn't exist, it is created. If it exists and is a select/multiselect, new values are merged in (existing values kept). Date values on nodes are written via naumu_update_node as either an ISO date string \"YYYY-MM-DD\" (single day) or an object { start, end? } with ISO date strings (inclusive range). A \"person\" attribute holds one space member (or several when `multiple` is true); write it on a node by member name or email and the server stores the member id. Strongly encouraged to provide `description` on the attribute and on each value - short, contrastive notes (e.g. attribute \"stage - sales funnel position; distinct from status which captures health/blockers\", value \"closed-won - deal signed and revenue committed\"). Descriptions are the single strongest signal future agents use when picking which attribute/value to set.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string",
+            "description": "Existing node type to add the attribute to."
+          },
+          "name": {
+            "type": "string",
+            "description": "Attribute key (e.g. \"stage\", \"status\")."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "select",
+              "multiselect",
+              "string",
+              "number",
+              "boolean",
+              "date",
+              "person"
+            ],
+            "description": "Attribute type (required). select/multiselect define a closed set of categories - provide their values. string/number/boolean/date/person hold per-node data - pass values: []. A specific calendar date is per-node data, so use type \"date\" and write the date on the node, rather than adding the date as a select value. \"person\" references one space member (an owner, assignee, account manager)."
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "color": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Short note distinguishing this value from sibling values (e.g. \"closed-won - deal signed and revenue committed\"). Encouraged when the label alone is ambiguous."
+                }
+              },
+              "required": [
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "description": {
+            "type": "string",
+            "description": "Short note explaining what this attribute captures and how it differs from similarly-named attributes elsewhere in the schema (e.g. \"Sales funnel position; differs from `status` which captures health/blockers\"). Strongly encouraged."
+          },
+          "requiredOnWrite": {
+            "type": "boolean",
+            "description": "True when every write that creates or updates a node of this type must also set this attribute (e.g. \"Next contact\" on a Company). Omit to leave the stored flag unchanged."
+          },
+          "multiple": {
+            "type": "boolean",
+            "description": "person only - allow several members. Omit to leave the stored flag unchanged."
+          }
+        },
+        "required": [
+          "graphId",
+          "node_type",
+          "name",
+          "type"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_update_schema_description",
+      "description": "Rewrite the description of ONE existing schema target - the space-wide schema description, a node type, an attribute on that type, or a single value of that attribute. A description is the contrastive decision rule an agent reads when choosing between siblings: say what this target IS and, more importantly, when to pick it over the ones next to it (e.g. \"Done - shipped to prod; use In review while the PR is open but not merged\"). Generic restatements of the name are worthless; the contrast is the whole point. Call naumu_get_schema first to see the current descriptions and the exact sibling names, then rewrite the one that is ambiguous. Targeting: pass `value` (with its `attribute`) to update a value, `attribute` alone to update an attribute, `nodeType` alone to update the node type itself, and omit `nodeType` entirely to update the space-wide schema description - the guidance that holds across every type (e.g. what a parent connection means in this space). This replaces the existing description outright - it does not append. To create new types/attributes/values, use naumu_add_node_type / naumu_add_attribute.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_search",
+      "description": "Hybrid search over graph nodes; use for meaning-based lookup when you don't know the exact label. Combines text matching, which looks for the whole query as one contiguous substring (good for UUIDs, proper nouns, specific labels), with semantic similarity (good for paraphrase and meaning), then fuses both rankings with Reciprocal Rank Fusion. Returns the top matches with a `matchedVia` tag - `both` is the highest-confidence signal, then `semantic`, then `text`. Use `naumu_filter` for structured queries by type and attributes (e.g. \"all in-progress Tasks\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "query": {
+            "type": "string",
+            "description": "A short contiguous phrase — an entity name, label, or ID. The text half matches it verbatim as a case-insensitive substring; the semantic half matches meaning."
+          },
+          "limit": {
+            "type": "number",
+            "default": 20,
+            "description": "Max results to return (default 20, max 200). Adaptive cutoff may return fewer when the top match is weak."
+          },
+          "nodeTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter to specific node types (e.g. [\"Type A\", \"Type B\"])"
+          }
+        },
+        "required": [
+          "graphId",
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_filter",
+      "description": "Filter nodes by type and attributes with deterministic, complete results; use for structured queries like \"all in-progress Tasks\" or \"Bugs not yet resolved.\" Unlike search tools, this returns every matching node (up to the limit) - no semantic ranking, no missed results. Results are sorted by sortKey or recency.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "nodeTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter to specific node types (e.g. [\"Type A\", \"Type B\"])"
+          },
+          "includeAttributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Only include nodes where attribute matches one of the values. Example: {\"Status\": [\"Todo\", \"In Progress\"]}"
+          },
+          "excludeAttributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Exclude nodes where attribute matches any of the values. Example: {\"Status\": [\"Done\", \"Wont do\"]}"
+          },
+          "sortBy": {
+            "type": "string",
+            "enum": [
+              "sortKey",
+              "updatedAt",
+              "label"
+            ],
+            "default": "sortKey",
+            "description": "Sort order: \"sortKey\" (default), \"updatedAt\" (most recent first), or \"label\" (alphabetical)"
+          },
+          "limit": {
+            "type": "number",
+            "default": 50,
+            "description": "Max results to return (default 50, max 200)"
+          }
+        },
+        "required": [
+          "graphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_get_node",
+      "description": "Get a single node with all its properties, connections (incoming and outgoing edges with neighbor labels), and tied context: attached notes, conversations (threads), scheduled tasks, and the generated summary when one exists.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "The node ID"
+          }
+        },
+        "required": [
+          "graphId",
+          "nodeId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_add_node",
+      "description": "Create 1-25 nodes in the knowledge graph in a single call; use when you have a vetted, dedup-checked batch ready to insert. Keep batches small and atomic (5-25 nodes) so failures stay contained. Each node MUST include a non-empty `content` describing what it is. Returns one entry per input node with `{id, label, type, status: \"created\"}` - there is NO server-side dedup, every input becomes a node. Dedup is the caller's responsibility: BEFORE calling this tool, run `naumu_search` on each candidate label and treat a result as the same entity when its `matchedVia` is \"semantic\" or \"both\" AND its type matches AND the labels plausibly name the same thing - then reuse/update that node instead of creating one. (The `score` field is a rank-fusion value, not a similarity - do not compare it against a threshold.) Warning: nodes are isolated until you connect them with `naumu_add_edge`. Prefer `naumu_delegate` for general knowledge intake - it discovers and creates connections for you.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Display name of the node"
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Node type from the graph schema"
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Rich text content / description. REQUIRED - every node must explain what it is."
+                },
+                "attributes": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "Schema-defined attributes. Keys are matched case-insensitively against the node type's schema attributes and stored in canonical form; unknown attributes or invalid select values reject the whole batch. Date attributes accept \"YYYY-MM-DD\" or { start, end? }."
+                }
+              },
+              "required": [
+                "label",
+                "type",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 25,
+            "description": "Batch of 1–25 nodes to create. Keep batches small for atomicity."
+          }
+        },
+        "required": [
+          "graphId",
+          "nodes"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_update_node",
+      "description": "Overwrite properties of an existing node; use for simple attribute changes like setting a status, priority, or due date. Only the provided fields will be changed. For content or structural changes, consider `naumu_delegate` instead - it understands the full graph context and can propagate updates to related nodes. Attribute keys AND values must match the schema for the node type; use naumu_get_schema to check valid attribute names, types, and values before updating. Date attributes accept either null (to clear), an ISO date string \"YYYY-MM-DD\" (single day), or { start: \"YYYY-MM-DD\", end?: \"YYYY-MM-DD\" } (inclusive range). Example: { \"due_date\": { \"start\": \"2026-05-21\", \"end\": \"2026-05-23\" } } or { \"due_date\": \"2026-05-21\" } or { \"due_date\": null }. Select attributes accept the value label as a string. Person attributes accept a member name, email or user id as a string (null clears); a person attribute with `multiple: true` in the schema takes an array of them. The server resolves them against the space members and rejects anyone who is not a member - use naumu_list_members to see who is.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "The node ID to update"
+          },
+          "label": {
+            "type": "string",
+            "description": "New display name"
+          },
+          "type": {
+            "type": "string",
+            "description": "New node type"
+          },
+          "content": {
+            "type": "string",
+            "description": "New content / description"
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Schema-defined attributes to set. Examples: {\"Status\": \"In Progress\"}, {\"due_date\": {\"start\": \"2026-05-21\", \"end\": \"2026-05-23\"}}, {\"due_date\": \"2026-05-21\"}, {\"due_date\": null}."
+          }
+        },
+        "required": [
+          "graphId",
+          "nodeId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_add_edge",
+      "description": "Create 1-25 relationships (edges) between existing nodes in a single call; use after a bulk node insert to wire nodes together. Keep batches small and atomic (5-25 edges) so failures stay contained. Typical workflow: create nodes with `naumu_add_node`, then wire them up with batched `naumu_add_edge` calls. Direction matters and must match the schema: each edge's `(source.type, label, target.type)` tuple should appear in the schema's `connections` or `parent` for the source type. When the backend runs with `STRICT_EDGE_VALIDATION=true`, invalid tuples are rejected immediately with `error: invalid_edge` (the response includes `details.allowed_targets_for_relation` and a `hint` for routing the call); otherwise the edge persists and surfaces later as an `invalid_connection_target` / `parent_mismatch` violation. Either way, check `naumu_get_schema` and flip or drop offending edges before calling. Prefer `naumu_delegate` when you want the agent to discover the right connections itself.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "description": "Source node ID"
+                },
+                "target": {
+                  "type": "string",
+                  "description": "Target node ID"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Relationship type (e.g. RELATES_TO, SOLVES, TRACKS)"
+                },
+                "isParent": {
+                  "type": "boolean",
+                  "description": "Whether this is a parent relationship"
+                }
+              },
+              "required": [
+                "source",
+                "target",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 25,
+            "description": "Batch of 1–25 edges to create. Keep batches small for atomicity."
+          }
+        },
+        "required": [
+          "graphId",
+          "edges"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_remove_node",
+      "description": "Delete a node and all its connections from the knowledge graph; use only when you need precise, surgical deletion. This is destructive. Prefer `naumu_delegate` for removing knowledge - it understands the impact on the broader graph and can handle cascading changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "The node ID to delete"
+          }
+        },
+        "required": [
+          "graphId",
+          "nodeId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_remove_edge",
+      "description": "Delete a single edge identified by `(source, target, label)` tuple; use to correct a wrong-target edge mistake (a recovery tool, not a routine one). Does NOT delete the endpoint nodes - only the edge between them. System edges (HAS_NODE, HAS_THREAD, OWNS, etc.) are rejected with `error: system_edge_not_removable`. Parent edges (`isParent: true`) are removable but the response includes a warning that the child may now be orphaned - call `naumu_reparent` first if you want connectivity preserved. Response: `{deleted: 0 | 1, warnings: string[]}`. Prefer `naumu_delegate` when the structural intent is broader than removing one specific edge - it can reason about the surrounding graph.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "source": {
+            "type": "string",
+            "description": "Source node id of the edge to delete"
+          },
+          "target": {
+            "type": "string",
+            "description": "Target node id of the edge to delete"
+          },
+          "label": {
+            "type": "string",
+            "description": "Relation label of the edge to delete (e.g. \"AUTHORED\"). Case-insensitive; non-alphanum chars are normalized."
+          }
+        },
+        "required": [
+          "graphId",
+          "source",
+          "target",
+          "label"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_remove_edges_bulk",
+      "description": "Delete 1-100 edges in a single atomic call (all-or-none); use to fix multiple wrong-target edge mistakes in one shot. Does NOT delete endpoint nodes. System edges (HAS_NODE, HAS_THREAD, OWNS, etc.) are rejected - if any edge in the batch targets a system relation, the WHOLE batch is rejected with `error: system_edge_not_removable`. Parent edges (`isParent: true`) are removable but each parent removal contributes a warning to the response (`{deleted, warnings: string[]}`) - call `naumu_reparent` first if you want connectivity preserved. Prefer `naumu_delegate` for broader structural cleanup that needs graph-wide reasoning.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "description": "Source node ID"
+                },
+                "target": {
+                  "type": "string",
+                  "description": "Target node ID"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Relation label of the edge to delete"
+                }
+              },
+              "required": [
+                "source",
+                "target",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "1-100 edges to delete. Atomic per call - all succeed or none do."
+          }
+        },
+        "required": [
+          "graphId",
+          "edges"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_ask",
+      "description": "Ask @Naumu a question about a space and get back a synthesised, node-grounded answer with the exact source node ids it used and a confidence hint. This is THE tool for any question about a space - what is in it, what is new or recently changed, how something works, or a summary of any topic. @Naumu has full read access and has already inspected the graph for you, so its answer is authoritative: present it and its cited sources directly. Do NOT independently re-read the graph (naumu_get_schema, naumu_filter, naumu_get_node, fetch) to verify or flesh out the answer - that repeats work @Naumu already did and is far slower. Reach for a granular read ONLY to pull a specific node the answer pointed to but did not fully include. Returns { answer, sources, confidence, threadId, status }; the answer is saved as a visible conversation in the space, which is expected and useful, so do not avoid the tool to prevent creating a thread. On a very long synthesis it may return status \"processing\" with a threadId - in that case wait a few seconds and call naumu_read_thread with that threadId for the final answer, and still do not fall back to manual digging. To hand @Naumu work to carry out (add knowledge, make changes, record status) without waiting, use naumu_delegate instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The space (graph) id to ask about."
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "The question for @Naumu. Up to 4000 characters."
+          },
+          "topicIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "description": "Topic ids (from naumu_list_topics) to file the resulting conversation into, making it visible to those topics' members from birth. Omit to keep the default behavior (the ask lands in the virtual #misc bucket)."
+          }
+        },
+        "required": [
+          "graphId",
+          "question"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "naumu_delegate",
+      "description": "Hand @Naumu a task to carry out asynchronously: add knowledge, make graph-aware changes, or record a status update (e.g. \"mark task X done\", \"log this deployment\"). Returns immediately with a threadId; @Naumu works in the background and may take seconds to minutes. For status reports you can fire and forget. To read what @Naumu did, poll naumu_read_thread with the returned threadId. When you instead need an answer synchronously, use naumu_ask. A new thread is visible to the whole space by default (it lands in the space's #misc feed), so delegated work reads as a shared work log. File it into specific topics instead by passing `topicIds` (see naumu_list_topics), or pass `private: true` to keep it between you and @Naumu. This always invokes @Naumu, even in threads where auto-response is paused, so the task text must never contain a literal \"@Naumu\" mention (plain text never renders or triggers a mention).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The space (graph) id to act in."
+          },
+          "task": {
+            "type": "string",
+            "description": "What you want @Naumu to do, add, or record."
+          },
+          "threadId": {
+            "type": "string",
+            "description": "Continue an existing conversation; omit to start a new one."
+          },
+          "topicIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "description": "Topic ids (from naumu_list_topics) to file a NEW thread into, making it visible to those topics' members. Only used at creation; never adds topics to an existing thread, so it is ignored when threadId is provided. Omit to share the thread with the whole space instead."
+          },
+          "private": {
+            "type": "boolean",
+            "description": "Keep a NEW thread between you and @Naumu instead of sharing it with the space. Default false. Only used at creation; ignored when threadId or topicIds are provided."
+          }
+        },
+        "required": [
+          "graphId",
+          "task"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "naumu_post_message",
+      "description": "Post a message in a Naumu thread you participate in. Use it to reply to humans (or other bots) in a thread that pinged you. Write `content` in markdown (the default format): **bold**, *italic*, `inline code`, fenced code blocks, `- ` bullets, `1. ` ordered lists, and `> ` quotes all render natively; headings and tables are not supported and render as plain text. Mentions are inline pills: `@[Name](id)` mentions a person or bot and `#[label](topic-id)` tags a topic. For a human the mention id is their User id (from naumu_list_members or naumu_get_thread participantDetails) or their email - both work; for a bot/agent use its identity id; `@[Naumu](naumu-ai)` addresses the @Naumu agent (a bare `@naumu` in prose also summons it, so only type it when you mean to). A text @-mention renders as a pill but does NOT notify or add a non-participant — to loop a person in so they get notified, use naumu_add_participants after posting. Set contentFormat to \"tiptap\" only when you need rich content beyond the markdown subset, passing a Tiptap JSON document with mention nodes (`{ type: \"mention\", attrs: { id, label } }`). To attach files call naumu_request_attachment_upload first, PUT the bytes to the returned uploadUrl, then pass the resulting attachmentIds here. The message needs either `content` or `attachmentIds`. Returns the created message JSON. By default this only appends text: @Naumu is NOT summoned unless the thread auto-responds or you mention it, so nothing is committed to the graph. Pass `invokeAgent: true` when you need @Naumu to act on the message (record a work-log entry, file a status update); it summons @Naumu unconditionally, even in paused threads, and @Naumu works in the background - poll naumu_read_thread to see what it did. To get a synthesised answer from @Naumu, use naumu_ask.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "description": "The thread ID to post into. You must be a participant in this thread."
+          },
+          "content": {
+            "type": "string",
+            "description": "Message body. Markdown by default (see the tool description for the supported subset and the `@[Name](id)` mention pill syntax); a Tiptap JSON document when contentFormat is \"tiptap\". Optional when `attachmentIds` is provided."
+          },
+          "contentFormat": {
+            "type": "string",
+            "enum": [
+              "tiptap",
+              "markdown"
+            ],
+            "description": "Format of `content`. Defaults to \"markdown\" (rendered subset plus `@[Name](id)` / `#[label](topic-id)` mention pills). Use \"tiptap\" for full rich content, e.g. a doc containing `{ type: \"mention\", attrs: { id: userIdOrEmailOrIdentityId, label: displayName } }`."
+          },
+          "attachmentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxItems": 25,
+            "description": "Attachment IDs from prior `naumu_request_attachment_upload` calls. Each must be a successfully-uploaded pending attachment in this graph (1-hour TTL). Up to 25 per message."
+          },
+          "invokeAgent": {
+            "type": "boolean",
+            "description": "Set true to summon @Naumu on this message unconditionally (mention-equivalent), even in threads where auto-response is paused. Required whenever the post must be committed to the graph (work-log entries, status updates). @Naumu processes in the background; poll naumu_read_thread. Defaults to false: plain append, no agent turn."
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_add_participants",
+      "description": "Add space members to a Naumu thread as participants. This is how you loop someone into a conversation so they actually get notified: each newly added person gets an \"added you to this thread\" notification and a \"has joined the conversation\" system note, and the thread lands in their inbox. Text @-mentions in naumu_post_message do NOT notify or add non-participants — after posting a handoff or a message addressed to someone, add them here. Pass userIds (UUIDs) from naumu_list_members or naumu_get_thread participantDetails; emails are not accepted. Adding is idempotent — already-present participants are skipped silently.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "description": "The thread ID to add participants to. You must be able to manage this thread."
+          },
+          "userIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 25,
+            "description": "User ids (UUIDs) of space members to add, from naumu_list_members or naumu_get_thread."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "viewer"
+            ],
+            "description": "Thread role for the added participants. Defaults to editor (can post); viewer is read-only."
+          }
+        },
+        "required": [
+          "threadId",
+          "userIds"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_read_thread",
+      "description": "Read messages from a Naumu thread. Returns paginated history ordered newest-first, or oldest-first when you pass `after`; each message carries a `status` (`processing` while @Naumu is still composing, `complete` when done). Use this to pick up an answer after naumu_ask returns status \"processing\", or to read what naumu_delegate produced. Use `before` (timestamp ms) to page further back, or `after` (timestamp ms) to catch up on what arrived since you last looked. To wait for the next message instead of re-reading on a timer, use naumu_wait_for_activity. Default page size 50, max 200. Agent messages carry `memoryScope.line`, a one-line statement of which Memory scope the answer used; surface it under the answer. Audio attachments are transcribed by Naumu at post time: read `attachments[].transcription` (plus `transcriptionSummary` and `transcriptionStatus`) straight from the message instead of downloading and transcribing the file. To read or download any other attachment, pass its `attachments[].id` to naumu_get_attachment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "description": "The thread ID to read from."
+          },
+          "before": {
+            "type": "number",
+            "description": "Unix timestamp in milliseconds. Returns messages strictly older than this. Omit for the newest page."
+          },
+          "after": {
+            "type": "number",
+            "description": "Unix timestamp in milliseconds. Returns only messages newer than this, oldest-first. Mutually exclusive with `before`."
+          },
+          "afterId": {
+            "type": "string",
+            "description": "Message id that goes with `after` - the `latestId` from naumu_wait_for_activity. Only meaningful alongside `after`. With it, messages sharing the `after` millisecond are compared by id instead of being skipped."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Page size, default 50, max 200."
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_wait_for_activity",
+      "description": "Wait for the next messages in a Naumu thread. The call blocks for up to `timeoutSec` seconds server-side and returns the moment something new arrives, so this is the cheap way to attend a thread - use it instead of calling naumu_read_thread on a timer.\n\nReturns `{ messages, latest, latestId, timedOut }`. `messages` is oldest-first and each one carries `senderKind`: \"self\" (you), \"user\" (a human), \"agent\" (a bot or @Naumu), \"system\" (a system notice). Reply only to \"user\" messages unless your task says otherwise; ignore \"agent\" and \"system\" ones.\n\nTo keep attending, loop: call again with `after` = the `latest` you just received AND `afterId` = the `latestId`. Passing both is what stops two messages written in the same millisecond from being lost. Never reuse the old cursor after receiving messages - you will get the same ones back. If `timedOut` is true and `messages` is empty, nothing happened: call again with the same cursor.\n\nIf a returned message has `status: \"processing\"`, the reply is still being written - it is a placeholder that gets UPDATED in place, so waiting again will never show you the final text. Re-read that message with naumu_read_thread instead (pass `after` = its timestamp minus 1, or page back to it) until its status is `complete`.\n\nGet your first `after`/`afterId` from the newest message in naumu_read_thread. Before composing a reply call naumu_typing, then post it with naumu_post_message.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "description": "The thread ID to wait on. You must be a participant."
+          },
+          "after": {
+            "type": "number",
+            "description": "Unix timestamp in milliseconds. Only messages newer than this count. Use the `latest` value from the previous call, or the newest message timestamp from naumu_read_thread."
+          },
+          "afterId": {
+            "type": "string",
+            "description": "Message id that goes with `after` - the `latestId` from the previous call. Only meaningful alongside `after`. With it, messages sharing the `after` millisecond are compared by id instead of being skipped, so nothing written in the same millisecond is lost."
+          },
+          "timeoutSec": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 20,
+            "description": "Seconds to block before returning empty, 1 to 25, default 20."
+          },
+          "excludeSelf": {
+            "type": "boolean",
+            "default": true,
+            "description": "Ignore your own messages (senderKind \"self\") when deciding whether something new arrived. Default true - keep it on so your own reply does not end the next wait immediately."
+          }
+        },
+        "required": [
+          "threadId",
+          "after"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_whoami",
+      "description": "Return who the calling key is, so you can bootstrap before the first real operation. A bot identity key returns its Identity row (id, graphId, name, instructions, allowedTools) plus its curated MCP tool manifest. A user API key returns `kind: \"user\"` with userId, name, and email - a person spans many graphs, so resolve a specific graph via naumu_list_graphs. The live tool list is already available from tools/list, so it is not repeated here. No arguments. Always available regardless of the permission grid.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_list_threads",
+      "description": "List threads sorted by last activity (newest first), for self-discovery before deciding which to engage. With a user API key, pass `graphId` to list threads you can see in that space (resolve it via naumu_list_graphs). Pass `nodeId` alongside `graphId` to list only the conversations tied to that node (attached, or that created/modified it). With a bot identity key, omit `graphId` to list threads in your own graph — each row carries an `isParticipant` flag (TRUE means you were explicitly invited and your replies fan out via webhook). Page back with `cursor` set to the oldest `lastActivityAt` from the previous page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "Graph (space) ID. Required for user API keys; omit for bot identity keys (defaults to your own graph)."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Scope the listing to conversations tied to this node. Requires `graphId`."
+          },
+          "cursor": {
+            "type": "integer",
+            "description": "Unix timestamp ms — returns threads with `lastActivityAt` strictly older than this. Omit for the newest page."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Page size, default 50, max 200."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_list_topics",
+      "description": "List a space's real topics — the filing destinations you can hand to the `topicIds` param of naumu_delegate or naumu_ask when creating a thread. Filing a new thread into one or more topics makes it visible to those topics' members from birth (instead of the default private thread). Each row carries { id, name, visibilityMode, memberCount, openToWeb }; use the id values in `topicIds`. Topics have no separate description field. The virtual #misc bucket is not a real topic and is omitted; archived topics are omitted because they can't be tagged. Resolve `graphId` via naumu_list_graphs first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The space (graph) id to list topics for."
+          }
+        },
+        "required": [
+          "graphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_create_topic",
+      "description": "Create a new topic (filing destination) in a space; use when the topic a thread or note should be filed into does not exist yet. Check `naumu_list_topics` first so you reuse an existing topic instead of creating a near-duplicate. Returns the created topic `{id, name, color, visibilityMode, archived, openToWeb, webParticipation, createdAt, createdBy, memberIds, isMember}` - pass the returned `id` to the `topicIds` param of naumu_delegate, naumu_ask or naumu_create_note to file work into it. Name rules (validated before the call): lowercase letters, numbers and \"-\" only (channel-slug style, e.g. \"core-team\"), at most 50 characters, and never one of the reserved names all, everyone, naumu, here, misc, hidden, space, shared-with-you. Names are unique per space, case-insensitively. Requires admin rights on the space: editors and bot identities always get a 403, so do not attempt this on behalf of a bot. `visibilityMode` defaults to \"open\"; the caller is always added as a member, and `openToWeb` cannot be combined with a \"closed\" topic. Pass `notifyOn: \"people\"` for topics that will mostly hold automated posts - work logs, alerts, imports, scheduled digests - so members are not notified on every API/MCP or agent message; a person writing in a thread there, or tagging someone, still notifies. Resolve `graphId` via naumu_list_graphs first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The space (graph) id to create the topic in."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Topic name in channel-slug form: lowercase letters, numbers and \"-\" only, max 50 chars, not a reserved name. Unique per space (case-insensitive)."
+          },
+          "color": {
+            "type": "string",
+            "description": "Optional named color token for the topic badge. Omit unless the user asked for a specific color."
+          },
+          "visibilityMode": {
+            "type": "string",
+            "enum": [
+              "default",
+              "open",
+              "closed"
+            ],
+            "description": "Who can see and join the topic. \"open\" (the default) lets any space member join, \"default\" is the space default, \"closed\" is invite-only."
+          },
+          "openToWeb": {
+            "type": "boolean",
+            "description": "Expose the topic publicly on the web. Invalid together with visibilityMode \"closed\"."
+          },
+          "webParticipation": {
+            "type": "string",
+            "enum": [
+              "participate",
+              "view-only"
+            ],
+            "description": "What public web visitors may do when openToWeb is true. Defaults to \"view-only\"."
+          },
+          "notifyOn": {
+            "type": "string",
+            "enum": [
+              "everyone",
+              "people"
+            ],
+            "description": "Who the topic notifies. \"everyone\" (the default) notifies members on every message. \"people\" keeps automated posts silent: a thread with no human-typed message that is filed only in people-only topics never notifies, badges or enters anyone's Focus until a person writes in it or someone is tagged. Use \"people\" for work-log, alert, import and digest topics."
+          },
+          "memberIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "User ids to add as topic members (get them from naumu_list_members). Ids that are not current space members are silently dropped. The caller is always added regardless."
+          }
+        },
+        "required": [
+          "graphId",
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_get_thread",
+      "description": "Fetch a single thread, including the human participant roster (`participantDetails` — userId, name, image) and bot roster (`identityParticipants` — id, name, isSystem). Use this when `naumu_list_threads` surfaced a candidate and you want to know exactly who is in it before posting. Pair with `naumu_read_thread` for message history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "description": "The thread ID to fetch."
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_request_attachment_upload",
+      "description": "Request a presigned S3 upload URL to attach a file - pass either `threadId` or `noteId` for where the upload will land, then PUT the bytes directly to the returned URL. Same flow Naumu users use for file uploads. User API keys and OAuth sessions must also pass `graphId` (a user spans many spaces; resolve it via `naumu_list_graphs`); bot keys resolve it automatically.\n\nTwo destinations, two follow-up calls:\n• Thread: presign with `threadId` → PUT the bytes → call `naumu_post_message` with the returned `attachmentId` in `attachmentIds`.\n• Note: presign with `noteId` → PUT the bytes → call `naumu_note_append` (or any note write tool) with `![alt](attachment://<attachmentId>)` in the markdown. That single call binds the upload, embeds it inline as the note's canonical media node, and files it into the space's Files & Media library - the same syntax works for images, video, audio, and other files, dispatched by the upload's MIME type.\n\nTo attach media to a graph node, upload into a thread that originated or modified that node - files surface on the node via its threads; there is no separate node-attachment flow.\n\nPer-MIME size caps apply: 10MB for types the agent reads whole (image, text, PDF, office docs), otherwise the space plan's umbrella cap (50MB free, 500MB team, 1GB max). Audio takes the plan cap, NOT the 10MB agent-read budget - it is transcribed on upload and only the transcript reaches an agent, so a multi-hour recording is a legitimate attachment. Over-cap requests are refused with HTTP 413 before any URL is minted, and the size is re-checked at bind time against the object that actually landed - so an oversized upload is refused there too, not silently accepted.\n\nReturns `{ attachmentId, uploadUrl, method, requiredHeaders, expiresAt }`. Use these EXACTLY:\n• `method` is \"PUT\".\n• Send every header in `requiredHeaders`. It carries BOTH `Content-Type` and `Content-Length`, and both are load-bearing: `Content-Length` is signed INTO the URL, so the body must be exactly that many bytes or S3 answers 403. PUT the whole file as one fixed-length body - do not stream it, do not use chunked transfer encoding, and do not send a different byte count than the `fileSize` you declared here.\n• Do NOT add an Authorization header - the URL itself is the auth.\n• Do NOT log `uploadUrl` - it is a bearer capability for the duration of the TTL.\n• `expiresAt` is a Unix-ms timestamp; the pending attachment vanishes at that moment whether or not you uploaded. Bind it (post the message or embed the note reference) before then or the upload orphans.\n\nServer-side checks at bind time enforce that the attachment was uploaded by you, in this graph, for this thread/note - you cannot reuse an upload across destinations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_get_attachment",
+      "description": "Read a chat attachment. Pass the `attachmentId` from a message's `attachments[].id` in naumu_read_thread (its `url` field works too - the id is extracted from it), and this resolves it into a short-lived download URL for the actual bytes.\n\nReturns a JSON text block with `{ attachmentId, downloadUrl, expiresInSeconds, note }`. Use `downloadUrl` EXACTLY as given:\n• GET it with no Authorization header - the URL itself is the auth, and adding one makes S3 answer 403.\n• It expires about 15 minutes after this call. Fetch it now; re-call this tool for a fresh URL rather than holding one.\n• Do not log it, quote it back to the user, or store it - it is a bearer capability for its whole lifetime.\n\nWhen the attachment is an image (or a video or PDF that has a generated poster), a downsized preview is also returned inline as an image block, so a visual attachment can often be understood without fetching anything. The preview is a thumbnail, not the original - fetch `downloadUrl` when you need full resolution or the exact file.\n\nAudio attachments do not need this tool for their contents: Naumu transcribes them at post time and naumu_read_thread returns the text as `attachments[].transcription` on the message - use that instead of downloading and transcribing the file.\n\nAccess is checked the same way it is for a person: you only resolve attachments in threads you can already read.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "attachmentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Attachment id, from `attachments[].id` on a message returned by naumu_read_thread. A full or relative download URL is also accepted - the id is extracted from its last path segment."
+          }
+        },
+        "required": [
+          "attachmentId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_add_reaction",
+      "description": "Add an emoji reaction to a message in a thread you are participating in; use for lightweight acknowledgement instead of posting a message. Idempotent - calling twice with the same emoji is a no-op (use `naumu_remove_reaction` to undo). Returns `{ ok, messageId, emoji, alreadyExisted, reactionCount, reactions }` so you can confirm the state without re-reading the thread; `alreadyExisted: true` means the reaction was already on the message and the call was a no-op.\n\nWhen to react vs. when to post a message:\n• React (no message) for lightweight acknowledgement (👀, ✅, 👍), appreciation (❤️, 🙌), laughter (😂), or \"I saw this\".\n• Post a message for direct questions, clarification, important corrections, or final results - situations where words are required.\n• For long tasks: react 👀 first to acknowledge, optionally post a short \"On it - I'll report back\" if the work will take >20s, do the work, then post the final result.\n• Ignore casual human banter, side-conversations someone else already answered, or anything where you would only say \"ok\"/\"nice\"/\"lol\".\n\nUse at most one reaction per message unless explicitly useful. Reactions are social backpressure relief, not a sparkle-confetti channel.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "description": "Thread containing the message. You must be a participant."
+          },
+          "messageId": {
+            "type": "string",
+            "description": "The message to react to."
+          },
+          "emoji": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Emoji character (e.g. \"👀\", \"✅\", \"❤️\"). Custom-emoji shortcodes are NOT supported here - pass a real Unicode emoji."
+          }
+        },
+        "required": [
+          "threadId",
+          "messageId",
+          "emoji"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_remove_reaction",
+      "description": "Remove your own emoji reaction from a message; use to walk back an acknowledgement you previously added. Idempotent - calling on a reaction you never added is a no-op. Pair with `naumu_add_reaction` (e.g. you reacted 👀 to start a task and want to clear it after a final result message lands). Returns `{ ok, messageId, emoji, alreadyExisted, reactionCount, reactions }` - `alreadyExisted: false` means there was nothing to remove and the call was a no-op.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "description": "Thread containing the message. You must be a participant."
+          },
+          "messageId": {
+            "type": "string",
+            "description": "The message to remove your reaction from."
+          },
+          "emoji": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Emoji character to remove (must match what you originally reacted with)."
+          }
+        },
+        "required": [
+          "threadId",
+          "messageId",
+          "emoji"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_typing",
+      "description": "Show or hide your \"is typing…\" pill in a thread; use to signal that you are composing a reply. Call with `state: \"start\"` the moment you decide to compose a reply (before any LLM call), and the server holds the pill alive - re-broadcasting on a short interval - until you stop, post a message, or the lease cap (~5 min) fires. You do NOT need to refresh on a timer; that's the lease's job.\n\nThe pill clears automatically when:\n• you call this tool with `state: \"stop\"`\n• you call `naumu_post_message` for the same thread (cleared on commit)\n• the lease cap expires\n\nUse `start` whenever you start work, even if you might end up not replying - call `stop` if you decide NOT to post. Calling `start` while a lease is already active renews it (resets the cap), so a long-running run can call `start` again as a heartbeat without breaking the indicator. You must be a participant of the thread.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "description": "The thread ID to set typing in. You must be a participant."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop"
+            ],
+            "description": "\"start\" acquires/renews the lease; \"stop\" ends it and clears the pill immediately."
+          }
+        },
+        "required": [
+          "threadId",
+          "state"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_note_read",
+      "description": "Read the current contents of a note as markdown, with its title and `connections` (the graph nodes the note is tied to); use before editing so you know what you're working with. `naumu_note_find_replace` and the section-based tools (`naumu_note_insert`, `naumu_note_replace_section`, `naumu_note_delete_section`) anchor on text/headings present in the live doc.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "The note (Thought) ID"
+          }
+        },
+        "required": [
+          "noteId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_note_append",
+      "description": "Append markdown blocks to the end of a note; use for additive note writing that never touches existing content. Other participants see your colored cursor while the write lands. Markdown supports headings (1-3), bold/italic/code, lists, blockquotes, code blocks, links, and tables. To embed media, write `![alt](attachment://<attachmentId>)` as a sole-line image - the id must come from `naumu_request_attachment_upload` presigned with this same `noteId`. The one syntax covers images, video, audio, and other files, dispatched by the upload's MIME type into the note's canonical media node; an unresolvable or wrong-note id fails the whole write with a 400 naming the bad id. An id already embedded in the note can be repeated safely without re-uploading.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "The note (Thought) ID to append to"
+          },
+          "markdown": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Markdown content to append at the end of the note"
+          }
+        },
+        "required": [
+          "noteId",
+          "markdown"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_note_insert",
+      "description": "Insert markdown content into a note immediately after a named section; use to add content under a specific heading without rewriting it. The section ends at the next heading of equal-or-higher level (or end of doc). 404 if no heading matches `headingText` exactly - call `naumu_note_read` first to see the live structure. To embed media, write `![alt](attachment://<attachmentId>)` as a sole-line image - the id must come from `naumu_request_attachment_upload` presigned with this same `noteId`. The one syntax covers images, video, audio, and other files, dispatched by the upload's MIME type; an unresolvable or wrong-note id fails the whole write with a 400 naming the bad id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "The note (Thought) ID"
+          },
+          "headingText": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact text of the heading whose section the new content follows"
+          },
+          "markdown": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Markdown content to insert at the end of that section"
+          }
+        },
+        "required": [
+          "noteId",
+          "headingText",
+          "markdown"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_note_replace_section",
+      "description": "Replace the body under a named heading with new markdown; use to rewrite one section of a note while leaving the rest intact. By default the heading row itself is preserved (set `keepHeading: false` to drop it too). 404 if no heading matches. To embed media, write `![alt](attachment://<attachmentId>)` as a sole-line image - the id must come from `naumu_request_attachment_upload` presigned with this same `noteId`. The one syntax covers images, video, audio, and other files, dispatched by the upload's MIME type; an unresolvable or wrong-note id fails the whole write with a 400 naming the bad id. An id already embedded elsewhere in the note can be repeated safely without re-uploading.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "The note (Thought) ID"
+          },
+          "headingText": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact text of the heading anchoring the section"
+          },
+          "markdown": {
+            "type": "string",
+            "description": "Replacement markdown for the section body"
+          },
+          "keepHeading": {
+            "type": "boolean",
+            "description": "Whether to keep the heading row itself. Default true."
+          }
+        },
+        "required": [
+          "noteId",
+          "headingText",
+          "markdown"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_note_delete_section",
+      "description": "⚠ DESTRUCTIVE: remove a heading row plus its body (down to the next heading of equal-or-higher level); ONLY use when the user explicitly asks to drop a section. Anything inside that section is gone - there is no per-call undo. If you're unsure which heading they meant, call `naumu_note_read` first to see the current structure. Returns 404 if `headingText` does not exactly match any live heading.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "The note (Thought) ID"
+          },
+          "headingText": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact text of the heading whose section will be deleted"
+          }
+        },
+        "required": [
+          "noteId",
+          "headingText"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_note_replace",
+      "description": "⚠ DESTRUCTIVE: replace the entire note content with new markdown; ONLY use when the user explicitly asks to rewrite/replace the whole note. Any concurrent human edits made during the call are silently overwritten. For additive work prefer `naumu_note_append`. For section-level edits use `naumu_note_replace_section`. For inline tweaks use `naumu_note_find_replace`. Read with `naumu_note_read` first if you weren't the last writer. To embed media, write `![alt](attachment://<attachmentId>)` as a sole-line image - the id must come from `naumu_request_attachment_upload` presigned with this same `noteId`. The one syntax covers images, video, audio, and other files, dispatched by the upload's MIME type; an unresolvable or wrong-note id fails the whole write with a 400 naming the bad id. Ids already embedded in the note (read them back via `naumu_note_read`) can be repeated safely without re-uploading.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "The note (Thought) ID"
+          },
+          "markdown": {
+            "type": "string",
+            "description": "New markdown content for the entire note"
+          }
+        },
+        "required": [
+          "noteId",
+          "markdown"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_note_find_replace",
+      "description": "Literal find/replace within a note's text content; use for mid-paragraph tweaks the section-based tools can't target. Marks (bold, italic, code, etc.) are preserved on the surrounding text. ⚠ The match is literal-substring across every text leaf in the doc; an overly generic `find` (e.g. \" a \") can rewrite the doc unrecognizably. Pick a phrase distinctive enough to land where you mean. By default replaces every occurrence; set `all: false` for first-only. Returns `{ replacements }` so you can sanity-check the count. `replace` can embed media by containing `![alt](attachment://<attachmentId>)` as a sole-line image - the id must come from `naumu_request_attachment_upload` presigned with this same `noteId`; an unresolvable or wrong-note id fails the whole write with a 400 naming the bad id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "The note (Thought) ID"
+          },
+          "find": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Substring to search for. Literal - no regex."
+          },
+          "replace": {
+            "type": "string",
+            "description": "Replacement string. May be empty to delete the match."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Replace all occurrences (default true). Pass false to replace only the first."
+          }
+        },
+        "required": [
+          "noteId",
+          "find",
+          "replace"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_note_batch",
+      "description": "Apply several edits to ONE note in a single write. This is the preferred way to make more than one change to the same note: the whole list runs in one document transaction, so readers see one update event instead of one per edit, and you pay one round trip instead of N. Each entry mirrors a single-op note tool - `append` {markdown}, `insertAfter` {heading, markdown}, `replaceSection` {heading, markdown, keepHeading?}, `deleteSection` {heading}, `replace` {markdown}, `findReplace` {find, replace, all?} - and they run in the order given, each seeing the result of the one before. Max 20 ops. All-or-nothing: the batch is rehearsed first, so if any op fails (most often a heading that does not exist) the note is left completely untouched and the error names the failing index. Media works as in the single-op tools: write `![alt](attachment://<attachmentId>)` on its own line, with an id presigned by `naumu_request_attachment_upload` for this same `noteId`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "description": "The note (Thought) ID to edit"
+          },
+          "ops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "append",
+                    "insertAfter",
+                    "replaceSection",
+                    "deleteSection",
+                    "replace",
+                    "findReplace"
+                  ],
+                  "description": "Which edit to perform."
+                },
+                "markdown": {
+                  "type": "string",
+                  "description": "Markdown payload. Required for append, insertAfter, replaceSection, replace."
+                },
+                "heading": {
+                  "type": "string",
+                  "description": "Target heading text. Required for insertAfter, replaceSection, deleteSection. Accepts the markdown form (\"## Title\") or the bare text."
+                },
+                "keepHeading": {
+                  "type": "boolean",
+                  "description": "replaceSection only: keep the heading row and replace just its body (default true)."
+                },
+                "find": {
+                  "type": "string",
+                  "description": "findReplace only: literal substring to search for."
+                },
+                "replace": {
+                  "type": "string",
+                  "description": "findReplace only: replacement string. May be empty to delete the match."
+                },
+                "all": {
+                  "type": "boolean",
+                  "description": "findReplace only: replace every occurrence (default true)."
+                }
+              },
+              "required": [
+                "op"
+              ],
+              "additionalProperties": false,
+              "description": "One edit in the batch."
+            },
+            "minItems": 1,
+            "maxItems": 20,
+            "description": "Edits to apply, in order. Max 20."
+          }
+        },
+        "required": [
+          "noteId",
+          "ops"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_create_note",
+      "description": "Create a note in a graph, optionally with its full content already in place. Pass `markdown` to create the note and its body in a single call - the preferred path for imports and for any content you already hold. Returns the new note row including its `id`; use `naumu_note_append` / `naumu_note_replace` for LATER edits, not to fill in content you could have passed here. The returned row is the note as it stood BEFORE the body write landed, so its content may read as empty - the write still succeeded, do not retry the call or re-append the body. `attachment://` refs are not accepted in create-time `markdown`: upload the file after the note exists and embed it with a note write tool. Bots can only create notes in their own graph, and a bot-created note is private (participants only) unless `sharedWithSpace` is set true. Bots cannot file notes into topics - a bot passing `topicIds` is rejected (bots hold no topic membership); use `sharedWithSpace` instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID to create the note in"
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional title for the note"
+          },
+          "markdown": {
+            "type": "string",
+            "description": "Full initial note content as markdown. Provide it here to create the note with its content in a single call - preferred for imports; do not restate large content through extra edit calls."
+          },
+          "sharedWithSpace": {
+            "type": "boolean",
+            "description": "Share the note with everyone in the space. Omit (or false) to keep it private to its participants."
+          },
+          "topicIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "description": "File the note into these topics (get ids from naumu_list_topics), making it visible to those topics' members. Not available to bots."
+          }
+        },
+        "required": [
+          "graphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_list_schema_violations",
+      "description": "Audit a graph against its schema. By default returns a compact summary: total counts plus, for each violation kind, its count and up to 5 example nodes (id/label/type/message) — small enough not to flood the client. Violation kinds: parent_missing (schema expects a parent edge that does not exist), parent_multiple (more than one parent edge where one is expected), parent_mismatch (parent edge has wrong target type or relation label), parent_not_backbone (an edge uses a backbone/parent relation but is not stored as a backbone edge, so the subtree stays off the hierarchy), unknown_relation (edge uses a relation not in the schema), invalid_connection_target (edge connects to a type the schema does not allow for this source), unknown_type (node carries a type no longer in the schema), disconnected (node heads a group with no backbone path to the main tree). To see every node for one kind, pass `kind` to filter; `limit` caps how many rows are returned (examples in the default summary, or full rows when `kind` is set). Use for audits, import-verification, and CI-style checks after batch writes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Drill into one violation kind (e.g. \"parent_not_backbone\"). Returns the full list of nodes with that kind, up to `limit`, instead of the summary."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Max rows to return. When `kind` is set, caps the full drill-down list (default: all). Otherwise caps example nodes per kind in the summary (default: 5)."
+          }
+        },
+        "required": [
+          "graphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_list_dense_nodes",
+      "description": "Return nodes whose child count (children via parent edges; mesh cross-links don't count) is ≥ minConnections, grouped by type; use for /restructure hub detection. Each row includes `same_typed_child_count` - the number of children of the SAME type as the node (the Naumu hub-pattern signal) and `connection_count` - its total children. Sort the response by `same_typed_child_count` descending and route any node with ≥10 same-typed children through a mini-hub split. Pass `nodeTypes` (comma-separated) to restrict to a subset (e.g. [\"Type A\",\"Type B\"]). Cheap to call - runs a single Cypher aggregation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "minConnections": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Minimum number of children (parent edges; mesh cross-links excluded). Typical: 10 for hub detection, 11 to count only hubs that exceed the round-4 ≤10 threshold."
+          },
+          "nodeTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional list of node types to restrict the scan to."
+          }
+        },
+        "required": [
+          "graphId",
+          "minConnections"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_list_node_connections",
+      "description": "Return a single node's edges (non-system) with the connected node on the other side; use during /restructure to confirm mini-hub candidates and verify reparenting outcomes. Filter with `edgeType` (relation label) and `direction` (\"in\" | \"out\" | \"both\", default both). Response: `{ node: {id,label,type}, edges: [{relation, direction, isParent, other: {id,label,type}}] }`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "The node ID to inspect"
+          },
+          "edgeType": {
+            "type": "string",
+            "description": "Restrict to a specific relation label (e.g. \"ASSOCIATED_WITH\"). Case-insensitive; non-alphanum chars are normalized."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out",
+              "both"
+            ],
+            "description": "Edge direction filter - \"in\" (incoming), \"out\" (outgoing), \"both\" (default)."
+          }
+        },
+        "required": [
+          "graphId",
+          "nodeId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_reparent",
+      "description": "Atomically swap a node's parent edge; use to move a child under a different parent (e.g. during /restructure to reparent children under newly-created mini-hubs). Deletes any existing `isParent: true` edges on the node and creates a new one to `newParentId` with relation `newRelation`. Preserves the node's id, content, attributes, and embedding - does NOT trigger embedding regeneration because only the parent edge changes. Idempotent: if the node already has the requested parent edge, response is `status: \"skipped\"`. Response shape: `{nodeId, oldParentId, newParentId, newRelation, status: \"moved\" | \"skipped\"}`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "The child node to reparent"
+          },
+          "newParentId": {
+            "type": "string",
+            "description": "The new parent node id"
+          },
+          "newRelation": {
+            "type": "string",
+            "description": "The new parent edge relation label (e.g. \"PART_OF\"). Must be valid per the schema for (child.type, relation, parent.type)."
+          }
+        },
+        "required": [
+          "graphId",
+          "nodeId",
+          "newParentId",
+          "newRelation"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_batch_reparent",
+      "description": "Reparent 1-25 nodes onto a shared `newParentId` with the same `newRelation`; use to move a same-typed cluster under a freshly-created mini-hub in /restructure. Same semantics as `naumu_reparent` per-node: atomic swap of the isParent edge, preserves id/content/attributes/embedding, no re-embedding. Idempotent per node (already-parented nodes return `status: \"skipped\"`). Per-node response array: `[{nodeId, oldParentId, newParentId, status: \"moved\" | \"skipped\" | \"error\", error?}]`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The graph ID"
+          },
+          "newParentId": {
+            "type": "string",
+            "description": "Parent node id every nodeId in the batch will be parented to"
+          },
+          "newRelation": {
+            "type": "string",
+            "description": "Parent edge relation label (must be valid per schema for child.type → parent.type)"
+          },
+          "nodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 25,
+            "description": "1–25 child node ids to reparent under `newParentId`"
+          }
+        },
+        "required": [
+          "graphId",
+          "newParentId",
+          "newRelation",
+          "nodeIds"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "search",
+      "description": "Search across all of the knowledge graphs (spaces) you can access and return the most relevant nodes. Returns `{ results: [{ id, title, url }] }`. Pass each result `id` to the `fetch` tool to read the full node. (This is the cross-space entry point for ChatGPT/Deep Research; within a single space, `naumu_search` exposes more controls.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "A short contiguous phrase — an entity name, label, or ID. The text half matches it verbatim as a case-insensitive substring; the semantic half matches meaning."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "fetch",
+      "description": "Fetch the full contents of a node returned by the `search` tool. Pass the result `id` verbatim (format `<graphId>:<nodeId>`). Returns `{ id, title, text, url }` where `text` is the node content plus its type, attributes, and connections.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A resource id from a previous `search` result, in the form `<graphId>:<nodeId>`."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_admission_status",
+      "description": "Show who can auto-join a Naumu space (graph) and who is waiting for approval: the whitelisted emails (people who join the moment they sign in with that email), the auto-join domain wildcards, and the count of pending join requests. When there are pending requests, this also returns the full list (who requested, their email, git-email hint, and message) so you can act on them with naumu_resolve_join_request. Use it during repo init to review or seed access, or whenever the user asks who has access to a space or who is asking to join.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The space (graph) ID to inspect admission for. You must be a member of this space."
+          }
+        },
+        "required": [
+          "graphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_whitelist_members",
+      "description": "Whitelist emails so those people auto-join a Naumu space (graph) the moment they sign in with that email. Use this during repo init: after you scrub git history, present the curated list of collaborators to the user, and get their explicit confirmation, call this with the confirmed emails. It is silent - it sends no invite emails, it just pre-authorizes those addresses. Returns which entries were created and which were skipped (already whitelisted or already members). Set repoInit true when this call is part of the repo init flow.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The space (graph) ID to whitelist emails for. You must be a member of this space."
+          },
+          "emails": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "The emails to whitelist. Each becomes an exact-match auto-join entry. Present these to the user and get confirmation before calling."
+          },
+          "repoInit": {
+            "type": "boolean",
+            "description": "Set true when this whitelist is being seeded as part of the repo init flow, so onboarding is tracked correctly."
+          }
+        },
+        "required": [
+          "graphId",
+          "emails"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_resolve_admission",
+      "description": "The call a coding agent makes right after connecting when a repo's .naumu references a space the user is not yet a member of. It evaluates whether the user can join and does it: outcome is joined-whitelist or joined-wildcard (the user is now a member - proceed), already-member (nothing to do), request-created (a join request was just filed and is awaiting a member's approval), or request-pending (a request was already open). When the response also carries reason 'seat-limit' on a request-created/request-pending outcome, the user WOULD have auto-joined via a whitelist/domain match but the space is at its seat limit - so their access is pending an admin approving them or upgrading the plan; relay that specific reason honestly, do not just say 'no match'. Pass gitEmailHint from `git config user.email` so a matching whitelist or domain rule can admit them. Relay the outcome to the user honestly: say plainly whether they joined or are waiting for approval - never imply access that is still pending.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The space (graph) ID referenced by the repo .naumu file that the user wants to join."
+          },
+          "gitEmailHint": {
+            "type": "string",
+            "description": "The email from `git config user.email`, used to match whitelist entries and auto-join domains."
+          }
+        },
+        "required": [
+          "graphId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "naumu_resolve_join_request",
+      "description": "For a member resolving a pending join request surfaced by naumu_admission_status. Approve to add the requester to the space as a member, or deny to reject the request. Get the requestId from naumu_admission_status's pending list, and confirm the decision with the user before calling since approving grants access.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "The space (graph) ID the request is for. You must be a member of this space."
+          },
+          "requestId": {
+            "type": "string",
+            "description": "The pending join request ID, taken from naumu_admission_status."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "deny"
+            ],
+            "description": "approve adds the requester as a member; deny rejects the request."
+          }
+        },
+        "required": [
+          "graphId",
+          "requestId",
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "naumu",
+    "version": "0.18.3"
+  },
+  "protocolVersion": null,
+  "instructions": "The Naumu MCP server gives structured access to Naumu knowledge graphs (also called spaces). Prefer these tools over WebFetch whenever the user mentions a naumu.ai URL — Naumu pages are client-rendered React, so WebFetch returns an empty shell with no data.\n\nGetting information about a space: use naumu_ask. It puts your question to the @Naumu agent (which has full read access and inspects the graph for you) and returns a synthesised, node-grounded answer with the exact source node ids and a confidence hint, in a single call. It is the authoritative answer for what is in a space, what is new or recently changed, how something works, or any summary - present it and its sources directly. Do NOT then re-read the graph yourself with naumu_get_schema, naumu_filter, naumu_get_node or fetch to verify or sanity-check the answer: that repeats work naumu_ask already did and is dramatically slower (it can turn a 40-second answer into minutes). Trust the answer and its cited sources. Reach for a granular read only to fetch one specific node the answer pointed to, or for a need naumu_ask genuinely cannot serve (naumu_search to locate nodes by meaning, naumu_list_threads + naumu_read_thread for conversation history). To wait for the next reply in a thread, use naumu_wait_for_activity instead of re-reading it on a timer - it blocks server-side until a new message lands. Recording the question and answer as a visible conversation in the space is expected and useful, so do not avoid naumu_ask to prevent creating a thread. To hand @Naumu work to carry out in the background (add knowledge, make changes, record a status update), use naumu_delegate.\n\nIMPORTANT: graphId is a UUID (e.g. \"0464cbfa-60ca-41b3-ac8f-bbeb8243a193\"). The value in the URL right after /spaces/ is a slug (e.g. \"naumu-0464cbfa\"), NOT the graphId. You must resolve the slug to a graphId first.\n\nHow to resolve a slug → graphId:\nCall naumu_list_graphs and find the graph whose 'slug' field matches the URL segment. Use that graph's 'id' as graphId for every other tool. Cache it for the rest of the conversation; the user will likely paste more URLs for the same space.\n\nURL → tool mapping (the value after /spaces/ is the slug — resolve it first):\n- naumu.ai/spaces/{slug}                          → naumu_list_graphs (resolve), then naumu_get_schema for an overview\n- naumu.ai/spaces/{slug}/nodes/{nodeId}           → naumu_list_graphs (resolve), then naumu_get_node\n- naumu.ai/spaces/{slug}/chat/{threadId}          → naumu_list_graphs (resolve), then naumu_read_thread\n- Other panel URLs (notes, views, conversations, members, settings, schema, heat, health, changelog) have no dedicated tool — fall back to naumu_get_node with the relevant id, or naumu_get_schema for the space-level question.\n\nLocalhost URLs (http://localhost:3000/spaces/{slug}/...) follow the same shape — resolve the slug the same way. The MCP backend host is configured separately; the URL the user pastes is just for parsing structure.",
+  "durationMs": 5590,
+  "stderr": "[mcp] connected to smallprint-placeholder as user key (smallprint-placeholder)\n"
+}

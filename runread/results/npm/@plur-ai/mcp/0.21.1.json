@@ -1,0 +1,733 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@plur-ai/mcp",
+  "version": "0.21.1",
+  "integrity": {
+    "dist": "sha512-DA2HxiW4GotIicPAbpkNiHk/fX5E0THHt6Iz+Jnx+nkwzdkxeDyWGLAD2HCr+i9zkrmXtIiUaHsJULfYkjm2pQ==",
+    "installed": "sha512-DA2HxiW4GotIicPAbpkNiHk/fX5E0THHt6Iz+Jnx+nkwzdkxeDyWGLAD2HCr+i9zkrmXtIiUaHsJULfYkjm2pQ=="
+  },
+  "bin": "node_modules/@plur-ai/mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-18T11:52:46.617Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "plur_learn",
+      "description": "Create an engram — record a reusable learning, preference, or correction. A write is never suppressed by similarity: exact content-hash duplicates NOOP, and anything merely SIMILAR is written and reported back in `dedup.near_duplicates` (closest existing engrams, their cosine scores, and a preview of each neighbour's own statement — read them before moving on; that is what they are for) so you can supersede or merge deliberately. High similarity is a reason to look, not a decision — cosine cannot tell a duplicate from a correction of it. Multi-agent note: in an orchestration that spawns subagents, have the PARENT session own plur_learn writes — spawned subagents should return their findings as text for the parent to persist, rather than each calling plur_learn (tool availability is not guaranteed in every subagent context). See plur-ai/plur#281.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "statement": {
+            "type": "string",
+            "description": "ONE assertion, written so someone who was not there can act on it. Route the rest to the field whose job it is: the mechanism that makes it true goes in `rationale`, where it came from in `source`, when it applies in `tags`/`domain`. An \"and also\" means a second engram. Good: \"Never name a client unless the user names them first, say the customer.\" Typical 100-300 chars; past ~600 you are carrying another field content. Length is a symptom, not the rule."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "behavioral",
+              "terminological",
+              "procedural",
+              "architectural"
+            ],
+            "description": "Category of the engram"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Namespace, e.g. global, project:myapp"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Domain tag, e.g. software.deployment"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Searchable keyword tags — contribute to BM25/embedding recall, so concrete keywords pay off"
+          },
+          "rationale": {
+            "type": "string",
+            "description": "The mechanism that makes the statement true, and therefore the condition under which it would STOP being true. One sentence. \"Because the user said so on <date>\" is a citation, not a mechanism: that belongs in `source`. This text is indexed, so a real mechanism also carries concrete nouns a future query can match. NOTE: constraints render without rationale (plur-ai/plur#1144), so a mechanism a prohibition needs the model to weigh must stay in the statement."
+          },
+          "source": {
+            "type": "string",
+            "description": "Origin of this knowledge (URL, conversation ref, etc.)"
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "Always-load flag. If true, this engram bypasses the keyword-relevance gate at injection time. Use sparingly: meta-rules, safety conventions, core operating principles only."
+          },
+          "commitment": {
+            "type": "string",
+            "enum": [
+              "exploring",
+              "leaning",
+              "decided",
+              "locked",
+              "draft"
+            ],
+            "description": "How firmly the user has committed to this belief (default: leaning). `draft` marks the engram as pending human approval: core stores and RECALLS it normally but NEVER injects it (#1141), so an unapproved rule cannot shape agent behaviour. Retrieval stays open because reviewing something requires reading it."
+          },
+          "locked_reason": {
+            "type": "string",
+            "description": "Why this engram is locked (only meaningful when commitment=locked)"
+          },
+          "valid_from": {
+            "type": "string",
+            "description": "ISO date (YYYY-MM-DD) the knowledge becomes valid — inject/recall skip the engram before this date (#347)"
+          },
+          "valid_until": {
+            "type": "string",
+            "description": "ISO date (YYYY-MM-DD) the knowledge expires — inject/recall skip the engram after this date. Set this for any time-bound fact (offers, deadlines, temporary endpoints). When omitted, an explicit expiry phrase in the statement (\"valid until 31 May 2026\") is auto-parsed and echoed back (#347)"
+          },
+          "supersedes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Engram IDs this statement intentionally replaces (#240). Writes relations.supersedes on the new engram and the reverse superseded_by edge on each local target. Supersedes-linked pairs are skipped by tension scans — an intentional update is not a contradiction. Use when updating a standing fact (new version, changed rule) rather than contradicting it."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Session this write belongs to (from plur_session_start). Resolves the session default scope (incl. mid-session plur_session_scope changes) when no explicit scope is passed. Optional when one session is open. With none or several open and no session_id, NO session default applies: the write takes the unscoped path (#243, E7)."
+          },
+          "measured_under": {
+            "type": "object",
+            "description": "Measurement context for numeric or benchmark-derived claims (#869). Records the conditions under which the asserted value was measured — model, source_type, hardware, dataset, date. When present, the tension scanner does not treat two measurements from the same store taken under different configurations as a contradiction (the skipped pair is reported in the scan result). Omit for non-numeric engrams.",
+            "properties": {
+              "model": {
+                "type": "string",
+                "description": "Model or system variant (e.g. \"claude-opus-4\", \"gpt-4o\")"
+              },
+              "source_type": {
+                "type": "string",
+                "description": "Source environment type (e.g. \"local-git\", \"gitlab\", \"bench\", \"production\")"
+              },
+              "hardware": {
+                "type": "string",
+                "description": "Hardware or runtime tier (e.g. \"M3-Pro-36GB\", \"A100\", \"CI-runner\")"
+              },
+              "dataset": {
+                "type": "string",
+                "description": "Dataset or workload identifier (e.g. \"LongMemEval-S\", \"plur-bench-2026-Q2\")"
+              },
+              "date": {
+                "type": "string",
+                "description": "ISO date (YYYY-MM-DD) the measurement was taken"
+              }
+            }
+          },
+          "attribution": {
+            "type": "object",
+            "description": "Who is answerable for this memory (#961). Every sub-field optional; OMIT rather than guess — a memory with no agent is honest, one with an invented agent is worse than none. Set asserted_by to \"unidentified\" when nobody is identified, rather than leaving it out: absence cannot be told apart from a memory written before this existed.",
+            "properties": {
+              "asserted_by": {
+                "type": "string",
+                "description": "Who or what asserted it. Any address: a local name, a Decentralized Identifier, or \"unidentified\"."
+              },
+              "runtime": {
+                "type": "object",
+                "description": "The software writing this. Usually known, so usually worth setting.",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                }
+              },
+              "model": {
+                "type": "object",
+                "description": "The model behind the statement, if one was involved. Prompt TEXT is never stored, only a hash.",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "prompt_id": {
+                    "type": "string"
+                  },
+                  "prompt_version": {
+                    "type": "string"
+                  },
+                  "prompt_sha256": {
+                    "type": "string"
+                  }
+                }
+              },
+              "tool": {
+                "type": "object",
+                "description": "An extractor or importer, with its version.",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                }
+              },
+              "on_behalf_of": {
+                "type": "string",
+                "description": "The party the runtime acted for."
+              }
+            }
+          },
+          "claim_class": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "documented",
+              "structural",
+              "asserted",
+              "inferred",
+              "revised"
+            ],
+            "description": "What KIND of claim this is (#963), and the most useful single field for anyone later deciding how much to trust it. Use \"asserted\" when a PERSON stated it outright, \"inferred\" when YOU worked it out, \"documented\" when you took it from prose someone wrote, \"observed\" for a record of something that happened, \"structural\" when read off the shape of an artifact, \"revised\" for a rewrite. Omit only when it genuinely cannot be determined."
+          },
+          "license": {
+            "type": "string",
+            "description": "Which licence governs reuse of this memory, as an SPDX-style identifier such as \"cc-by-4.0\" or \"apache-2.0\". Set it only when the user has actually said which licence applies — do NOT guess one. Left unset, a default applies that nobody chose, and a provenance record reports it as unchosen rather than presenting it as a decision."
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public",
+              "template"
+            ],
+            "description": "Who this memory is shared with beyond its scope. Defaults to \"private\": EXCLUDED from every exported pack and from shared git sync. The default does NOT keep a team-scope write on this machine — with visibility omitted, a write whose scope is a team store (e.g. group:acme/eng) still goes to that team store. Only an EXPLICIT \"private\" keeps such a write local (stored here with a warning, never sent to the team store). Set \"public\" only when the user has said this is shareable with others — it is their decision, not yours. Without \"public\" nothing an agent writes can appear in a pack."
+          }
+        },
+        "required": [
+          "statement"
+        ]
+      },
+      "annotations": {
+        "title": "Learn",
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "plur_recall",
+      "description": "Search engrams by topic. Default mode is hybrid (BM25 + local embeddings via RRF) — set mode:\"keyword\" for BM25-only. Local search plus, when a configured enterprise store is part of the current project/work — or when the scope (or the default scope this session registered itself) is a personal user: scope and a remote store is configured with that same scope (exact match, case-insensitive; that rule adds only the matching store, though a store set to dial: always or a trusted project remote can still add others) — one live timeout-bounded recall per remote host merged in (a `remote_stores` block + warning appears when a host is degraded; no host configured or implicated = fully local). Note: a project-scope filter also returns personal-family engrams (local, global, user:*, agent:*); an explicit scope=global recall returns ALL personal-family engrams — wider than scope=global INJECT, which is targeted to the global namespace only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query to find relevant engrams"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "hybrid",
+              "keyword"
+            ],
+            "description": "Search mode — hybrid (default): BM25 + embeddings via RRF; keyword: BM25-only (faster, embeddings-independent). budget, caller_session_id and include_episodes apply to hybrid mode only — in keyword mode use limit to bound results."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Filter by scope (also includes global)"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Filter by domain prefix"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results to return (default 20)"
+          },
+          "budget": {
+            "type": "object",
+            "description": "Budget constraints for sub-agents. Hybrid mode only — ignored when mode:\"keyword\".",
+            "properties": {
+              "max_tokens": {
+                "type": "number"
+              },
+              "max_results": {
+                "type": "number"
+              }
+            }
+          },
+          "caller_session_id": {
+            "type": "string",
+            "description": "Session ID of calling agent for budget enforcement. Hybrid mode only — ignored when mode:\"keyword\"."
+          },
+          "include_episodes": {
+            "type": "boolean",
+            "description": "If true, include linked episode summaries for each engram (SP2 episodic anchoring). Hybrid mode only — ignored when mode:\"keyword\"."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Session this recall belongs to (from plur_session_start). Its default scope (incl. mid-session plur_session_scope changes) sets the remote dialing context when no explicit scope filter is passed. Optional when one session is open (#243); with none or several open and no session_id, no session default applies."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "title": "Recall",
+        "readOnlyHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "plur_feedback",
+      "description": "Rate an engram's usefulness — trains injection relevance over time. Supports single or batch mode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Engram ID (single mode)"
+          },
+          "signal": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative",
+              "neutral"
+            ],
+            "description": "Feedback signal (single mode)"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Store scope to target directly, e.g. \"primary\" for the local store or a remote scope like \"group:plur/plur-ai/engineering\". Required when the same engram ID exists in multiple stores (#850)."
+          },
+          "signals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Engram ID"
+                },
+                "signal": {
+                  "type": "string",
+                  "enum": [
+                    "positive",
+                    "negative",
+                    "neutral"
+                  ]
+                },
+                "scope": {
+                  "type": "string",
+                  "description": "Store scope to target directly (optional, same semantics as top-level scope)."
+                }
+              },
+              "required": [
+                "id",
+                "signal"
+              ]
+            },
+            "description": "Batch feedback signals"
+          }
+        }
+      },
+      "annotations": {
+        "title": "Feedback",
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "plur_forget",
+      "description": "Retire an engram by ID or search term — marks it as no longer active without deleting history",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Exact engram ID to retire"
+          },
+          "search": {
+            "type": "string",
+            "description": "Search term to find engram to retire"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this is being retired. Recorded in the history log and on the engram (#959). Say what changed, not just that something did."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Which store holds it (#831). Ids are minted per store, so one id can name several unrelated engrams. Pass \"primary\" to stay on disk — the local primary store and any local secondary stores, never a remote — or a remote scope (e.g. \"group:plur/plur-ai/engineering\") to target that server. A scope matching no configured store is rejected, not guessed at. Omit it and an id resolving in two places is refused."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Forget",
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "plur_packs_uninstall",
+      "description": "Uninstall an engram pack by name — removes the pack and all its engrams",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Pack name to uninstall (use plur_packs_list to see names)"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "annotations": {
+        "title": "Uninstall pack",
+        "destructiveHint": true,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "plur_validate_meta",
+      "description": "Test a meta-engram template against engrams from a new domain — updates confidence and domain_coverage. A meta-engram that fails validation in a third domain is demoted (top → mop) or, below top level, RETIRED.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "meta_engram_id": {
+            "type": "string",
+            "description": "META- engram ID to validate"
+          },
+          "test_domain": {
+            "type": "string",
+            "description": "Domain to test against (e.g. medicine)"
+          },
+          "llm_base_url": {
+            "type": "string",
+            "description": "OpenAI-compatible API base URL"
+          },
+          "llm_api_key": {
+            "type": "string",
+            "description": "API key for the LLM"
+          },
+          "llm_model": {
+            "type": "string",
+            "description": "Model name (default: gpt-4o-mini)"
+          }
+        },
+        "required": [
+          "meta_engram_id",
+          "test_domain",
+          "llm_base_url",
+          "llm_api_key"
+        ]
+      },
+      "annotations": {
+        "title": "Validate meta-engram",
+        "destructiveHint": true,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "plur_status",
+      "description": "Return system health — running version, engram count, episode count, pack count, storage root. Optionally filter engram counts by domain prefix and/or creation date.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "Only count engrams whose domain starts with this prefix (e.g. \"meridian\")"
+          },
+          "created_after": {
+            "type": "string",
+            "description": "ISO-8601 date (YYYY-MM-DD). Only count engrams learned on or after this date."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Status",
+        "readOnlyHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "plur_receipt",
+      "description": "Counted report of what your memory retrieved for you: engrams stored, how many were retrieved and how often, which are most relied on, and how much of the store is dormant. Local and read-only; every figure is directly counted, never estimated. IMPORTANT when relaying to the user: `activation_rate` is COVERAGE over the logging window (≈ how much of the store was surfaced), NOT a quality or effectiveness score — it is naturally low and FALLS as more engrams are added, so never present it as \"memory is N% effective\". A `summary` line is included; prefer relaying that. NOT plur_provenance: this counts usage across the whole store; plur_provenance says where a single memory came from.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "number",
+            "description": "Restrict to the last N days (integer). Omit for all recorded history."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Memory receipt",
+        "readOnlyHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "plur_doctor",
+      "description": "Diagnose the PLUR ENGINE (embedder, hybrid search, remote-store auth) — not hook/MCP wiring. Reports whether the embedding model loaded, whether hybrid search is fully operational, and — for any configured enterprise/remote store — whether its auth is valid (probes /api/v1/me and decodes token expiry), so a dead or soon-to-expire token surfaces instead of hiding behind a \"healthy\" report. Run this first when recall feels off or team engrams stop syncing. Does NOT check .cursor/mcp.json, .cursor/hooks.json, or the live MCP tool count — for that, run the `plur doctor` CLI command in a terminal (a different, more thorough check with the same name).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "retry": {
+            "type": "boolean",
+            "description": "If true, reset cached embedder failure state and retry the model load before reporting"
+          },
+          "rerank_eval": {
+            "type": "boolean",
+            "description": "If true and a reranker is configured (PLUR_RERANKER), run the per-store self-eval gate (#451): probes synthesized from this store's own engrams compare rerank-on vs RRF-only ordering. Verdict is cached in the store and advisory — it never auto-disables reranking. Costs one cross-encoder pass per probe (~20 probes)."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Doctor",
+        "readOnlyHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "plur_session_start",
+      "description": "Start a session — inject relevant engrams for your task. Call at the beginning of every session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "What you are working on (triggers engram injection)"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags to filter injected engrams"
+          },
+          "default_scope": {
+            "type": "string",
+            "description": "Default scope for plur_learn calls this session when no explicit scope is provided. Only set this if you want ALL engrams to route to a specific store. Usually, leave unset and pass scope per-engram based on relevance."
+          }
+        },
+        "required": [
+          "task"
+        ]
+      },
+      "annotations": {
+        "title": "Session Start",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "plur_session_end",
+      "description": "End a session. BEFORE calling this tool, review the conversation and extract learnings:\n\n1. Corrections the user made (\"no, use X not Y\") → type: behavioral\n2. Preferences stated (\"always X\", \"never Y\") → type: behavioral\n3. Codebase patterns discovered (naming, structure, conventions) → type: architectural\n4. Technical facts learned (API quirks, config, gotchas) → type: procedural\n5. Terminology defined or clarified → type: terminological\n\nInclude at least one engram_suggestion if ANYTHING was learned. An empty suggestions array means nothing worth remembering happened — this should be rare.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "What happened in this session (1-3 sentences)"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Session ID from plur_session_start"
+          },
+          "engram_suggestions": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "statement": {
+                      "type": "string",
+                      "description": "A concise, reusable assertion. Write it as advice to your future self."
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "behavioral",
+                        "terminological",
+                        "procedural",
+                        "architectural"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "statement"
+                  ]
+                }
+              ]
+            },
+            "description": "Learnings from this session. Preferred shape is {statement: \"...\", type?: \"...\"}; bare strings are also accepted and treated as the statement. If the whole parameter arrives as one plain string it is ONE suggestion (never split on commas); send several as a JSON array. Review the conversation for corrections, preferences, patterns, and technical facts before calling."
+          }
+        },
+        "required": [
+          "summary",
+          "engram_suggestions"
+        ]
+      },
+      "annotations": {
+        "title": "Session End",
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "plur_tensions",
+      "description": "Tension lifecycle (#181). Default: list persisted tension records (unresolved first). scan:true runs an LLM contradiction scan, persists NEW detections as records, and skips already-recorded pairs. Lifecycle actions: action:\"confirm\" (real conflict), action:\"dismiss\" (false positive — pair suppressed from future scans), action:\"resolve\" + winner:<engram_id> (loser engram retired). Scan requires OPENAI_API_KEY or OPENROUTER_API_KEY env var, or explicit llm_base_url + llm_api_key args.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "description": "Filter by scope"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Filter by domain prefix"
+          },
+          "scan": {
+            "type": "boolean",
+            "description": "Run an active contradiction scan using an LLM judge. New detections are persisted as tension records; recorded pairs (any status) are skipped. Requires OPENAI_API_KEY or OPENROUTER_API_KEY env var, or explicit llm_base_url + llm_api_key args."
+          },
+          "persist": {
+            "type": "boolean",
+            "description": "Persist scan detections as tension records (default true). Set false for a dry-run scan that also ignores the recorded-pair suppress list."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "confirm",
+              "dismiss",
+              "resolve"
+            ],
+            "description": "Lifecycle action on a persisted tension record (requires id). confirm: mark real. dismiss: false positive, suppress the pair. resolve: pick winner (requires winner), the losing engram is retired."
+          },
+          "id": {
+            "type": "string",
+            "description": "Tension record id (T-YYYY-MMDD-NNN) for action mode"
+          },
+          "winner": {
+            "type": "string",
+            "description": "Engram id that wins the tension (action:\"resolve\" only). The other engram is retired."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "detected",
+              "confirmed",
+              "dismissed",
+              "resolved",
+              "all"
+            ],
+            "description": "List-mode status filter. Default: unresolved records (detected + confirmed)."
+          },
+          "llm_base_url": {
+            "type": "string",
+            "description": "OpenAI-compatible API base URL for scan mode (e.g. https://api.openai.com/v1)"
+          },
+          "llm_api_key": {
+            "type": "string",
+            "description": "API key for the LLM (scan mode)"
+          },
+          "llm_model": {
+            "type": "string",
+            "description": "Model name for scan mode (default: gpt-4o-mini)"
+          },
+          "min_confidence": {
+            "type": "number",
+            "description": "Minimum confidence threshold for scan mode (0–1, default: 0.7)"
+          },
+          "max_pairs": {
+            "type": "number",
+            "description": "Maximum candidate pairs to evaluate in scan mode (default: 50)"
+          },
+          "batch_size": {
+            "type": "number",
+            "description": "Pairs judged per LLM call in scan mode (default: 5). Set to 1 for sequential single-pair judging."
+          },
+          "temporal_discount": {
+            "type": "boolean",
+            "description": "Multiply judge confidence by a days-apart ladder (same day x1.0 ... 15+ days x0.3) in scan mode (#240). Overrides the config default (tensions.temporal_discount, off by default). The judge prompt already carries recorded dates; enable this only when date-aware judging alone leaves too many temporal-evolution false positives."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Tensions",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "plur_tensions_purge",
+      "description": "Purge all conflict relations from local engrams — removes accumulated false positives from the legacy tension-detection system",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Purge Tensions",
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "plur_admin",
+      "description": "Gateway to the 31 PLUR operations that are not top-level tools under the current profile (collapsed into one dispatch tool so Cursor's ~40-tool-per-workspace limit is not exhausted by PLUR alone). A plur_* name missing from tools/list means it moved HERE — not that the MCP is unavailable. Calling convention: { action: \"<tool name>\", args: { ...that tool's normal arguments } } — same arguments, same validation, same result as a direct call. Example: { action: \"plur_recall_hybrid\", args: { query: \"deploy checklist\" } }. Send { action: \"help\" } for every action's one-line description and argument schema. Actions, grouped — inject: plur_inject, plur_inject_hybrid · packs: plur_packs_discover, plur_packs_export, plur_packs_install, plur_packs_list, plur_packs_preview · stores: plur_stores_add, plur_stores_list · sync: plur_sync, plur_sync_status · other: plur_capture, plur_episode_to_engram, plur_extract_meta, plur_history, plur_ingest, plur_learn_batch, plur_meta_engrams, plur_outbox, plur_pin, plur_profile, plur_promote, plur_provenance, plur_recall_hybrid, plur_report_failure, plur_rescope, plur_scopes_discover, plur_session_scope, plur_similarity_search, plur_suggest_scope, plur_timeline.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Which underlying plur_* tool to invoke, or \"help\" to list every action with its description and argument schema"
+          },
+          "args": {
+            "type": "object",
+            "description": "Arguments for the chosen action, matching that tool's normal input schema",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "annotations": {
+        "title": "Admin dispatch",
+        "readOnlyHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "plur-mcp",
+    "version": "0.21.1"
+  },
+  "protocolVersion": null,
+  "instructions": "PLUR is your persistent memory. Corrections, preferences, and conventions persist across sessions as engrams.\n\nPLUR is a GLOBAL tool — one MCP server, one engram store (~/.plur/), available in every project. Multi-project scoping uses domain/scope fields on engrams, not separate installations.\n\nTOOL PROFILE: by default only the core session tools are exposed directly (lean profile). Every other plur_* operation is reachable via plur_admin: { action: \"<tool name>\", args: {...} } — same arguments and validation as a direct call. A plur_* name missing from tools/list means it MOVED behind plur_admin, not that the MCP is down — never conclude the server is unavailable from a name-lookup miss. Discover the live surface with plur_admin { action: \"help\" } (every action with description + argument schema) or plur_doctor (tool_surface). PLUR_TOOL_PROFILE=full exposes everything directly.\n\nSESSION LIFECYCLE:\n- With hooks installed (plur init): engrams are injected automatically on first message. You do NOT need to call plur_session_start — it happens via hooks. Just call plur_session_end before the conversation ends.\n- Without hooks: call plur_session_start at the start, plur_session_end at the end.\n\nDURING the session:\n- When user corrects you (\"no, use X not Y\") → call plur_learn immediately\n- When user states a preference (\"always X\", \"never Y\") → call plur_learn immediately\n- When you discover a codebase convention or pattern → call plur_learn\n\nEVERY REPLY: End every reply with one short line: `Memory — recalled N · used: ENG-…, ENG-… · written: ENG-…` (recalled as a count; used and written as ids only, no statements), or `Memory — none`. Only count/list ids you actually saw this turn; never invent an id. Give details only if the user asks.\n\nSCOPE SELECTION (set scope PER engram, by content — not once per session):\nA single session produces engrams that belong in different stores. Choose the\n\"scope\" on EACH plur_learn call from what the engram is about:\n- Team / engineering / architecture / shared-convention knowledge → the matching\n  team store scope (e.g. \"group:<org>/<team>\"). plur_session_start lists the\n  scopes this install can write to — use them.\n- Personal preferences, your workflow, or details specific to one project → the\n  default/local scope (or \"project:<name>\").\n- \"global\" is for genuinely cross-project facts only (language gotchas, tool\n  quirks). Do NOT let team-relevant knowledge fall back to \"global\" by omitting\n  scope — with a team store configured it never reaches the team store. If no\n  scope fits, prefer the project/local default over global.\n\nOPTIONAL but improves quality:\n- Call plur_feedback to rate which injected engrams helped (positive/negative)\n- Call plur_recall before answering factual questions — the answer may be in memory\n\nDo not ask permission to use these tools — they are your memory system.\n\nFOLDERS WHERE PLUR IS OFF: the user can turn memory off for a folder (plur folders set <folder> --off). In that folder the memory tools (learn, recall, inject, session start/end, capture, feedback, receipt, …) read and write nothing and answer { plur: \"off\", message } instead — not an error. The same answer, with reason \"folder-map-unreadable\", comes back when the user's folder map is broken, and with reason \"workspace-unknown\" when your client's workspace roots could not be fetched (that one retries by itself on the next call). Carry on without memory and do not retry or work around it; only the user can turn it back on, from a terminal (the message names the command). For a broken map the message names the line and the problem; when it carries a repair_command (plur folders repair --yes), tell the user what is wrong, show them repair_summary (what the repair changes), and run that command only after they agree. plur_status and plur_doctor keep working.\n\nSetup: If this is a fresh install, suggest the user run: npx @plur-ai/mcp init\nThis installs hooks for automatic injection + session management. One-time global setup.",
+  "durationMs": 14542,
+  "stderr": ""
+}

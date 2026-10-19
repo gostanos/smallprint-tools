@@ -1,0 +1,2538 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@boost-jp/nagio-mcp-server",
+  "version": "0.22.0",
+  "integrity": {
+    "dist": "sha512-2Qjwkc4+sHiibiAoltaqUQgxE+mMZZk7kYwJJ6T/CuYEqVf4hE/tVLxicivzEFk6oHqBbleIHufTAFUjPNE+Ng==",
+    "installed": "sha512-2Qjwkc4+sHiibiAoltaqUQgxE+mMZZk7kYwJJ6T/CuYEqVf4hE/tVLxicivzEFk6oHqBbleIHufTAFUjPNE+Ng=="
+  },
+  "bin": "node_modules/@boost-jp/nagio-mcp-server/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.4.3",
+    "sdk": "1.30.0",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-18T13:15:24.318Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "list_projects",
+      "description": "本人が使える組織・プロジェクトの一覧と、現在のプロジェクト（リクエストの X-Nagio-Project ヘッダに使われる値）を返す。\n\n**全組織・全プロジェクトで使えるパーソナル API キー向けのツールです。** プロジェクトごとに 1 キーが固定されるプロジェクト API キーでは、本人という概念が無いため一覧が空になることがある （その場合は currentProject を確認すれば十分で、このツールを呼ぶ必要はない）。\n\n各要素の `project` フィールドが `use_project` にそのまま渡せる `org/project` 形式の識別子。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "use_project",
+      "description": "以降のリクエストで対象にするプロジェクトを切り替える（この MCP サーバープロセス内だけの設定で、NAGIO_PROJECT_ID の既定値を上書きする。永続化はされず、サーバーを再起動すると NAGIO_PROJECT_ID に戻る）。\n\nproject には project_id か、list_projects が返す `org/project` 形式の識別子のどちらかを渡す。\n\n**プロジェクト API キー（`at_` 接頭辞）は発行時の 1 プロジェクトに固定されており切り替えられない。** 複数プロジェクトを使う場合はパーソナル API キー（`pat_` 接頭辞）を発行すること。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "description": "project_id、または list_projects が返す `org/project` 形式の識別子"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "list_specs",
+      "description": "仕様書（観点生成・テストケース設計の入力になる markdown ドキュメント）の一覧を取得する（Viewer 以上で利用可、読み取り専用）。タイトルのフリーテキスト検索・ページングに対応する。応答には本文（content）を含まないため、内容の確認には get_spec を使う。各項目の currentVersion が確定済みの現行版の番号（未 backfill は 0）。**draft（未確定の編集）の有無は一覧では分からない** ―― backend が N+1 を避けるため一覧では算出しておらず、hasDraft/draftVersion は応答に現れない（false/0 と同じ扱い）。draft の有無と過去版の内容は get_spec（specState/specVersion）で仕様書ごとに確認する。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "description": "ページ番号（1 始まり）。デフォルト 1",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "description": "1 ページの件数。デフォルト 20",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "searchWord": {
+            "description": "タイトルのフリーテキスト検索",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_spec",
+      "description": "仕様書の詳細（本文 markdown 込み）を取得する（Viewer 以上で利用可、読み取り専用）。nagio-cases スキルで AC・仕様からケースを設計する際の入力として使う。本文が大きすぎる場合（5 万文字超）は切り詰め、応答の truncated=true で判別できる。省略時は確定済みの current 版の本文を返す（編集中の draft があってもそれは返らない）。specState を指定すると、その版（current/draft/past）の title・content で返す。応答の revision が「返した本文がどの版か」、specDocument の currentVersion / hasDraft / draftVersion が「現行版と未確定の編集の有無」を表す。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "specDocumentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "仕様書 ID"
+          },
+          "specState": {
+            "description": "指定した版（current/draft/past）の内容で返す。REVISION_STATE_PAST の場合は specVersion も指定する。省略時は REVISION_STATE_CURRENT と同じ（確定済みの現行版）。許容値: REVISION_STATE_CURRENT / REVISION_STATE_DRAFT / REVISION_STATE_PAST",
+            "type": "string",
+            "enum": [
+              "REVISION_STATE_CURRENT",
+              "REVISION_STATE_DRAFT",
+              "REVISION_STATE_PAST"
+            ]
+          },
+          "specVersion": {
+            "description": "specState=REVISION_STATE_PAST のときに対象の版番号を指定する",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "specDocumentId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "create_spec",
+      "description": "仕様書（markdown）を新規作成する（Editor 権限が必要）。作成した内容はその場で確定し、currentVersion=1 の現行版になる（draft は作られず confirm_spec は不要）。以後の編集は update_spec が draft を作り、confirm_spec で確定する。content は 20 万文字まで。タイトルの重複チェックは無いため、既存の仕様書を更新したい場合は list_specs で探してから update_spec を使うこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "仕様書のタイトル"
+          },
+          "content": {
+            "description": "本文（markdown）。省略すると空の仕様書を作る",
+            "type": "string",
+            "maxLength": 200000
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "update_spec",
+      "description": "仕様書を更新する（Editor 権限が必要）。**部分更新**: 指定しなかったフィールドは現在の値を維持する（内部で現在値を読み取ってからマージし、backend の UpdateV1 へ送る。backend の UpdateV1 は title と content の両方を必須で受け取り、送らなかった側を空文字で上書きするため）。\n\n更新内容は確定済みの current 版を書き換えず draft 版に入る: draft が無ければ version=currentVersion+1 の draft が作られ、既にあればその draft が上書きされる（draft は 1 仕様書につき常に最大 1 件で、続けて何度更新しても version は増えない）。そのため応答の currentVersion は更新前のまま変わらない ―― これは正常で、更新した内容は draft 側にある（get_spec の hasDraft/draftVersion、または specState=REVISION_STATE_DRAFT で確認できる）。draft を現行にするには confirm_spec を呼ぶ。\n\n**2 回目以降の部分更新は 1 回目の編集を保ったままマージする**（マージ元は draft があれば draft、無ければ current）。既知の制約: 取得と更新の間に他の更新が挟まると、その更新は上書きされうる（楽観的排他制御は無い）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "specDocumentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "更新対象の仕様書 ID"
+          },
+          "title": {
+            "description": "省略時は現在の値を維持する",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "content": {
+            "description": "本文（markdown）。省略時は現在の本文を維持する（空文字を渡すと本文を空にできる）",
+            "type": "string",
+            "maxLength": 200000
+          }
+        },
+        "required": [
+          "specDocumentId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "confirm_spec",
+      "description": "仕様書の draft（update_spec で作られた未確定の編集）を current に確定する（Editor 権限が必要）。旧 current は past に退き、以後 get_spec の specState=REVISION_STATE_PAST + specVersion で参照できる。確定後は currentVersion が draft の版番号に上がり、hasDraft が false になる。**draft が無い仕様書に対して呼ぶと not_found エラー**（何も起きないのではなくエラーになる）。draft の有無は get_spec の hasDraft で事前に確認できる。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "specDocumentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "確定対象の仕様書 ID"
+          }
+        },
+        "required": [
+          "specDocumentId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "comment_spec",
+      "description": "仕様書に人のレビューコメントを追記する（Viewer 以上で利用可）。コメントが 1 件追加されるだけで、仕様書の内容も版も変わらない（追記専用。コメント時点の current の版に紐づく）。書いたコメントは list_spec_comments で読め、resolve_spec_comment で解決済みにできる。\n\n**API トークン（NAGIO_TOKEN が at_ で始まるトークン）では実行できない**（permission_denied）。自動化トークンでレビュー痕跡を量産させないという backend の設計方針のため、人間ユーザーのセッショントークンを NAGIO_TOKEN に設定した場合のみ使える。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "specDocumentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "対象の仕様書 ID"
+          },
+          "comment": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000,
+            "description": "コメント本文"
+          }
+        },
+        "required": [
+          "specDocumentId",
+          "comment"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "list_spec_comments",
+      "description": "仕様書に付いたレビューコメントを新しい順で取得する（Viewer 以上で利用可、読み取り専用）。版を跨いで全件返す（コメント時点でどの版が current だったかは応答の revisionId/revisionVersion で分かる）。論理削除されたコメントは含まれない。解決済みのコメントは resolvedAt つきで含まれる。1 件も無ければ空配列を返す（エラーにはならない）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "specDocumentId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "仕様書 ID"
+          }
+        },
+        "required": [
+          "specDocumentId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "resolve_spec_comment",
+      "description": "仕様書のレビューコメントを解決済みにする（Viewer 以上で利用可）。応答の resolvedAt に解決日時が入る。解決済みのコメントも list_spec_comments には残り続ける（一覧から消えるわけではない）。本人以外のコメントも解決できる（削除と違って所有者チェックは無い）。reviewId は list_spec_comments で取得する。\n\n**API トークン（NAGIO_TOKEN が at_ で始まるトークン）では実行できない**（permission_denied）。自動化トークンでレビュー痕跡を量産させないという backend の設計方針のため、人間ユーザーのセッショントークンを NAGIO_TOKEN に設定した場合のみ使える。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reviewId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "解決するコメントの reviewId（list_spec_comments で取得する）"
+          }
+        },
+        "required": [
+          "reviewId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "list_perspective_catalogs",
+      "description": "そのプロジェクトで有効なカタログ（共通 + 追加）を返す。ケースやケース候補に付ける観点名はここから選ぶ。当てはまらなければ新しい名前を付けてよい。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_test_cases",
+      "description": "テストケース一覧を取得する（Viewer 以上で利用可）。suite・観点・実装状況・優先度・レイヤー・タグ・フリーテキストで絞り込み、ページングに対応する。caseNumbers を指定すると TC-{番号} で直接引き当て、ページングを無視して全件返す。hasDraft=true で draft（未確定の編集）を持つケースだけに絞り込める。caseSetState で PJ のケースセットの版（current/draft/past）を指定して、その版の内容で返すこともできる。caseSetState=REVISION_STATE_DRAFT と caseSetDiff を組み合わせると、確定前に『今回増えるケース（ADDED）・改訂されるケース（REVISED）』を列挙できる。\n\n**未承認の自動ケースを探す手段**: kind=TEST_CASE_KIND_AUTOMATED で絞り込み、各要素の approvedAt が未設定のものを確認する。応答の approvedCount で承認済み件数（kind 以外の絞り込みは効かせた集計）が分かる。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "description": "ページ番号（1 始まり）。デフォルト 1",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "description": "1 ページの件数。デフォルト 20",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "suiteId": {
+            "description": "スイート ID で絞り込む。指定したスイート自身と配下すべてのスイートのケースが対象になる（階層は最大 3 階層）",
+            "type": "string"
+          },
+          "perspectives": {
+            "description": "観点名の配列で絞り込む。指定した観点のいずれかを持つケースを返す",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "priority": {
+            "description": "優先度で絞り込む。許容値: PRIORITY_P0 / PRIORITY_P1 / PRIORITY_P2",
+            "type": "string",
+            "enum": [
+              "PRIORITY_P0",
+              "PRIORITY_P1",
+              "PRIORITY_P2"
+            ]
+          },
+          "layer": {
+            "description": "テストレイヤー（粒度）で絞り込む。許容値: TEST_LAYER_UNIT / TEST_LAYER_INTEGRATION / TEST_LAYER_API / TEST_LAYER_E2E",
+            "type": "string",
+            "enum": [
+              "TEST_LAYER_UNIT",
+              "TEST_LAYER_INTEGRATION",
+              "TEST_LAYER_API",
+              "TEST_LAYER_E2E"
+            ]
+          },
+          "verificationMethod": {
+            "description": "検証手段（振る舞い / 見た目）で絞り込む。許容値: VERIFICATION_METHOD_BEHAVIOR / VERIFICATION_METHOD_VISUAL",
+            "type": "string",
+            "enum": [
+              "VERIFICATION_METHOD_BEHAVIOR",
+              "VERIFICATION_METHOD_VISUAL"
+            ]
+          },
+          "kind": {
+            "description": "種別（未選択/手動/自動）で絞り込む。許容値: TEST_CASE_KIND_UNSELECTED / TEST_CASE_KIND_MANUAL / TEST_CASE_KIND_AUTOMATED",
+            "type": "string",
+            "enum": [
+              "TEST_CASE_KIND_UNSELECTED",
+              "TEST_CASE_KIND_MANUAL",
+              "TEST_CASE_KIND_AUTOMATED"
+            ]
+          },
+          "tag": {
+            "description": "タグで絞り込む（完全一致）",
+            "type": "string"
+          },
+          "testTarget": {
+            "description": "テスト対象で絞り込む（完全一致）",
+            "type": "string"
+          },
+          "incompleteOnly": {
+            "description": "true の場合、5 項目（テスト対象・テスト観点・テスト条件・テスト手順・期待値）のいずれかが空のケースだけに絞り込む。既存ケースを埋める作業で対象を取り出すためのフィルタ",
+            "type": "boolean"
+          },
+          "searchWord": {
+            "description": "タイトルのフリーテキスト検索",
+            "type": "string"
+          },
+          "caseNumbers": {
+            "description": "TC-{番号} の番号で直接引き当てる（最大 200 件）。指定時はページングを無視して全件返す",
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "archiveFilter": {
+            "description": "アーカイブ状態で絞り込む。未指定は ACTIVE 相当（アーカイブ済みは返さない）。ただし caseNumbers 指定時の未指定は ALL 扱い（番号からの引き当ては同定操作なのでアーカイブ済みでも返る）",
+            "type": "string",
+            "enum": [
+              "ARCHIVE_FILTER_ACTIVE",
+              "ARCHIVE_FILTER_ARCHIVED",
+              "ARCHIVE_FILTER_ALL"
+            ]
+          },
+          "hasDraft": {
+            "description": "true の場合、draft revision を持つケースだけに絞り込む",
+            "type": "boolean"
+          },
+          "caseSetState": {
+            "description": "PJ のケースセットのどの版（current/draft/past）の内容で返すか。省略時は版を意識しない既定の見せ方。REVISION_STATE_PAST の場合は caseSetVersion も指定する。許容値: REVISION_STATE_CURRENT / REVISION_STATE_DRAFT / REVISION_STATE_PAST",
+            "type": "string",
+            "enum": [
+              "REVISION_STATE_CURRENT",
+              "REVISION_STATE_DRAFT",
+              "REVISION_STATE_PAST"
+            ]
+          },
+          "caseSetVersion": {
+            "description": "caseSetState=REVISION_STATE_PAST のときに対象の版番号を指定する",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "caseSetDiff": {
+            "description": "ケースセットの現行版との差分種別で絞り込む。caseSetState=REVISION_STATE_DRAFT のときのみ意味を持つ。許容値: TEST_CASE_SET_DIFF_ADDED / TEST_CASE_SET_DIFF_REVISED / TEST_CASE_SET_DIFF_UNCHANGED",
+            "type": "string",
+            "enum": [
+              "TEST_CASE_SET_DIFF_ADDED",
+              "TEST_CASE_SET_DIFF_REVISED",
+              "TEST_CASE_SET_DIFF_UNCHANGED"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_test_case",
+      "description": "テストケースの詳細（手順込み）を取得する（Viewer 以上で利用可）。レビューコメントは含まれない（list_case_comments で別途取得する）。自動テストの Approved/Rejected の所見（差し戻し理由）もupdate_case_status の comment 経由で list_case_comments に記録される。基準画像は応答肥大を避けるため URL を返さず、件数と stepSequence の一覧だけを返す。stepSequence の 0 はケース全体・終了時を表す。testCaseId か caseNumber（TC-{番号} の番号）のどちらか一方を指定する。caseSetState を指定すると、その版（current/draft/past）の内容で返す。省略時は現在保存されている生の内容（draft 編集中ならその内容）を返す。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testCaseId": {
+            "description": "テストケース ID",
+            "type": "string"
+          },
+          "caseNumber": {
+            "description": "TC-{番号} の番号。testCaseId 未指定時に使う",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "caseSetState": {
+            "description": "指定した版（current/draft/past）の内容で返す。REVISION_STATE_PAST の場合は caseSetVersion も指定する。省略時は版を意識しない既定の見せ方（hasDraft/draftVersion で draft の有無だけ分かる）。許容値: REVISION_STATE_CURRENT / REVISION_STATE_DRAFT / REVISION_STATE_PAST",
+            "type": "string",
+            "enum": [
+              "REVISION_STATE_CURRENT",
+              "REVISION_STATE_DRAFT",
+              "REVISION_STATE_PAST"
+            ]
+          },
+          "caseSetVersion": {
+            "description": "caseSetState=REVISION_STATE_PAST のときに対象の版番号を指定する",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "search_cases",
+      "description": "自然言語のキーワードでテストケースをタイトル検索する（Viewer 以上で利用可）。list_test_cases のフリーテキスト検索（searchWord）の薄いラッパーで、絞り込み条件を細かく指定せずまず探索したいときに使う。より精密な絞り込みが必要なら list_test_cases を使う。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "検索キーワード（タイトルの部分一致）"
+          },
+          "page": {
+            "description": "ページ番号（1 始まり）。デフォルト 1",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "description": "1 ページの件数。デフォルト 20",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "caseSetState": {
+            "description": "PJ のケースセットのどの版（current/draft/past）の内容で返すか。省略時は版を意識しない既定の見せ方。REVISION_STATE_PAST の場合は caseSetVersion も指定する。許容値: REVISION_STATE_CURRENT / REVISION_STATE_DRAFT / REVISION_STATE_PAST",
+            "type": "string",
+            "enum": [
+              "REVISION_STATE_CURRENT",
+              "REVISION_STATE_DRAFT",
+              "REVISION_STATE_PAST"
+            ]
+          },
+          "caseSetVersion": {
+            "description": "caseSetState=REVISION_STATE_PAST のときに対象の版番号を指定する",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "create_test_case",
+      "description": "テストケースを新規作成する（Editor 権限が必要。API トークンのロールが Editor でないと拒否される）。作成した内容はその場で確定して currentVersion=1 の現行版になる（draft は作られない）。以後の編集は update_test_case が draft を作り、confirm_case_set で PJ のケースセットごと確定する。kind でケース種別（未選択/手動/自動）を指定する。承認は人の判断なので MCP からは操作しない。作成後の種別変更は update_case_status を使う。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "suiteId": {
+            "description": "スイート ID。未所属は省略",
+            "type": "string"
+          },
+          "perspectives": {
+            "description": "観点名の配列。list_perspective_catalogs の名前と一致させると表記ゆれを避けられる。カタログに無い名前も付けられる",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "「〔条件〕で〔操作〕すると〔期待結果〕」の一文"
+          },
+          "testTarget": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "テスト対象。このケースが何を検証するか（画面・API・帳票・バッチ など）。必須"
+          },
+          "verificationPoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "テスト観点（確認内容）。このケース 1 件で何を確かめるかを 1 文で書く。必須。タイトルは「〔条件〕で〔操作〕すると〔期待結果〕」の形なので、その言い換えを書かないこと（どの切り口で確認しているか ―― 境界値・権限×ロール・状態遷移 など ―― を書く）。観点（perspectives）はカタログ由来の切り口の配列で、これとは別の軸"
+          },
+          "description": {
+            "description": "概要（ケースの意図・背景）。5 項目の外側の補助情報",
+            "type": "string"
+          },
+          "preconditions": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テスト条件（事前条件）。必須"
+          },
+          "postConditions": {
+            "description": "事後条件",
+            "type": "string"
+          },
+          "steps": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "description": "操作"
+                },
+                "expectedResult": {
+                  "type": "string",
+                  "description": "期待結果"
+                }
+              },
+              "required": [
+                "action",
+                "expectedResult"
+              ]
+            },
+            "description": "テスト手順と期待値（順番どおりの配列）。必須。各要素は { action: 操作, expectedResult: 期待結果 } のオブジェクト（文字列の配列ではない）"
+          },
+          "stepsVariable": {
+            "description": "ステップ数が実行パス（ループ・条件分岐）によって変わるケースであることの宣言。true にすると Run 詳細のステップ乖離表示を弱める。既定は false",
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "PRIORITY_P0",
+              "PRIORITY_P1",
+              "PRIORITY_P2"
+            ],
+            "description": "優先度。P0=毎リリース必須。許容値: PRIORITY_P0 / PRIORITY_P1 / PRIORITY_P2"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "SEVERITY_CRITICAL",
+              "SEVERITY_MAJOR",
+              "SEVERITY_NORMAL",
+              "SEVERITY_MINOR",
+              "SEVERITY_TRIVIAL"
+            ],
+            "description": "重要度（壊れたときのビジネス影響）。許容値: SEVERITY_CRITICAL / SEVERITY_MAJOR / SEVERITY_NORMAL / SEVERITY_MINOR / SEVERITY_TRIVIAL"
+          },
+          "layer": {
+            "type": "string",
+            "enum": [
+              "TEST_LAYER_UNIT",
+              "TEST_LAYER_INTEGRATION",
+              "TEST_LAYER_API",
+              "TEST_LAYER_E2E"
+            ],
+            "description": "どのテストレイヤーで担保するか（粒度）。許容値: TEST_LAYER_UNIT / TEST_LAYER_INTEGRATION / TEST_LAYER_API / TEST_LAYER_E2E"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "TEST_CASE_KIND_UNSELECTED",
+              "TEST_CASE_KIND_MANUAL",
+              "TEST_CASE_KIND_AUTOMATED"
+            ],
+            "description": "種別（未選択/手動/自動）。承認は MCP から操作できない。許容値: TEST_CASE_KIND_UNSELECTED / TEST_CASE_KIND_MANUAL / TEST_CASE_KIND_AUTOMATED"
+          },
+          "verificationMethod": {
+            "type": "string",
+            "enum": [
+              "VERIFICATION_METHOD_BEHAVIOR",
+              "VERIFICATION_METHOD_VISUAL"
+            ],
+            "description": "何を検証するか（振る舞い / 見た目）。許容値: VERIFICATION_METHOD_BEHAVIOR / VERIFICATION_METHOD_VISUAL"
+          },
+          "automatedBy": {
+            "description": "自動テストコードへの参照パス",
+            "type": "string"
+          },
+          "sourceSpec": {
+            "description": "仕様書の該当箇所への参照",
+            "type": "string"
+          },
+          "tags": {
+            "description": "タグ",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "title",
+          "testTarget",
+          "verificationPoint",
+          "preconditions",
+          "steps",
+          "priority",
+          "severity",
+          "layer",
+          "kind",
+          "verificationMethod"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "update_test_case",
+      "description": "テストケースを更新する（Editor 権限が必要）。**部分更新**: 指定しなかったフィールドは現在の値を維持する（内部で現在値を取得してからマージし、backend の UpdateV1 へ送る）。**承認済み（approvedAt が設定されている）のケースも更新できる**（旧「承認済みは変更セット経由で編集」ガードは版管理の再設計で撤廃された）。更新内容は確定済みの current 版を書き換えず draft 版に入る: draft が無ければ version=currentVersion+1 の draft が作られ、既にあればその draft が上書きされる（draft は 1 ケースにつき常に最大 1 件で、続けて何度更新しても version は増えない）。ただし kind と automatedBy は実装状況のメタデータとして版を作らず、その場で反映される（内容変更と同時に送った場合も kind / automatedBy は即時反映され、内容だけ draft に入る）。そのため応答の currentVersion は更新前のまま変わらない ―― これは正常で、更新した内容は draft 側にある（get_test_case の hasDraft/draftVersion、または caseSetState=REVISION_STATE_DRAFT で確認できる）。draft を current に確定するには confirm_case_set を呼ぶ（確定は PJ のケースセット単位で、ケース 1 件だけを確定する操作は無い）。kind を指定すると種別を切り替えられる（省略時は現在の値を維持する）。**テストの内容（title / precondition / steps / description 等）か automatedBy（紐づくテストコード）が変わる場合、ケース承認は失効する**。kind を自動以外へ変える場合も承認は外れる。承認は人の判断なので MCP からは操作しない。suiteId / tags / perspectives はケースの分類・メタデータであり検証内容そのものではないため、その変更だけでは承認は失効しない。suiteId / tags / perspectives は従来どおり版を作る（承認の失効可否と版が変わるかどうかは別の判定）。既知の制約: 取得と更新の間に他の更新が挟まると、その更新は上書きされうる（楽観的排他制御は無い）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testCaseId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "更新対象のテストケース ID"
+          },
+          "suiteId": {
+            "description": "スイート ID。省略時は現在の値を維持する（空文字を渡すと未所属にできる）",
+            "type": "string"
+          },
+          "perspectives": {
+            "description": "観点名の配列。省略時は現在の値を維持する（空配列を渡すと全て削除できる）。list_perspective_catalogs の名前と一致させると表記ゆれを避けられる。カタログに無い名前も付けられる",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "description": "省略時は現在の値を維持する",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "testTarget": {
+            "description": "テスト対象。省略時は現在の値を維持する",
+            "type": "string",
+            "maxLength": 255
+          },
+          "verificationPoint": {
+            "description": "テスト観点（確認内容）。省略時は現在の値を維持する",
+            "type": "string",
+            "maxLength": 1000
+          },
+          "description": {
+            "description": "概要（ケースの意図・背景）。省略時は現在の値を維持する",
+            "type": "string"
+          },
+          "preconditions": {
+            "description": "テスト条件。省略時は現在の値を維持する",
+            "type": "string"
+          },
+          "postConditions": {
+            "description": "事後条件。省略時は現在の値を維持する",
+            "type": "string"
+          },
+          "steps": {
+            "description": "省略時は現在の手順を維持する。各要素は { action: 操作, expectedResult: 期待結果 } のオブジェクト（文字列の配列ではない）",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "description": "操作"
+                },
+                "expectedResult": {
+                  "type": "string",
+                  "description": "期待結果"
+                }
+              },
+              "required": [
+                "action",
+                "expectedResult"
+              ]
+            }
+          },
+          "stepsVariable": {
+            "description": "ステップ数が実行パスによって変わるケースであることの宣言。省略時は現在の値を維持する",
+            "type": "boolean"
+          },
+          "priority": {
+            "description": "省略時は現在の値を維持する。許容値: PRIORITY_P0 / PRIORITY_P1 / PRIORITY_P2",
+            "type": "string",
+            "enum": [
+              "PRIORITY_P0",
+              "PRIORITY_P1",
+              "PRIORITY_P2"
+            ]
+          },
+          "severity": {
+            "description": "省略時は現在の値を維持する。許容値: SEVERITY_CRITICAL / SEVERITY_MAJOR / SEVERITY_NORMAL / SEVERITY_MINOR / SEVERITY_TRIVIAL",
+            "type": "string",
+            "enum": [
+              "SEVERITY_CRITICAL",
+              "SEVERITY_MAJOR",
+              "SEVERITY_NORMAL",
+              "SEVERITY_MINOR",
+              "SEVERITY_TRIVIAL"
+            ]
+          },
+          "layer": {
+            "description": "省略時は現在の値を維持する。許容値: TEST_LAYER_UNIT / TEST_LAYER_INTEGRATION / TEST_LAYER_API / TEST_LAYER_E2E",
+            "type": "string",
+            "enum": [
+              "TEST_LAYER_UNIT",
+              "TEST_LAYER_INTEGRATION",
+              "TEST_LAYER_API",
+              "TEST_LAYER_E2E"
+            ]
+          },
+          "kind": {
+            "description": "種別（未選択/手動/自動）。省略時は現在の値を維持する。自動以外に変えると承認は外れる。許容値: TEST_CASE_KIND_UNSELECTED / TEST_CASE_KIND_MANUAL / TEST_CASE_KIND_AUTOMATED",
+            "type": "string",
+            "enum": [
+              "TEST_CASE_KIND_UNSELECTED",
+              "TEST_CASE_KIND_MANUAL",
+              "TEST_CASE_KIND_AUTOMATED"
+            ]
+          },
+          "verificationMethod": {
+            "description": "省略時は現在の値を維持する。許容値: VERIFICATION_METHOD_BEHAVIOR / VERIFICATION_METHOD_VISUAL",
+            "type": "string",
+            "enum": [
+              "VERIFICATION_METHOD_BEHAVIOR",
+              "VERIFICATION_METHOD_VISUAL"
+            ]
+          },
+          "automatedBy": {
+            "description": "省略時は現在の値を維持する",
+            "type": "string"
+          },
+          "sourceSpec": {
+            "description": "省略時は現在の値を維持する",
+            "type": "string"
+          },
+          "tags": {
+            "description": "省略時は現在の値を維持する（空配列を渡すと全タグを削除できる）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "testCaseId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "update_case_status",
+      "description": "テストケースの種別と自動テストコードへの参照を変更する（Editor 権限が必要）。ケースの内容（title・手順など）は変えないため draft は作られず、変更はその場で反映される。kind を自動以外へ変えるとケース承認は外れる。automatedBy を変更した場合も承認は外れる。ケース承認は人の判断なので MCP からは操作しない。\n\nkind: 許容値: TEST_CASE_KIND_UNSELECTED / TEST_CASE_KIND_MANUAL / TEST_CASE_KIND_AUTOMATED\n\n応答は { testCase }。testCase.kind / testCase.automatedBy / approvedAt で結果を確認できる。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testCaseId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "対象のテストケース ID"
+          },
+          "kind": {
+            "description": "ケースの種別。許容値: TEST_CASE_KIND_UNSELECTED / TEST_CASE_KIND_MANUAL / TEST_CASE_KIND_AUTOMATED",
+            "type": "string",
+            "enum": [
+              "TEST_CASE_KIND_UNSELECTED",
+              "TEST_CASE_KIND_MANUAL",
+              "TEST_CASE_KIND_AUTOMATED"
+            ]
+          },
+          "automatedBy": {
+            "description": "自動テストコードへの参照パス。版を上げずに即時反映され、変更すると承認は外れる",
+            "type": "string"
+          }
+        },
+        "required": [
+          "testCaseId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "comment_case",
+      "description": "テストケースに人のレビューコメントを追記する（Viewer 以上で利用可）。コメントが 1 件追加されるだけで、ケースの内容も版も変わらない（追記専用）。書いたコメントは list_case_comments で読め、resolve_case_comment で解決済みにできる。自動テストの承認・差し戻しの所見は update_case_status の comment 側に入る（同じく list_case_comments に現れる）ため、ここに書くのは「ケース定義そのものへの指摘」にすること。\n\n**API トークン（NAGIO_TOKEN が at_ で始まるトークン）では実行できない**（permission_denied）。自動化トークンでレビュー痕跡を量産させないという backend の設計方針のため、人間ユーザーのセッショントークンを NAGIO_TOKEN に設定した場合のみ使える。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testCaseId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "対象のテストケース ID"
+          },
+          "comment": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000,
+            "description": "コメント本文"
+          }
+        },
+        "required": [
+          "testCaseId",
+          "comment"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "list_case_comments",
+      "description": "テストケースに付いたレビューコメントを新しい順で取得する（Viewer 以上で利用可、読み取り専用）。版を跨いで全件返す（コメント時点でどの版が current だったかは応答の revisionId/revisionVersion で分かる）。論理削除されたコメントは含まれない。解決済みのコメントは resolvedAt つきで含まれる。1 件も無ければ空配列を返す（エラーにはならない）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testCaseId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テストケース ID"
+          }
+        },
+        "required": [
+          "testCaseId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "resolve_case_comment",
+      "description": "テストケースのレビューコメントを解決済みにする（Viewer 以上で利用可）。応答の resolvedAt に解決日時が入る。解決済みのコメントも list_case_comments には残り続ける（一覧から消えるわけではない）。本人以外のコメントも解決できる（削除と違って所有者チェックは無い）。reviewId は list_case_comments で取得する。\n\n**API トークン（NAGIO_TOKEN が at_ で始まるトークン）では実行できない**（permission_denied）。自動化トークンでレビュー痕跡を量産させないという backend の設計方針のため、人間ユーザーのセッショントークンを NAGIO_TOKEN に設定した場合のみ使える。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reviewId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "解決するコメントの reviewId（list_case_comments で取得する）"
+          }
+        },
+        "required": [
+          "reviewId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "list_suites",
+      "description": "スイート（機能領域の階層。最大 3 階層）の一覧をフラット配列で取得する（Viewer 以上で利用可、引数なし）。ツリーは呼び出し側で parentSuiteId（親スイートの suiteId。ルートは空文字）を辿って組み立てる。各要素の caseCount は直接所属するケース数（配下スイートの分は含まない）。list_test_cases の suiteId 絞り込みは、指定したスイート自身と配下すべてのスイートのケースを対象にする。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "create_suite",
+      "description": "スイート（機能領域の階層）を新規作成する（Editor 権限が必要）。作成した内容はその場で確定して反映される（draft・確定の概念は無い）。parentSuiteId を指定するとその配下に作成し、省略するとルート直下に作成する。階層は最大 3 階層まで（親を含めて 4 階層目になる作成は failed_precondition）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "スイート名"
+          },
+          "description": {
+            "description": "説明",
+            "type": "string"
+          },
+          "parentSuiteId": {
+            "description": "親スイート ID（list_suites の suiteId）。省略するとルート直下に作成する",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "update_suite",
+      "description": "スイートを更新する（Editor 権限が必要）。**部分更新**: 指定しなかったフィールドは現在の値を維持する（内部で list_suites 相当の現在値を読み取ってからマージし、backend の UpdateV1 へ送る。draft・確定の概念は無く、更新内容はその場で反映される）。\n\n**parentSuiteId だけ他と扱いが違う**: 省略すると現在の親スイートを維持し、空文字を指定するとルート直下へ移動する。指定した ID のスイートが存在しない・別プロジェクトに属する場合は not_found、自分自身または自分の配下のスイートを指定した場合や、移動後の階層が最大 3 階層を超える場合はfailed_precondition になる。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "suiteId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "更新対象のスイート ID（list_suites の suiteId）"
+          },
+          "name": {
+            "description": "スイート名。省略時は現在の値を維持する",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "description": "説明。省略時は現在の値を維持する",
+            "type": "string"
+          },
+          "position": {
+            "description": "表示順。省略時は現在の値を維持する",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "parentSuiteId": {
+            "description": "親スイート ID。省略時は現在の親を維持する。空文字を指定するとルート直下へ移動する",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suiteId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "get_case_set",
+      "description": "PJ のケースセット（プロジェクト内の全ケースを 1 つの箱として版管理したもの）を、その版に含まれる項目ごと取得する（Viewer 以上で利用可、読み取り専用）。各項目はケース ID と、その版で固定されたケース内容の revisionId を持つ。\n\nstate=REVISION_STATE_CURRENT が確定済みの現行版、REVISION_STATE_DRAFT が未確定の編集版。**draft はケースの編集（create_test_case / update_test_case など）のたびに backend が自動で作る・追随させる**ため、draft を作る操作は無い。draft を現行にするには confirm_case_set を呼ぶ。\n\n**該当する版が無い場合は not_found エラー**（draft が無い状態で REVISION_STATE_DRAFT を指定した場合、ケースが 1 件も無いプロジェクトで REVISION_STATE_CURRENT を指定した場合）。過去版は list_case_set_versions で番号を確認し、ケースの内容は list_test_cases / get_test_case の caseSetState=REVISION_STATE_PAST + caseSetVersion で引く（過去版の項目一覧を返す RPC は backend に無い）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "REVISION_STATE_CURRENT",
+              "REVISION_STATE_DRAFT"
+            ],
+            "description": "取得する版。REVISION_STATE_CURRENT（現行）か REVISION_STATE_DRAFT（未確定の編集）。許容値: REVISION_STATE_CURRENT / REVISION_STATE_DRAFT"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_case_set_versions",
+      "description": "PJ のケースセットの版を新しい順で取得する（Viewer 以上で利用可、引数なし、読み取り専用）。past（過去）を含む全件を返し、各要素の state が REVISION_STATE_PAST / REVISION_STATE_CURRENT / REVISION_STATE_DRAFT のどれかを示す（current は常にちょうど 1 件、draft は 0 か 1 件）。項目（どのケースのどの revision を含むか）は含まないため、内容が要るときは get_case_set を使う。\n\nlist_test_cases / get_test_case / create_test_run に caseSetState=REVISION_STATE_PAST を渡すときの caseSetVersion（版番号）は、この一覧から選ぶ。ケースがまだ 1 件も無いプロジェクトでは空配列を返す。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "confirm_case_set",
+      "description": "**PJ のケースセットの draft と、そこに含まれる各ケースの draft を 1 回でまとめて current に確定する**（Editor 権限が必要、引数なし）。ケースを個別に確定する操作は無く、ケースの確定はこの 1 つの操作が兼ねる（**このあと更に「ケースの確定」を呼ぶ必要は無い**）。\n\n起きることは 2 つ:\n1. ケースセットの draft が current になり、旧 current は past に退く\n2. draft に載っているケースのうち revision がまだ draft のものは、そのケースの revision も current になる（そのケースの currentVersion が上がり hasDraft が false になる）\n\n**承認の失効はここでは起きない。** 失効するのは update_test_case で内容を変えた時点で、そのケースの approvedAt が未設定に戻る。確定までに人が改めて承認していれば、そのまま確定後も承認済みを維持する。\n\n**応答の confirmedCases に、2 で確定したケースが 1 件ずつ入る**（testCaseId / revisionId / version / title）。既に current だったケースは含まれない —— items は「この版が何を含むか」であって「この呼び出しが何を変えたか」ではないため、確認には confirmedCases を見ること。\n\n**draft が無いときに呼ぶと not_found エラー**（何も起きないのではなくエラーになる）。draft の有無は list_case_set_versions か get_case_set(state=REVISION_STATE_DRAFT) で事前に確認できる。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "list_test_runs",
+      "description": "テストラン（Run）一覧を取得する（Viewer 以上で利用可）。ページングに対応。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "description": "ページ番号（1 始まり）。デフォルト 1",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "description": "1 ページの件数。デフォルト 20",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_test_run",
+      "description": "テストラン（Run）の詳細を、実施結果一覧（各ケースの resultStatus・evidence）込みで取得する（Viewer 以上で利用可）。人のレビューコメントはここには含まれない（list_run_case_comments に runCases[].testRunCaseId を指定して取得すること）。コメントが特定のステップ・証跡を指している場合、その stepSequence / testRunAttachmentId は runCases[].attempts[].stepViews[].sequence / runCases[].attempts[].attachments[].testRunAttachmentId と突き合わせられる。各試行は attachments[] で証跡（スクリーンショット・画面録画）を持つ。attachments[].url は常に空文字（証跡が多い Run で応答が遅くなるため）で、実体を見る・ダウンロードするには get_run_case_attachment_urls を使う。testRunAttachmentId を comment_run_case に渡すと、その証跡に対する指摘として記録できる。**各実施結果は runCases[].caseVersion で「どの版のケース定義に対する記録か」を表す**: version（実行時に固定された版）・currentVersion（ケースの現在の現行版）・isOutdated（version < currentVersion。実行後にケースが改訂されており、この結果は古い定義に対するもの）・isDraft（未確定の draft を対象に実行した）。isOutdated=true の結果を「今のケース定義を満たした証拠」として扱わないこと。版が記録されていない古い Run では caseVersion 自体が設定されない。**Run 全体がどのケースセットの版を対象に作られたかは testRun.caseSetVersion**（version・state）に入る。これは Run 作成時に caseSetState/caseSetVersion で選んだ版そのもので、ケースごとの caseVersion とは別の軸。ケースセットの版が記録されていない Run（旧データ・ケースセットがまだ無い PJ）では未設定。\n\n**各実施結果は runCases[].attempts で全試行（attemptNumber 昇順）を持つ**（実装 → 実行 → レビュー → 修正 → 再実行のループを試行として記録したもの）。開いている試行（closedAt 未設定）は高々 1 つ。各試行が stepViews/stepDivergence/attachments を持つ。runCases[].lastClosedAttemptId は非正規化されたresultStatus 等の出どころの試行 ID（空文字は、まだ閉じた試行が無いことを示す）。試行を開始・終了するには start_run_case_attempt / finish_run_case_attempt を使う。\n\nrun-case の検収とケースの実装承認は人が画面で行う操作で、MCP からは変更できない。画面で検収 OK にすると、対象が自動・未承認・版一致の場合だけケースの実装承認も同時に付く。runCases[].acceptanceState と runCases[].acceptanceRequiredReasons を読み取り、必要なら人に画面での判断を促すこと。\n\n証跡画像差分のレビュー対象（承認済みケース × 差分あり証跡）だけを掴みたい場合は list_run_case_diffs を使う。\n\n**証跡画像差分レビュー**: 各証跡（attachments[]）は差分箇所ごとの人の判定 regionVerdicts[]（4 値: RUN_DIFF_VERDICT_UNSPECIFIED/APPROVED（受入）/REJECTED（不具合）/NOISE。判定済みの箇所だけが並ぶ）と、画像（証跡）単位の OK/NG reviewStatus（ATTACHMENT_REVIEW_STATUS_UNSPECIFIED/OK/NG。NG のときは reviewComment に理由が入る）を持つ ―― この 2 つは別の軸で、箇所が全て判定済みでも画像単位はまだ未レビューのことがある。判定・OK/NG の変更は人が画面で行う運用で MCP からは行えない（読み取りのみ）。runCases[] には証跡画像差分の集計（runDiffChangedCount/runDiffTotalCount/runDiffPendingCount・属性推定の runDiffNoiseCount/runDiffNeedsReviewCount・箇所単位の人の判定集計 humanVerdictNoiseCount/humanVerdictRejectedCount・画像単位の OK/NG 集計 attachmentReviewOkCount/attachmentReviewNgCount）が、testRun にはケース横断の集計 （approvedCaseCount/runDiffChangedCaseCount/runDiffNgCaseCount/runDiffUnreviewedCaseCount）が付く。testRun 側の証跡画像差分件数と list_run_case_diffs の対象は承認済みケースだけを数え、未承認ケースの証跡画像差分は runCases[] の個別集計だけに残る。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run ID"
+          }
+        },
+        "required": [
+          "testRunId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_run_case_attachment_urls",
+      "description": "get_test_run の runCases[].attempts[].attachments[].url / diffImageUrl は常に空文字で返る（証跡が数千件規模の Run では応答時に全件分の署名 URL を発行すると遅いため、backend は発行しない）。証跡（スクリーンショット・画面録画）・差分ハイライト画像・baseline 画像の実体を見る・ダウンロードするには、対象の 1 run-case についてこのツールで署名付き URL を取得すること（testRunAttachmentId → url / diffImageUrl / baselineUrl の対応）。いずれも期限付きで毎回発行し直されるため保存しないこと。\n\n**対象の指し方は 2 通り**: testRunCaseId（実施結果 ID）を直接指定するか、testRunId と testCaseId の組で指定する（Run 作成直後に手元にあるのはケースの ID なので、ID を引き直さずそのまま渡せる）。どちらか一方を満たすこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunCaseId": {
+            "description": "実施結果 ID（get_test_run / create_test_run の runCases[].testRunCaseId）。これを省略する場合は testRunId と testCaseId の組を指定する",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunId": {
+            "description": "対象 Run の ID。testCaseId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "対象テストケースの ID（TC-{番号} の表示番号ではない）。testRunId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "create_test_run",
+      "description": "テストラン（Run）を作成する（Runner 以上の権限が必要。API トークンのロールが Runner 未満だと拒否される）。\n\n**対象ケースの指定は 2 通り**:\n- **testCaseIds を省略する** = caseSetState で指定した版のケースセットに含まれる**全ケース**が対象（プロジェクトのケースは 1 つのケースセットとして版管理されているので、これが「現行のケースセットを全部実行する」の書き方。上限 2000 件で、超える場合は分割を促すエラーになる）\n- **testCaseIds を明示列挙する** = その testCaseId（内部 ID）のケースだけが対象。最大 2000 件、重複不可。TC-{番号} の表示番号ではない点に注意: 番号しか分からない場合は list_test_cases を caseNumbers 指定で呼んで testCaseId を引いてから使う\n\n実装状況（種別・自動テストのステータス）による制限は無く、自動実装が無いケースも手動実施を前提に Run に追加できる（Run は自動実行と手動実施の両方を扱う）。作成直後は全ケース untested の状態で、この応答の runCases に同梱して返る（runCases[].testRunCaseId が実施結果 ID。record_run_result はこれか testRunId + testCaseId の組を取る）。assigneeUserId を指定する場合は対象プロジェクトのメンバーである必要がある（メンバー外・存在しない ID は invalid_argument）。\n\ncaseSetState は必須（「どの版を実行したか分からない Run」を作れないようにするモデルの制約）: 通常は REVISION_STATE_CURRENT（確定済みの現行版）を指定する。**REVISION_STATE_DRAFT は invalid_argument になる**（下書き版のケースセットは実行できない）。対象ケースの中に draft の版が混ざっている場合も同様に invalid_argument になる（caseSetState に CURRENT/PAST を指定していても）: 「下書き（draft）の版のケースは実行できません」。ケースセットを確定するか、test_case_ids で対象から外すこと。REVISION_STATE_PAST を指定する場合は caseSetVersion（過去の版番号。list_case_set_versions で確認する）も必須。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "Run のタイトル"
+          },
+          "description": {
+            "description": "Run の説明",
+            "type": "string"
+          },
+          "testCaseIds": {
+            "description": "対象テストケースの testCaseId 一覧（TC-{番号} の表示番号ではない）。最大 2000 件、重複不可。**省略すると caseSetState で指定した版のケースセットの全件が対象になる**",
+            "maxItems": 2000,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "assigneeUserId": {
+            "description": "実施担当者の user_id。指定する場合は対象プロジェクトのメンバーであること",
+            "type": "string"
+          },
+          "environment": {
+            "description": "実施環境の自由記述（例: dev01 / staging）",
+            "type": "string",
+            "maxLength": 100
+          },
+          "caseSetState": {
+            "type": "string",
+            "enum": [
+              "REVISION_STATE_CURRENT",
+              "REVISION_STATE_DRAFT",
+              "REVISION_STATE_PAST"
+            ],
+            "description": "どの PJ ケースセットの版を実行するか（必須）。通常は REVISION_STATE_CURRENT。REVISION_STATE_PAST を指定する場合は caseSetVersion も必須。許容値: REVISION_STATE_CURRENT / REVISION_STATE_DRAFT / REVISION_STATE_PAST"
+          },
+          "caseSetVersion": {
+            "description": "caseSetState=REVISION_STATE_PAST のときに対象の版番号を指定する。それ以外では無視される",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "title",
+          "caseSetState"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "update_test_run",
+      "description": "テストラン（Run）のタイトル・説明・実施環境・担当者を部分更新する（Runner 以上の権限が必要）。実施中でも完了後でも使える。結果・試行・状態は変更しない。実施環境などの誤りに気付いたら、このツールで直す。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "更新する Run の testRunId"
+          },
+          "title": {
+            "description": "Run のタイトル",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "description": "Run の説明",
+            "type": "string"
+          },
+          "environment": {
+            "description": "実施環境の自由記述（例: dev01 / staging）",
+            "type": "string",
+            "maxLength": 100
+          },
+          "assigneeUserId": {
+            "description": "実施担当者の user_id。空文字を指定すると担当者を解除する",
+            "type": "string",
+            "maxLength": 26
+          }
+        },
+        "required": [
+          "testRunId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "start_run_case_attempt",
+      "description": "Run 内の 1 ケースについて、同じケースをもう一度実行するための新しい試行（attempt）を開く（Runner 以上の権限が必要）。前の試行の結果・ステップ・証跡はそのまま残り、以降の record_run_result / record_step_results / upload_run_attachment はこの新しい試行に積まれる。\n\n**開いている試行が未使用（結果・ステップ・証跡・レビュー指摘のいずれも記録されていない）なら、それをそのまま使い回す** —— 新しい試行は作らず、開始時刻だけ今の呼び出し時刻に更新される。record_run_result 等を呼ぶ前に 毎回このツールを呼んでも試行が無駄に増えないのはこのため。\n\n**開いている試行が既に何か記録済みなら、この呼び出しの中で先に閉じてから新しい試行を開く**（閉じるときに証跡画像差分が計算される。finish_run_case_attempt を明示的に呼ばなくても、次の start_run_case_attempt が前の試行を閉じる）。\n\n**開始しただけでは Run の集計（runCase.resultStatus・passCount 等）は変わらない** —— 前回閉じた試行の結果がそのまま残る。判定を Run の集計に反映するには、記録したあと finish_run_case_attempt を呼ぶこと（または complete_test_run で Run ごと完了する）。\n\n応答の attempt.attemptNumber は開いた（使い回した）試行の番号（1 始まり、run-case 内で一意）。未使用の試行を使い回した場合は前回と同じ番号が返る —— 呼ぶたびに増えるとは限らない。\n\n**対象の指し方は 2 通り**: testRunCaseId（実施結果 ID）を直接指定するか、testRunId と testCaseId の組で指定する（Run 作成直後に手元にあるのはケースの ID なので、ID を引き直さずそのまま渡せる）。どちらか一方を満たすこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunCaseId": {
+            "description": "実施結果 ID（get_test_run / create_test_run の runCases[].testRunCaseId）。これを省略する場合は testRunId と testCaseId の組を指定する",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunId": {
+            "description": "対象 Run の ID。testCaseId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "対象テストケースの ID（TC-{番号} の表示番号ではない）。testRunId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "record_run_result",
+      "description": "Run 内の 1 ケースの実施結果（合否）を記録する（Runner 以上の権限が必要）。実施中の Run にのみ記録できる（完了済みは failed_precondition）。ステップ単位の記録は record_step_results が別に行い、ケース全体の合否はこのツールが書く。\n\n**このツールは 2 つのモードを持つ**:\n- **開いている試行がある** ―― 実行の記録として、その試行に書く。結果が Run の集計（runCase.resultStatus・passCount 等）に反映されるのは finish_run_case_attempt でその試行を閉じたとき\n- **開いている試行が無く、resultStatus が現在の記録と同じ** ―― evidence / evidenceUrl / comment だけの**訂正**として最後に閉じた試行を直す（試行は増えない）\n- **開いている試行が無く、resultStatus を変えたい** ―― 先に start_run_case_attempt を呼んで新しい試行を開くこと。呼ばずに resultStatus を変えようとすると failed_precondition になる: 「この実施結果には実施中の試行がありません。試行を追加してから記録してください。」\n\n**対象の指し方は 2 通り**: testRunCaseId（実施結果 ID）を直接指定するか、testRunId と testCaseId の組で指定する（Run 作成直後に手元にあるのはケースの ID なので、ID を引き直さずそのまま渡せる）。どちらか一方を満たすこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunCaseId": {
+            "description": "実施結果 ID（get_test_run / create_test_run の runCases[].testRunCaseId）。これを省略する場合は testRunId と testCaseId の組を指定する",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunId": {
+            "description": "対象 Run の ID。testCaseId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "対象テストケースの ID（TC-{番号} の表示番号ではない）。testRunId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "resultStatus": {
+            "type": "string",
+            "enum": [
+              "RUN_CASE_RESULT_UNTESTED",
+              "RUN_CASE_RESULT_PASS",
+              "RUN_CASE_RESULT_FAIL",
+              "RUN_CASE_RESULT_BLOCKED",
+              "RUN_CASE_RESULT_SKIPPED"
+            ],
+            "description": "実施結果。許容値: RUN_CASE_RESULT_UNTESTED / RUN_CASE_RESULT_PASS / RUN_CASE_RESULT_FAIL / RUN_CASE_RESULT_BLOCKED / RUN_CASE_RESULT_SKIPPED"
+          },
+          "evidence": {
+            "description": "実施エビデンス（テキスト）",
+            "type": "string",
+            "maxLength": 16000
+          },
+          "evidenceUrl": {
+            "description": "スクリーンショット等の外部 URL",
+            "type": "string",
+            "maxLength": 1000
+          },
+          "comment": {
+            "description": "コメント",
+            "type": "string",
+            "maxLength": 5000
+          }
+        },
+        "required": [
+          "resultStatus"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "record_step_results",
+      "description": "Run 内の 1 ケースについて、実行したステップ列をまとめて記録する（Runner 以上の権限が必要）。自動実行・reporter からの記録を想定した RPC で、**置き換えセマンティクス**: この呼び出しで「この run-case の実行ステップはこれで全部」と宣言し、既存の実行ステップ列を丸ごと差し替える（空配列を渡すと既存の記録が消える）。1 回の呼び出しで 200 ステップまで。\n\n**ケース全体の合否（runCase.resultStatus）は更新しない** ―― これはステップ列だけを置き換える RPC で、合否は record_run_result が別途書く。両方を記録したい場合はこのツールのあとに record_run_result を呼ぶこと。\n\n応答の recorded / divergence は、記録したステップとケース定義のステップを突き合わせた結果を表す: kind=MATCHED（定義と対応）/ EXTRA（実行されたが定義に無い）/ MISSING（定義にあるが実行されていない）。ステップ数が実行パスで変わるケースは、ケース側の stepsVariable を true にしておくと乖離表示が弱まる。\n\n**完了済みの Run には記録できない**（failed_precondition）。\n\n**開いている試行に記録される（訂正モードは無い）。** 閉じた試行しか無い場合・Reopen 直後で試行が1 つも開いていない場合は failed_precondition になる: 「この実施結果には実施中の試行がありません。試行を追加してから記録してください。」 その場合は start_run_case_attempt を先に呼んで新しい試行を開くこと。\n\n**対象の指し方は 2 通り**: testRunCaseId（実施結果 ID）を直接指定するか、testRunId と testCaseId の組で指定する（Run 作成直後に手元にあるのはケースの ID なので、ID を引き直さずそのまま渡せる）。どちらか一方を満たすこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunCaseId": {
+            "description": "実施結果 ID（get_test_run / create_test_run の runCases[].testRunCaseId）。これを省略する場合は testRunId と testCaseId の組を指定する",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunId": {
+            "description": "対象 Run の ID。testCaseId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "対象テストケースの ID（TC-{番号} の表示番号ではない）。testRunId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "steps": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sequence": {
+                  "description": "実行順（1 始まり）。省略すると配列の並び順を採用する。重複するとエラー",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "action": {
+                  "description": "実際に実行した操作。定義ステップとのテキスト整列の入力にもなる",
+                  "type": "string",
+                  "maxLength": 1000
+                },
+                "expectedResult": {
+                  "description": "実際に確認した期待結果",
+                  "type": "string",
+                  "maxLength": 1000
+                },
+                "resultStatus": {
+                  "type": "string",
+                  "enum": [
+                    "RUN_CASE_RESULT_UNTESTED",
+                    "RUN_CASE_RESULT_PASS",
+                    "RUN_CASE_RESULT_FAIL",
+                    "RUN_CASE_RESULT_BLOCKED",
+                    "RUN_CASE_RESULT_SKIPPED"
+                  ],
+                  "description": "このステップの結果。許容値: RUN_CASE_RESULT_UNTESTED / RUN_CASE_RESULT_PASS / RUN_CASE_RESULT_FAIL / RUN_CASE_RESULT_BLOCKED / RUN_CASE_RESULT_SKIPPED"
+                },
+                "note": {
+                  "description": "このステップで実際に確認した内容",
+                  "type": "string",
+                  "maxLength": 4000
+                },
+                "durationMs": {
+                  "description": "所要時間（ミリ秒）。0 は未計測",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "definitionPosition": {
+                  "description": "対応する定義ステップの position（1 始まり）。0 は明示的に「定義に無いステップ」。省略すると backend が自動で対応付ける。ケースのステップ数を超える値はエラー",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "videoOffsetMs": {
+                  "description": "ケース全体に添付した動画の、このステップが始まった位置（ミリ秒）。0 は「動画の先頭」という正当な値",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "resultStatus"
+              ]
+            },
+            "description": "実行順に並んだ全ステップ（最大 200 件）。この内容で既存の実行ステップ列を置き換える。各要素は { resultStatus（必須）, sequence?, action?, expectedResult?, note?, durationMs?, definitionPosition?, videoOffsetMs? } のオブジェクト"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "finish_run_case_attempt",
+      "description": "Run 内の 1 ケースについて、開いている試行（start_run_case_attempt で開いたもの、または create_test_run が作った試行 #1）を終了する（Runner 以上の権限が必要）。\n\n**このタイミングで結果が Run の集計（runCase.resultStatus・passCount 等）に反映され**、証跡画像差分が計算される。record_run_result / record_step_results / upload_run_attachment だけでは集計に載らない点に注意すること。\n\n**開いている試行が無い場合（既に finish 済み、closed_at が入っている等）はエラーにせず冪等に成功扱いにする**（結果は変わらない。reporter がネットワークエラーで呼び出しを再送しても失敗にしないため）。\n\n**対象の指し方は 2 通り**: testRunCaseId（実施結果 ID）を直接指定するか、testRunId と testCaseId の組で指定する（Run 作成直後に手元にあるのはケースの ID なので、ID を引き直さずそのまま渡せる）。どちらか一方を満たすこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunCaseId": {
+            "description": "実施結果 ID（get_test_run / create_test_run の runCases[].testRunCaseId）。これを省略する場合は testRunId と testCaseId の組を指定する",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunId": {
+            "description": "対象 Run の ID。testCaseId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "対象テストケースの ID（TC-{番号} の表示番号ではない）。testRunId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "complete_test_run",
+      "description": "テストラン（Run）を完了にする（Runner 以上の権限が必要）。status が RUN_STATUS_COMPLETED になり completedAt が入る。\n\n**未実施（untested）のケースが残っていても完了できる**（件数のチェックは無い）。実施漏れを避けたい場合は 先に get_test_run の untestedCount を確認すること。\n\n**完了済みの Run に対して呼ぶと failed_precondition エラー**。完了後は record_run_result / record_step_results / upload_run_attachment が失敗するようになる（comment_run_case だけは完了後も書ける）。完了を取り消す操作（ReopenV1）は MCP からは提供しておらず、Web UI で行う。\n\n**開いたままの試行はここで一括して閉じられ**、その結果が集計（passCount 等）に反映される（finish_run_case_attempt を個別に呼ぶ手間が省ける）。**一括クローズでも証跡の証跡画像差分は非同期に計算される**（runDiffStatus は閉じた直後は \"pending\"。get_test_run で後追い確認すること）。\n\n応答の件数（passCount 等）は backend が集計せず 0 のまま返る。集計後の数字が要る場合は get_test_run を呼び直すこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "完了する Run の ID"
+          }
+        },
+        "required": [
+          "testRunId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "comment_run_case",
+      "description": "Run 内の 1 ケースの実施結果に人のレビューコメントを追記する（Runner 以上の権限が必要）。コメントが 1 件追加されるだけで、実施結果そのもの（resultStatus・evidence）は変わらない（追記専用）。Web の実行詳細画面の「レビュー・コメント」欄に出る。書いたコメントは list_run_case_comments で読め、resolve_run_case_comment で解決済みにできる。\n\n応答の revisionVersion / revisionId は**どの版のケース定義に対する指摘か**を示す（Run 作成時に固定された版。comment_case の応答と同じ形）。\n\n**完了済みの Run にも書ける**（record_run_result などの記録系とは違い ensureRunning を通らない）。\n\nstepSequence（get_test_run の runCases[].attempts[].stepViews[].sequence）か testRunAttachmentId（get_test_run の runCases[].attempts[].attachments[].testRunAttachmentId、または upload_run_attachment の応答）を指定すると、コメントを特定のステップ・証跡に紐付けられる（どちらも省略するとケース全体への指摘。両方指定はできない）。紐付けると「どのステップの証跡が足りないのか」といった指摘の対象がレビューを受けた側に伝わる。\n\ntestRunCaseAttemptId（get_test_run の runCases[].attempts[].testRunCaseAttemptId）を指定すると、指摘を特定の試行に向けられる（省略すると試行を特定しない指摘）。testRunAttachmentId を指定した場合は、その証跡が属する試行が backend 側で採用され、testRunCaseAttemptId は無視される。\n\n**対象の指し方は 2 通り**: testRunCaseId（実施結果 ID）を直接指定するか、testRunId と testCaseId の組で指定する（Run 作成直後に手元にあるのはケースの ID なので、ID を引き直さずそのまま渡せる）。どちらか一方を満たすこと。\n\n**API トークン（NAGIO_TOKEN が at_ で始まるトークン）では実行できない**（permission_denied）。自動化トークンでレビュー痕跡を量産させないという backend の設計方針のため、人間ユーザーのセッショントークンを NAGIO_TOKEN に設定した場合のみ使える。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunCaseId": {
+            "description": "実施結果 ID（get_test_run / create_test_run の runCases[].testRunCaseId）。これを省略する場合は testRunId と testCaseId の組を指定する",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunId": {
+            "description": "対象 Run の ID。testCaseId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "対象テストケースの ID（TC-{番号} の表示番号ではない）。testRunId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "comment": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000,
+            "description": "コメント本文"
+          },
+          "stepSequence": {
+            "description": "指摘対象の実行ステップの実行順（1 始まり）。get_test_run の runCases[].attempts[].stepViews[].sequence、または record_run_result で記録した実行ステップの sequence。省略するとステップを特定しない指摘になる。testRunAttachmentId とは同時に指定できない。",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "testRunAttachmentId": {
+            "description": "指摘対象の証跡 ID。get_test_run の runCases[].attempts[].attachments[].testRunAttachmentId、または upload_run_attachment の応答の testRunAttachmentId。省略すると証跡を特定しない指摘になる。stepSequence とは同時に指定できない。",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunCaseAttemptId": {
+            "description": "指摘を特定の試行に向ける。get_test_run の runCases[].attempts[].testRunCaseAttemptId。省略すると試行を特定しない指摘になる。testRunAttachmentId を指定した場合はその証跡が属する試行がbackend 側で採用され、この値は無視される。",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "comment"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "list_run_case_comments",
+      "description": "Run 内の 1 ケースの実施結果に付いたレビューコメントを新しい順で取得する（Viewer 以上で利用可、読み取り専用）。レビュアーが Web の「レビュー・コメント」欄（実行詳細画面）に書いたフィードバックを読み、テストの直し方を判断する用途を想定している。\n\n各コメントの revisionVersion / revisionId は**どの版のケース定義に対する指摘か**を示す（Run 作成時に固定された版。同じ実施結果へのコメントは全て同じ版を指す）。get_test_case の currentVersion より古ければ、その指摘は既に改訂された定義に対するもの。\n\n各コメントの stepSequence / testRunAttachmentId は**指摘の対象がケース全体か、特定のステップ or 証跡か**を示す（comment_run_case で指定したもの。排他で、両方とも未設定ならケース全体への指摘）。stepSequence は get_test_run の runCases[].attempts[].stepViews[].sequence、testRunAttachmentId は runCases[].attempts[].attachments[].testRunAttachmentId（または upload_run_attachment の応答）と突き合わせられる。\n\n解決済みのコメントは resolvedAt つきで含まれる（resolve_run_case_comment で解決できる）。コメントが 1 件も無い場合は空配列を返す（エラーにはならない）。修正が終わったら record_run_result で再実行結果を記録すること（それ自体が「対応した」という記録になる）。\n\n**対象の指し方は 2 通り**: testRunCaseId（実施結果 ID）を直接指定するか、testRunId と testCaseId の組で指定する（Run 作成直後に手元にあるのはケースの ID なので、ID を引き直さずそのまま渡せる）。どちらか一方を満たすこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunCaseId": {
+            "description": "実施結果 ID（get_test_run / create_test_run の runCases[].testRunCaseId）。これを省略する場合は testRunId と testCaseId の組を指定する",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunId": {
+            "description": "対象 Run の ID。testCaseId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "対象テストケースの ID（TC-{番号} の表示番号ではない）。testRunId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "resolve_run_case_comment",
+      "description": "実施結果のレビューコメントを解決済みにする（Viewer 以上で利用可）。応答の resolvedAt に解決日時が入る。解決済みのコメントも list_run_case_comments には残り続ける（一覧から消えるわけではない）。本人以外のコメントも解決できる（削除と違って所有者チェックは無い）。reviewId は list_run_case_comments で取得する。\n\n**API トークン（NAGIO_TOKEN が at_ で始まるトークン）では実行できない**（permission_denied）。自動化トークンでレビュー痕跡を量産させないという backend の設計方針のため、人間ユーザーのセッショントークンを NAGIO_TOKEN に設定した場合のみ使える。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reviewId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "解決するコメントの reviewId（list_run_case_comments で取得する）"
+          }
+        },
+        "required": [
+          "reviewId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "upload_run_attachment",
+      "description": "手元のスクリーンショット/動画ファイルを Run の実施結果に添付する（Runner 以上の権限が必要）。filePath はこのツールを実行しているマシン上のローカルパス（絶対パス推奨）。png/jpeg/webp は 5MiB、mp4/webm は 20MiB まで。stepSequence を指定するとその実行ステップへの添付、省略するとケース全体への添付になる。\n\n**開いている試行に添付される。** 閉じた試行しか無い場合・Reopen 直後で試行が 1 つも開いていない場合は failed_precondition になる: 「この実施結果には実施中の試行がありません。試行を追加してから記録してください。」 その場合は start_run_case_attempt を先に呼んで新しい試行を開くこと。\n\n応答の testRunCaseAttemptId はこの証跡が属した試行、runDiffStatus は基準画像との比較結果（試行がまだ閉じていない・backend が未対応の場合は両方とも未設定）。\n\n**対象の指し方は 2 通り**: testRunCaseId（実施結果 ID）を直接指定するか、testRunId と testCaseId の組で指定する（Run 作成直後に手元にあるのはケースの ID なので、ID を引き直さずそのまま渡せる）。どちらか一方を満たすこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunCaseId": {
+            "description": "実施結果 ID（get_test_run / create_test_run の runCases[].testRunCaseId）。これを省略する場合は testRunId と testCaseId の組を指定する",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunId": {
+            "description": "対象 Run の ID。testCaseId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "対象テストケースの ID（TC-{番号} の表示番号ではない）。testRunId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "filePath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "添付するファイルのローカルパス（絶対パス推奨）。png/jpeg/webp または mp4/webm。"
+          },
+          "stepSequence": {
+            "description": "ステップ単位の証跡ならその実行順（1 始まり）。省略時はケース全体への証跡として添付する。",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "contentType": {
+            "description": "MIME タイプ。省略時は filePath の拡張子（.png/.jpg/.jpeg/.webp/.mp4/.webm）から自動判定する。許容値: image/png / image/jpeg / image/webp / video/mp4 / video/webm",
+            "type": "string",
+            "enum": [
+              "image/png",
+              "image/jpeg",
+              "image/webp",
+              "video/mp4",
+              "video/webm"
+            ]
+          }
+        },
+        "required": [
+          "filePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "list_run_case_diffs",
+      "description": "Run 全体から、証跡画像差分のレビューが必要な証跡だけを run-case ごとにまとめて取得する（Viewer 以上で利用可）。対象は「承認済みケース × 検収対象 run-case（acceptanceState が REQUIRED / ACCEPTED / REJECTED）× 画像単位で未レビューの証跡画像差分あり（runDiffStatus = \"changed\" かつ reviewStatus が ATTACHMENT_REVIEW_STATUS_UNSPECIFIED）」の証跡のみ。レビュー対象外フラグ（runDiffExcluded）が立っている証跡・画像単位で既に OK/NG が確定済み（reviewStatus が OK/NG）の証跡は含まない ―― 差分箇所（regionVerdicts）が全て判定済みでも、画像単位の OK/NG がまだ人の手で 付いていなければここに含まれる（判定は箇所単位・レビューの完了は画像単位、の 2 軸のため）。各 run-case の最後に閉じた試行の証跡だけを見るため、再実行で上書き済みの古い試行の差分は含まれない。get_test_run の attachments 全件から自前で絞り込むより、レビュー対象を最短で掴める。\n\n差分の実体（diffImageUrl/baselineUrl）は含まない（get_test_run では常に空文字のため）。必要なら get_run_case_attachment_urls を呼ぶこと。差分ありの証跡が 1 枚も無いケースは応答に含まれない（空配列は「レビュー待ちが無い」ことを意味する）。差分箇所の判定・画像単位の OK/NG はいずれも人が画面で行う運用で、MCP からは行えない（読み取りのみ）。\n\n各証跡には backend が量子化した差分領域 diffRegions（面積上位 5 件まで）と、判断材料のヒントを添える。sharedAcrossCases は同じ矩形が Run 内の別ケースにも複数出ている場合の件数（共通部品＝時計・地図・ヘッダの疑い）、tinyRegion は極小差分（アイコンの1〜2px・スピナーの回転角など）の疑い。**どちらもヒントであり種別を決めるものではない** ―― 実際に見て判断するには get_run_case_attachment_urls で画像を取得し、annotate_run_case_diffs で属性を付けること。\n\n各証跡にはさらに、既に判定済みの差分箇所の内訳 regionVerdicts（4 値: RUN_DIFF_VERDICT_UNSPECIFIED は現れない・APPROVED（受入）/REJECTED（不具合）/NOISE）を添える。判定済みの箇所だけが並ぶ ―― 未判定の箇所はここに現れない。\n\n各証跡にはさらに、この identity（ケース × ステップ × ファイル名）の過去の判定の集計 verdictHistory を添える。追加の呼び出しなしで推定の材料にできる。履歴が無ければ省略する（hasHistory=false は返さない）。領域単位のより詳しい内訳が要る場合や、run-case 単位でまとめて確認したい場合は get_diff_verdict_history を呼ぶこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run ID"
+          }
+        },
+        "required": [
+          "testRunId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "annotate_run_case_diffs",
+      "description": "1 run-case に属する複数の証跡へ、差分の属性情報（領域の座標・種別・コメント・証跡全体の結論）をまとめて付ける（Editor 以上の権限が必要。API トークンからの呼び出しも許可されている）。\n\n**判定はこのツールを呼ぶあなたが画像を見て行う。backend は保存して返すだけで、判定も承認もしない。**座標を決めるには先に get_run_case_attachment_urls で証跡・差分ハイライト画像の署名 URL を取得し、画像そのものを読んで矩形を判断すること（画像の切り出しは提供しない）。list_run_case_diffs が返す diffRegions・shared_across_cases / tiny_region のヒントは判断材料であり、それ自体が種別を決めるものではない。\n\n対象は list_run_case_diffs が返す証跡（承認済みケース × changed × レビュー待ち）を想定するが、backend 側の前提条件は各証跡の runDiffStatus が \"changed\" であることだけ。\n\n**丸ごと置き換え（PUT）**: 同じ証跡に再度呼ぶと前回の属性は消える（追記ではない）。1 回あたり items は 50 件まで、1 証跡あたり regions は 20 件まで。\n\n**承認・却下・未判定に戻す判定はこのツールでは変えられない** ―― それは人が画面で行う操作で、対応する MCP ツールは無い。属性はあくまで補助情報で、web 画面の「ノイズ推定を飛ばす」トグルの既定表示と、差分レビューのキューの並び順（要確認を含む証跡を先に出す）に使われるだけ。\n\n**対象の指し方は 2 通り**: testRunCaseId（実施結果 ID）を直接指定するか、testRunId と testCaseId の組で指定する（Run 作成直後に手元にあるのはケースの ID なので、ID を引き直さずそのまま渡せる）。どちらか一方を満たすこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunCaseId": {
+            "description": "実施結果 ID（get_test_run / create_test_run の runCases[].testRunCaseId）。これを省略する場合は testRunId と testCaseId の組を指定する",
+            "type": "string",
+            "minLength": 1
+          },
+          "testRunId": {
+            "description": "対象 Run の ID。testCaseId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "対象テストケースの ID（TC-{番号} の表示番号ではない）。testRunId と組で指定すると testRunCaseId の代わりになる",
+            "type": "string",
+            "minLength": 1
+          },
+          "items": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "testRunAttachmentId": {
+                  "type": "string",
+                  "minLength": 26,
+                  "maxLength": 26,
+                  "description": "属性を付ける証跡の ID（get_run_case_attachment_urls や list_run_case_diffs の attachmentId）"
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "DIFF_ANNOTATION_VERDICT_NOISE",
+                    "DIFF_ANNOTATION_VERDICT_NEEDS_REVIEW",
+                    "DIFF_ANNOTATION_VERDICT_UNKNOWN"
+                  ],
+                  "description": "この証跡全体の結論。許容値: DIFF_ANNOTATION_VERDICT_NOISE / DIFF_ANNOTATION_VERDICT_NEEDS_REVIEW / DIFF_ANNOTATION_VERDICT_UNKNOWN"
+                },
+                "note": {
+                  "description": "証跡全体についての 1〜2 行の要約",
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "regions": {
+                  "description": "証跡画像差分の領域ごとの判定（最大 20 件）。省略・空配列も可（要約だけの属性にする場合）",
+                  "maxItems": 20,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 39999,
+                        "description": "矩形の左上 x 座標（px）"
+                      },
+                      "y": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 39999,
+                        "description": "矩形の左上 y 座標（px）"
+                      },
+                      "w": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 39999,
+                        "description": "矩形の幅（px）"
+                      },
+                      "h": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 39999,
+                        "description": "矩形の高さ（px）"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "maxLength": 40,
+                        "description": "自由文字列（40 文字まで。マイグレーション不要でいつでも新しい語彙を増やせる）。推奨語彙: noise_timestamp（日時）/ noise_map（地図）/ noise_animation（アニメーション）/ noise_data（テストデータ依存の表示）/ needs_review（人の目視確認が要る）。上記に当てはまらない場合も、noise_ で始めるとノイズ推定として画面のトグルで飛ばされる"
+                      },
+                      "comment": {
+                        "description": "この領域について判断した理由の短いコメント",
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "confidence": {
+                        "description": "この判定の信頼度（0.0〜1.0）。省略時は不明",
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y",
+                      "w",
+                      "h",
+                      "kind"
+                    ]
+                  }
+                },
+                "model": {
+                  "description": "この判定を行ったモデル名（例: claude-opus-5）。任意",
+                  "type": "string",
+                  "maxLength": 100
+                }
+              },
+              "required": [
+                "testRunAttachmentId",
+                "verdict"
+              ]
+            },
+            "description": "証跡ごとの属性（最大 50 件）。各要素は { testRunAttachmentId（必須）, verdict（必須）, note?, regions?, model? } のオブジェクト"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "get_diff_verdict_history",
+      "description": "list_run_case_diffs と同じ対象集合（承認済みケース × 画像単位で未レビューの changed 証跡）から、証跡 identity（テストケース × ステップ × ファイル名）ごとに過去の判定を集計して返す（Viewer 以上で利用可）。**推定（annotate_run_case_diffs）の入力に使うための参考情報であり、判定そのものは人が画面で行う。** 承認・却下・ノイズ確定の RPC は無く、このツールも読み取り専用。\n\ntestRunId だけを指定すると Run 全体、testRunCaseId または testCaseId も指定するとその 1 run-case の証跡だけに絞る。\n\n**生の判定イベントは返さない。** 識別子ごとに「直近 N 回中の内訳（ノイズ/受入/不具合）・最後の判定・現在のケース内容の版での判定件数」という集計結論と、問い合わせ矩形ごとの内訳（面積上位 5 件まで）だけを返す（生の履歴をそのまま返すと Run 1 本で数万トークンになり、list_run_case_diffs から証跡の実体 URL を外した判断と矛盾するため）。トークン消費を抑えるため、確認する identity は 1 回の呼び出しで最大 50 件までとし、**履歴が無い（1 度も判定されていない）identity は応答から省く**。55 件の changed 証跡がある Run に対してtestCaseId を指定せず呼ぶと、先頭 50 件だけを確認し、そのうち履歴があるものだけを返す（51 件目以降は未確認のまま）。全件を確認したい場合は testCaseId で個別に絞り込むこと。\n\n**判断の目安**: 直近の判定がノイズに偏っている箇所（especially currentVersionCount が高い＝現在のケース内容の版での判定が多い）は noise_* を自信を持って付けてよい。1 回でも不具合（rejected）や受入（approved）の実績がある箇所はノイズと決めつけず needs_review/unknown に留める。履歴が無い箇所は他のヒント（shared_across_cases・tiny_region）と画像そのものだけで判断する。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "testRunId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "対象 Run の ID"
+          },
+          "testRunCaseId": {
+            "description": "指定すると、この run-case の証跡だけに絞る",
+            "type": "string",
+            "minLength": 1
+          },
+          "testCaseId": {
+            "description": "指定すると、このテストケース（TC-{番号} の表示番号ではない）の証跡だけに絞る",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "testRunId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_test_plans",
+      "description": "テスト計画の一覧を取得する（Viewer 以上で利用可）。**常に作成日時の降順（新しい順）で返る**——直近に始めた計画が先頭に来る。タイトルのフリーテキスト検索・status（OPEN/CLOSED）・ページングに対応する。未指定は絞り込まない。\n\n**人にテスト計画を選んでもらう最初のステップとして使う**（get_test_plan / set_test_plan_prs 等に渡す planId をここで手に入れる。IDを人に手入力・貼り付けさせない）。各要素には planId と title の両方が入るため、**選択肢を提示するときは必ずタイトルと planId の両方を出す**（タイトルだけだと、似た対象・同じリポジトリの計画が並んだときに取り違える）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "description": "ページ番号（1 始まり）。デフォルト 1",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "description": "1 ページの件数。デフォルト 20",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "searchWord": {
+            "description": "タイトルのフリーテキスト検索",
+            "type": "string"
+          },
+          "status": {
+            "description": "進行状態で絞り込む。未指定は全状態（OPEN / CLOSED / COMPLETED）。許容値: TEST_PLAN_STATUS_OPEN / TEST_PLAN_STATUS_CLOSED / TEST_PLAN_STATUS_COMPLETED",
+            "type": "string",
+            "enum": [
+              "TEST_PLAN_STATUS_OPEN",
+              "TEST_PLAN_STATUS_CLOSED",
+              "TEST_PLAN_STATUS_COMPLETED"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "start_test_plan",
+      "description": "テスト計画を開始する（ステップ0）。title は任意 —— 未指定ならサーバーが暫定タイトルを入れ、titleIsAuto=true になる。対象 PR を set_test_plan_prs で設定すると、titleIsAuto が true の間だけ PR の束からタイトルを導出し直す（人が明示的にタイトルを付け直すと titleIsAuto は false になり、以降 PR を入れ替えても踏み潰さない）。1 リリース = 1 テスト計画（PR を 1 本以上束ねたものがリリースにあたる）。テスト計画は独立した機能で、版（version）には一切触らない。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "description": "テスト計画のタイトル。未指定はサーバーが暫定タイトルを入れる",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "get_test_plan",
+      "description": "テスト計画を、対象 PR（testPlanPrs）・資料（testPlanSources）・診断（testPlanFindings）・打った手（testPlanActions）込みで1 往復で取得する（Viewer 以上で利用可）。planId が分からない場合は list_test_plans で対象の計画を先に選ぶ。MCP 接続の確認にも使える —— これが通ればステップ0（MCP 接続）は完了。testPlan.steps に 7 個固定のステップ進捗（stepNo・state・isStale・isOptional）が入る。isStale はサーバー側で計算した値で、上流の内容を更新する呼び出し（put_plan_summary・propose_plan_actions 等）を行うと、READY/CONFIRMED まで進んでいた下流ステップにだけ自動的に伝播する（まだ手を付けていない TODO・任意で外した SKIPPED は対象外）。\n\n**既定では応答を軽量化している（detail=summary）。** 診断が 60 件を超えるような規模になると、全フィールドを毎回返すと応答が 10 万文字を超えて読めなくなるため、既定で診断の body/codeQuote/expected/fileUrl、資料の summary/contentHash、打った手の payload.commentBody/caseStory など、選ぶのに使わない重いフィールドを落とす。findingId・title・confidence・severity・category 等は残るので、どの診断を詳しく見るか・どの資料を読み直すかはこれで選べる。**全フィールドが要る場合はdetail=\"full\" を指定すること**（診断単位の個別取得はできないため、full にするとその include 対象は全件が全フィールドで返る）。応答の detail が実際に返した詳細度、included が実際に含めた関連データの種類——included に無いキーの配列が空なのは除外したからで、0 件だからではない。\n\ntestPlanSources[].triageStatus は、人がその資料をこの計画の根拠として妥当か判定した値。TEST_PLAN_SOURCE_TRIAGE_STATUS_NOT_RELEVANT または TEST_PLAN_SOURCE_TRIAGE_STATUS_INACCURATE の資料は、要約・観点・診断の根拠として引用しないこと。引用してよいのは未判定または TEST_PLAN_SOURCE_TRIAGE_STATUS_RELEVANT の資料だけ。testPlanSources[].relevances には、資料側の場所ラベルと対象 PR の変更ファイルパスの対応が入る（sourceAnchor は本文抜粋ではない）。testPlanFindings[].triageStatus は診断への対応要否で、意味が異なる。testPlanActions[].selection は提案への人の取捨選択で、設定・変更する MCP ツールは無い。\n\n**資料・観点提案・診断を消す、確認済みを取り消す MCP ツールは存在しない。** これらはいずれも人のセッション限定（backend の denyAPIToken）で、エージェントに「やり直したい」と伝えて誤って消させる事故を防ぐための設計判断。やり直したい・消したいときは、代わりの手段（DB を直接触る等）を探さず、その旨を人に伝えて Web 画面で操作してもらうこと。add_plan_sources・collect_plan_sources・propose_plan_actions はいずれも追加専用で、置き換え・削除は行えない。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テスト計画 ID"
+          },
+          "include": {
+            "description": "取得する関連データの種類（prs/sources/findings/actions）。省略時は全部取得する。使わない種類を外すと応答をさらに絞れる（例: 診断だけ読みたいなら [\"findings\"]）。",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "prs",
+                "sources",
+                "findings",
+                "actions"
+              ]
+            }
+          },
+          "detail": {
+            "description": "応答の詳細度。省略時は \"summary\"（ID・タイトル・確信度・重要度・種類など、どれを詳しく見るか選ぶのに使うフィールドだけ返す）。診断の本文・引用コード・期待値・パーマリンク、資料の概要・ハッシュ、打った手のコメント本文・ストーリーまで全部読みたい場合は \"full\" を指定すること。",
+            "type": "string",
+            "enum": [
+              "full",
+              "summary"
+            ]
+          }
+        },
+        "required": [
+          "planId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_tags",
+      "description": "連携リポジトリの GitHub タグを新しい順に返す（Viewer 以上で利用可）。リリースタグで管理しているチームが、テスト計画の対象を「前回のタグ〜今回のタグ」で決めるための候補を得る。searchWord でタグ名を絞り込め、page / pageSize でページングできる。\n\nリポジトリは githubRepositoryId（get_test_plan が返す対象 PR の githubRepositoryId など）か repository（owner/name）のどちらか一方で指定する。PR をまだ設定していない新しい計画でも owner/name で使える。githubAccountLinked が false のときは、呼び出したユーザー本人の GitHub 連携が未完了で tags は空。選んだタグは list_pull_requests_in_tag_range に渡して PR に展開する。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "githubRepositoryId": {
+            "description": "連携済み GitHub リポジトリの ID。repository とどちらか一方を指定",
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "description": "GitHub リポジトリ名（例: \"owner/name\"）。githubRepositoryId とどちらか一方を指定",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+$"
+          },
+          "searchWord": {
+            "description": "タグ名の絞り込み（部分一致）",
+            "type": "string"
+          },
+          "page": {
+            "description": "ページ番号（1 始まり）。デフォルト 1",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "description": "1 ページの件数。デフォルト 20",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_pull_requests_in_tag_range",
+      "description": "前回のタグ〜今回のタグの間に入ったマージ済み PR を返す（Viewer 以上で利用可）。何も保存しない読み取り専用の操作。結果の PR を set_test_plan_prs に渡すと、テスト計画の対象になる（githubRepositoryId + prNumber をそのまま渡せる）。\n\nheadTag が今回のタグ（範囲の終点を含む）、baseTag が前回のタグ（範囲の始点を含まない）。baseTag を省略すると headTag の直前のタグを自動で使い、実際に使ったタグは応答の baseTag に入る（直前のタグが無ければ空）。タグ名は list_tags で調べる。リポジトリは githubRepositoryId か repository（owner/name）のどちらか一方で指定する（PR をまだ設定していない新しい計画でも owner/name で使える）。\n\n注意: PR を経由しない直接のコミットは含まれない。truncated が true のときはタグ間のコミットが多すぎて一部の PR を拾えていない可能性がある。githubAccountLinked が false のときは、呼び出したユーザー本人の GitHub 連携が未完了で何も取得していない。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "githubRepositoryId": {
+            "description": "連携済み GitHub リポジトリの ID。repository とどちらか一方を指定",
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "description": "GitHub リポジトリ名（例: \"owner/name\"）。githubRepositoryId とどちらか一方を指定",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+$"
+          },
+          "headTag": {
+            "type": "string",
+            "minLength": 1,
+            "description": "今回のタグ（範囲の終点を含む）"
+          },
+          "baseTag": {
+            "description": "前回のタグ（範囲の始点を含まない）。省略時は headTag の直前のタグ",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "headTag"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "set_test_plan_prs",
+      "description": "対象 PR を設定する（ステップ1）。1 本以上必須 —— 1 リリース = 1 テスト計画で、PR を 1 本以上束ねたものがリリースにあたる。**置き換えセマンティクス**: 既存の対象 PR 一覧を丸ごと入れ替える（追記ではない）。\n\nリリースタグで管理している場合は list_pull_requests_in_tag_range で展開した PR を渡せる。\n\n各 PR は githubRepositoryId + prNumber、repository（owner/name）+ prNumber、または url で指定できる。未連携リポジトリの PR は、呼び出したユーザー本人の GitHub 権限で読めれば詳細を取得して保存し、読めなければ参照（owner/name + PR 番号）だけを保存する（referenceOnly=true）。\n\n連携済み PR の title / author / changedPaths はここでは渡さない —— サーバーが GitHub から取り直す（改竄された changedPaths をそのまま保存すると影響分析が歪むため。権威ある値はサーバー自身が持つ）。\n\ntitleIsAuto が true の間（人が明示的にタイトルを付け直していない間）は、ここで対象 PR の束からタイトルを導出し直す。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テスト計画 ID"
+          },
+          "prs": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "githubRepositoryId": {
+                  "description": "対象 PR が属する GitHub リポジトリ ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "repository": {
+                  "description": "GitHub リポジトリ名（例: \"owner/name\"）",
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+$"
+                },
+                "url": {
+                  "description": "GitHub PR URL（https://github.com/{owner}/{repo}/pull/{number}）",
+                  "type": "string",
+                  "format": "uri"
+                },
+                "prNumber": {
+                  "description": "PR 番号。url 指定時は省略可",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            "description": "対象 PR（1 本以上必須。丸ごと置き換え）。各要素は { githubRepositoryId, prNumber }、{ repository, prNumber }、{ url } のいずれか"
+          }
+        },
+        "required": [
+          "planId",
+          "prs"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "collect_plan_sources",
+      "description": "資料を自動収集する（ステップ2）。GitHub（対象 PR にリンクされた issue）と、nagio の仕様書機能に登録された仕様書（list_specs で見られるもの）を収集し、呼び出し時点で tes_plan_sources へ書き込み済みの結果を collectedSources として返す。**対象 PR 自身の本文・コミットは資料として登録しない**（PR は plan_prs に別枠、Why/What はput_plan_summary に入るため二重に持たない）。\n\nあわせて、過去のテスト計画が同じ対象（changed_paths）で使った資料の候補を candidateSourcesFromPastPlans として返す（属人性の解消 —— 過去にこの領域を触った計画が使った資料を候補として提示する）。**候補はまだ tes_plan_sources へ書き込まれていない**。Web 画面に候補を選ぶ欄は無いため、採否はエージェントが判断する。中身を確かめ、今回の変更に関連するものだけを add_plan_sources に渡すと今回の計画の資料になる。addedBy=TEST_PLAN_SOURCE_ADDED_BY_HUMANの候補が特に価値が高い（機械が見つけられなかった資料だから）。\n\nNotion・Jira 等の外部サービスはここでは読まない（連携先の認証・保管を抱え込まない設計）。それらを根拠にする場合は Claude Code 側で読み、今回の変更に本当に関連するか、内容が現行仕様として正しいかを確認してから add_plan_sources に渡すこと。古い・現行と食い違う資料は根拠として登録しない。登録する場合はsummary に古い／食い違う旨を明記すること。権限不足などで読めない外部資料は本文を推測で要約せず、未読である旨をsummary に明記すること。\n\n既存資料の testPlanSources[].triageStatus も確認し、人が TEST_PLAN_SOURCE_TRIAGE_STATUS_NOT_RELEVANT または TEST_PLAN_SOURCE_TRIAGE_STATUS_INACCURATE と判定した資料は要約・観点・診断の根拠として引用しないこと。引用してよいのは未判定または TEST_PLAN_SOURCE_TRIAGE_STATUS_RELEVANT の資料だけ。\n\n**このツールも add_plan_sources も追加専用。** 資料を消す・置き換える MCP ツールは存在しない。不要な資料があっても代わりの手段を探さず、人に Web 画面で削除（ClearSourcesV1。人のセッション限定）してもらうこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テスト計画 ID"
+          }
+        },
+        "required": [
+          "planId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "add_plan_sources",
+      "description": "資料を追加する（ステップ2）。人が直接足す、またはエージェントが Notion・Jira 等 Claude Code 側に既にある接続で読んだ内容を渡す。nagio は受け取る口を持つだけで外部サービスへは繋がない。**このツールは追加専用。**既存の資料は消えず、消す MCP ツールも存在しない。誤って足した資料や不要になった資料を消したい場合は、代わりの手段（DB を直接触る等）を探さず、人に Web 画面で削除（ClearSourcesV1。ステップ2の資料を丸ごとクリアする人のセッション限定の操作）してもらうこと。document_type・summary・title を訂正したいだけなら（削除ではなく訂正）、update_plan_source でエージェント自身が直せる。\n\ncollect_plan_sources が返した candidateSourcesFromPastPlans をそのまま渡すと、過去のテスト計画が使った資料を今回の計画にも採用できる（候補の採否は画面ではなくエージェントが判断する）。**対象 PR 自身の本文・コミットはここで登録しないこと**（PR は plan_prs に別枠であり、Why/What は put_plan_summary に入るため、資料として二重に持つ必要はない）。登録前に、今回の変更に本当に関連するか、内容が現行仕様として正しいか（古いチケット・古い仕様ではないか）を確認すること。古い・現行と食い違う資料は根拠として登録しない。登録する場合は summary に古い／食い違う旨を明記すること。権限不足などで読めない外部資料は本文を推測で要約せず、未読である旨を summary に明記すること。\n\nget_test_plan で既存資料の triageStatus を読むとき、人が TEST_PLAN_SOURCE_TRIAGE_STATUS_NOT_RELEVANT または TEST_PLAN_SOURCE_TRIAGE_STATUS_INACCURATE と判定した資料は要約・観点・診断の根拠として引用しないこと。引用してよいのは未判定または TEST_PLAN_SOURCE_TRIAGE_STATUS_RELEVANT の資料だけ。関連箇所の登録は任意だが、分かる場合は登録時にrelevances へ埋めること。\n\n原文（本文全体）は保存しない —— 権限が壊れる（Notion 側で閲覧を絞っている資料をコピーするとその制御が消える）ため、参照（ref）と contentHash・fetched_at だけを持つ。\n\n**応答は件数（count）と sourceId・citationNumber の一覧だけを返す**（登録した内容をそのまま返さない）。citationNumber は診断の expected 等から `[7]` のように引用するのに使う（引用の手順は put_plan_findings のexpected の説明を参照）。登録した内容そのものを確認したい場合は get_test_plan を呼び直すこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テスト計画 ID"
+          },
+          "sources": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "medium": {
+                  "type": "string",
+                  "enum": [
+                    "TEST_PLAN_SOURCE_MEDIUM_PULL_REQUEST",
+                    "TEST_PLAN_SOURCE_MEDIUM_TICKET",
+                    "TEST_PLAN_SOURCE_MEDIUM_COMMIT",
+                    "TEST_PLAN_SOURCE_MEDIUM_NAGIO",
+                    "TEST_PLAN_SOURCE_MEDIUM_EXTERNAL_URL",
+                    "TEST_PLAN_SOURCE_MEDIUM_NOTION",
+                    "TEST_PLAN_SOURCE_MEDIUM_GOOGLE_DOCS"
+                  ],
+                  "description": "資料の媒体（どこにあるか）。許容値: TEST_PLAN_SOURCE_MEDIUM_PULL_REQUEST / TEST_PLAN_SOURCE_MEDIUM_TICKET / TEST_PLAN_SOURCE_MEDIUM_COMMIT / TEST_PLAN_SOURCE_MEDIUM_NAGIO / TEST_PLAN_SOURCE_MEDIUM_EXTERNAL_URL / TEST_PLAN_SOURCE_MEDIUM_NOTION / TEST_PLAN_SOURCE_MEDIUM_GOOGLE_DOCS"
+                },
+                "ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "資料への参照。medium ごとに形式が異なる自由文字列（PR 番号、issue 番号、仕様書 ID、URL 等）"
+                },
+                "title": {
+                  "description": "資料のタイトル",
+                  "type": "string"
+                },
+                "addedBy": {
+                  "type": "string",
+                  "enum": [
+                    "TEST_PLAN_SOURCE_ADDED_BY_AGENT",
+                    "TEST_PLAN_SOURCE_ADDED_BY_HUMAN"
+                  ],
+                  "description": "人が足したか（HUMAN）、エージェントが足したか（AGENT）。許容値: TEST_PLAN_SOURCE_ADDED_BY_AGENT / TEST_PLAN_SOURCE_ADDED_BY_HUMAN"
+                },
+                "contentHash": {
+                  "description": "資料の内容のハッシュ。GitHub 由来は省略可（サーバーが API 応答から算出する）。Notion 等エージェント経由の資料は、読んだ本文から算出した値を渡す（次回この資料を読んだときに内容が変わったか contentChanged で判定するために使う）",
+                  "type": "string"
+                },
+                "url": {
+                  "description": "資料そのものを開く URL。**medium=EXTERNAL_URL/NOTION/GOOGLE_DOCS のときだけ渡すこと。** GitHub（PULL_REQUEST/TICKET/COMMIT）と nagio の仕様書機能に登録された仕様書（NAGIO）はサーバーが ref から URL を組むため、ここで渡しても無視される（渡した URL をそのまま出すと、資料と無関係な場所へ誘導できてしまうため）",
+                  "type": "string"
+                },
+                "documentType": {
+                  "description": "資料種別（何の資料か）。仕様書・PRD・ADR・チケット・設計メモ等の自由文字列。判断できる場合に渡す（チームごとに増えるため固定の選択肢は用意していない）",
+                  "type": "string"
+                },
+                "summary": {
+                  "description": "記載内容の概要（1 行程度）。「資料の呼び名」である title とは別の情報",
+                  "type": "string"
+                },
+                "relevances": {
+                  "description": "この資料のどの部分が、今回の変更のどこに効くかを示す関連箇所（複数可）。sourceAnchor は資料側の該当箇所（見出し・セクション名・ページ番号など場所を指す短いラベル。資料本文の抜粋を入れないこと）。changedPath は対象 PR の変更ファイルパスと完全一致させること（一致しないとエラーになる）。sourceAnchor・changedPath のどちらかは指定すること（両方空はエラー）。",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sourceAnchor": {
+                        "type": "string"
+                      },
+                      "changedPath": {
+                        "type": "string"
+                      },
+                      "note": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "required": [
+                "medium",
+                "ref",
+                "addedBy"
+              ]
+            },
+            "description": "追加する資料（1 件以上）"
+          }
+        },
+        "required": [
+          "planId",
+          "sources"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "update_plan_source",
+      "description": "登録済みの資料の document_type・summary・title を訂正する（ステップ2）。**編集できるのはこの3つだけ**——medium・ref・citationNumber・contentHash・addedBy 等は変えられない（サーバー側で常に現状のまま再セットされる）。それらを変えたい場合は資料そのものが別物なので、代わりに add_plan_sources で新しい資料として足すこと。\n\n**このツールでも既存資料の削除はできない。** 削除は人が Web 画面の「クリア」（ClearSourcesV1。ステップ2の資料を丸ごとクリアする人のセッション限定の操作）からのみ行う。\n\ndocumentType/summary/title は部分更新——未指定のフィールドは現状維持される。relevances は置き換え——渡すと既存の関連箇所は消え、渡した内容に丸ごと入れ替わる。1 件も無くしたい場合は空配列を渡すこと。sourceAnchor は資料本文の抜粋ではなく、見出し・セクション名・ページ番号など場所を指す短いラベルにすること。changedPath は対象 PR の変更ファイルパスと完全一致させること。\n\ndocumentType/summary/title/relevances は部分更新——未指定のフィールドは現状維持される。何も指定しない呼び出しは無意味なので、**最低1つは指定すること**。読めなかった外部資料の summary を推測で補完してはいけない。未読なら未読である旨を書き、古い・現行と食い違う資料を残す場合はその旨を summary に明記すること。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "訂正する資料の ID（get_test_plan の testPlanSources[].sourceId）"
+          },
+          "documentType": {
+            "description": "資料種別（自由文字列）。未指定なら現状維持",
+            "type": "string"
+          },
+          "summary": {
+            "description": "記載内容の概要（1 行程度）。未指定なら現状維持",
+            "type": "string"
+          },
+          "title": {
+            "description": "資料のタイトル。未指定なら現状維持",
+            "type": "string"
+          },
+          "relevances": {
+            "description": "関連箇所の置き換え。未指定なら現状維持、空配列なら全削除",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sourceAnchor": {
+                  "type": "string"
+                },
+                "changedPath": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "sourceId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "put_plan_summary",
+      "description": "要約を登録する（ステップ2）。**置き換えセマンティクス**: tes_plans の要約 3 列（概要 / Why / What）を丸ごと上書きする（版にしない。やり直したら上書きされる。前回の内容は残らない）。\n\n**summaryWhy（なぜこの変更が要るのか）は省略できるが、必ず書くこと。** summary だけで「何が変わったか」を書いても、テスト設計者はどこに重みを置くか判断できない —— それは背景・解こうとしている課題（Why）を読まないと決まらない。summaryWhat には何が変わるのか（変更の中身）を書く。\n\n関連資料（PR 本文・issue・仕様書・外部資料）はここに書かず、collect_plan_sources / add_plan_sources 側の構造化した資料一覧に持たせること（誰が足したか・いつ読んだか・その後変わったかが要約の自由文に混ぜると消えるため）。\n\n**引用元は `[1]` のように角括弧＋資料の citationNumber で summary / summaryWhy / summaryWhat 本文に添えること。** citationNumber は資料登録後に get_test_plan の testPlanSources から読める値で、作成時に一度だけ採番され振り直されない（欠番は許容）。資料を先に登録してから呼ぶこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テスト計画 ID"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "description": "何のリリースかを 1〜2 文で"
+          },
+          "summaryWhy": {
+            "description": "なぜこの変更が要るのか（背景・解こうとしている課題）。省略可能だが、必ず書くことを推奨する",
+            "type": "string"
+          },
+          "summaryWhat": {
+            "description": "何が変わるのか（変更の中身）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "planId",
+          "summary"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "put_plan_findings",
+      "description": "診断を登録する（ステップ5）。**既定（mode=\"replace\"）は置き換えセマンティクス**: 既存の診断を全て入れ替える（版にしない）。診断が 0 件（問題なし）も正当な結果として空配列を送れる。\n\n**件数が多く 1 回のリクエストで送り切れない場合は分割して送ること。** 手順:\n1. 1 回目は mode を指定しない（既定の \"replace\"）か明示的に \"replace\" にして送る\n2. 2 回目以降は mode=\"append\" で送る（既存を消さずに追加する。replace で送ると 1 回目の分が消える）\n\n**分割送信の途中で失敗すると中途半端な状態が残り、このツールではやり直せない。** 診断を消す・置き換える MCP ツールは存在しないため（下記参照）、途中失敗に気付いたら人に事情を伝えて Web 画面でクリアしてもらうこと。\n\n**応答は件数（count）と ID（findingIds）だけを返す**（登録した内容をそのまま返さない。件数が多いと応答が肥大化するため）。登録した内容を確認したい場合は get_test_plan を呼び直すこと。\n\n**confidence（確信度）・severity（重要度）・expected（本来どうあるべきか）の3つが揃って初めて、読み手が「リリースを止めるか」を判断できる。** confidence と severity は直交する軸で、片方だけでは判断材料にならない —— 「確信度は低いが当たれば致命的」（severity=HIGH）と「確信度は高いが軽微」（severity=LOW）は扱いが正反対で、畳んで1本の指標にしないこと。expected は「本来どうあるべきか」の対比を示す軸で、根拠資料があれば引用番号で示し、無ければ書けない理由を書く（詳細は expected の説明参照）。\n\n**nagio が言えることの限界**: 実負荷は測らないので、コードから言えるのは構造的リスク（例: 「N+1 がある」）まで。「遅い」とは書かないこと —— 実測していない断定を書くと、所見が事実の顔をしてしまう。\n\n機能バグだけを診断としないこと。セキュリティ・データ整合性・性能・運用性・互換性・アクセシビリティ等、コードから読み取れる非機能リスクも同じ場所に出す（category 参照）。\n\n**対象は「このリリースが利用者に与えるリスク」に限ること。開発の都合（CI・開発プロセス・依存関係の管理・コード品質・ドキュメントの不足）は診断にしないこと** —— 診断は「リリースを止めるか、何を確かめるか」の判断材料であり、そこに効かないものが混ざると件数が増えて読みづらくなるだけ。例:\n- 「CI が失敗しても通知が無く気づけない」→ **診断にしない**（開発プロセスの話。利用者に影響しない）\n- 「本番で失敗理由がログに出ず、運用者が原因を特定できない」→ **診断にする**（category=operability。製品を運用する人が困る）\n- 「go mod tidy を CI で毎回叩いていて遅い」→ **診断にしない**（CI のビルド時間の話。製品の性能ではない）\n- 「一覧 API が N+1 でリクエストごとに数十クエリ発行する」→ **診断にする**（category=performance。利用者が触る機能の速度に影響する）",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テスト計画 ID"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "confidence": {
+                  "type": "string",
+                  "enum": [
+                    "TEST_PLAN_FINDING_CONFIDENCE_HIGH",
+                    "TEST_PLAN_FINDING_CONFIDENCE_MEDIUM",
+                    "TEST_PLAN_FINDING_CONFIDENCE_LOW"
+                  ],
+                  "description": "この指摘がどれだけ確からしいか。**severity（重要度）とは直交する別軸で、畳んで1本にしないこと。**HIGH: コードを読んで直接確認した事実（例: 「この endpoint に認可チェックが無い」）。MEDIUM: 根拠はあるが断定はできない（例: 挙動から類推した設計意図）。LOW: 将来起こりうるが今は起きていない推測（例: 「将来この参照 RPC が拡張されたら情報漏えいになりうる」）。許容値: TEST_PLAN_FINDING_CONFIDENCE_HIGH / TEST_PLAN_FINDING_CONFIDENCE_MEDIUM / TEST_PLAN_FINDING_CONFIDENCE_LOW"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "TEST_PLAN_FINDING_SEVERITY_HIGH",
+                    "TEST_PLAN_FINDING_SEVERITY_MEDIUM",
+                    "TEST_PLAN_FINDING_SEVERITY_LOW"
+                  ],
+                  "description": "この診断が当たっていた場合にどれだけまずいか。confidence とは直交する別軸。**ケースの `severity`（CRITICAL/MAJOR/…）とは別物なので混同しないこと。** **「確信度は低いが severity は高い」（起きるかは未確定だが、起きれば致命的）という組み合わせを恐れずに使うこと** —— これを避けて severity を下げると、重要な指摘が軽微な所見に埋もれる。許容値: TEST_PLAN_FINDING_SEVERITY_HIGH / TEST_PLAN_FINDING_SEVERITY_MEDIUM / TEST_PLAN_FINDING_SEVERITY_LOW"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "診断のタイトル"
+                },
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "診断の本文（何が起きている・起きうるか）"
+                },
+                "expected": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "本来どうあるべきか（期待する挙動・要件）。**空欄や「不明」の1文字で埋めて済ませないこと** —— 書けない場合は「何が起きたか」が伝わる理由を書く（例: 「要件が資料に見当たらず、人にも確認できなかった」）。要件がどこにも定まっていないこと自体が指摘として価値がある（コードの問題ではなく仕様未確定という、リリース前に気付きたい報告そのもの）。\n\n**書き方の手順:**\n1. 対象 PR・get_test_plan の資料（testPlanSources）に根拠となる要件が無いか探す。あれば `本来は〜であるべき[7]`のように資料の citationNumber を角括弧で引用する\n2. 資料に見当たらない場合は、**先に人に確認する。確認せずに自分で閾値や仕様を決めないこと** —— 根拠のない閾値による指摘は confidence が上がらず、読み手も判断できない\n3. 人と合意できた要件は `add_plan_sources`（medium=TEST_PLAN_SOURCE_MEDIUM_NAGIO, documentType=\"要件\" または \"非機能要件\"）で資料として登録し、その citationNumber を expected から引用する\n4. 確認する手段が無い、または確認できなかった場合は、その旨を expected に書く（書けない理由）\n\nconfidence（確からしさ）・severity（深刻さ）・expected（本来どうあるべきか）の3つが揃って初めて、読み手が「リリースを止めるか」を判断できる。"
+                },
+                "filePath": {
+                  "description": "引用元のファイルパス（任意。実装を引用して課題を伝える）",
+                  "type": "string"
+                },
+                "line": {
+                  "description": "引用元の行番号（任意）",
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "codeQuote": {
+                  "description": "引用元のコード片（任意）",
+                  "type": "string"
+                },
+                "derivedAction": {
+                  "description": "この診断が導く帰結（任意）。許容値: TEST_PLAN_DERIVED_ACTION_ADD_CASE / TEST_PLAN_DERIVED_ACTION_CARRY_OVER / TEST_PLAN_DERIVED_ACTION_REQUEST_FIX",
+                  "type": "string",
+                  "enum": [
+                    "TEST_PLAN_DERIVED_ACTION_ADD_CASE",
+                    "TEST_PLAN_DERIVED_ACTION_CARRY_OVER",
+                    "TEST_PLAN_DERIVED_ACTION_REQUEST_FIX"
+                  ]
+                },
+                "category": {
+                  "description": "リスクの種類。自由文字列（40 文字まで。チーム固有の軸を migration 無しで足せるように enum にしていない）。推奨語彙は次の 7 つ。**機能は細分化しないこと**（入力検証・同時実行・状態遷移等に割らない。分類の判断コストが増えるだけで、優先順位は confidence/severity が付ける）。\n- functional（機能）: 正しく動かない。検証漏れ・競合・権限の穴も含む\n- data_integrity（データ整合性）: 不整合・消失・重複\n- security（セキュリティ）: 情報漏れ・越権\n- performance（パフォーマンス）: 遅い・規模で詰まる\n- operability（運用性）: 気づけない・戻せない（**製品を運用する人が困るものに限る**。下記の対象外参照）\n- compatibility（互換性）: 既存利用者が壊れる\n- accessibility（アクセシビリティ）: 使えない人が出る\n\n**confidence/severity とは直交する別軸**: 同じ category=security でも、指摘によって confidence・severity は異なりうる。category だけでは止める根拠か判断できず、confidence/severity だけでは何のリスクか分からない。",
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "githubRepositoryId": {
+                  "description": "引用元（filePath/line）が属する GitHub リポジトリ ID。指定するとサーバーが対象 PR のマージコミットに固定したパーマリンク（fileUrl）を組む。未指定なら fileUrl は空になるが、診断自体は残る（リンクを作れないことを理由に指摘を落とさない）",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "confidence",
+                "severity",
+                "title",
+                "body",
+                "expected"
+              ]
+            },
+            "description": "診断（0 件も可）"
+          },
+          "mode": {
+            "description": "省略時は \"replace\"（既存の診断を全て入れ替える）。分割送信の 2 回目以降だけ \"append\"（既存を消さずに追加する）を指定すること。",
+            "type": "string",
+            "enum": [
+              "replace",
+              "append"
+            ]
+          }
+        },
+        "required": [
+          "planId",
+          "findings"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "propose_plan_actions",
+      "description": "打てる手を提案する（テスト計画ステップ3のケース候補操作を扱う。PR_COMMENT は互換のため入力上は残るが、このツールでは提案しない）。ここで作られるアクションは常に PROPOSED —— 実行は人だけの操作を経る。**このツールでは実行されない**（commit_cases / execute_action に相当するMCP ツールは存在しない。台帳を汚す操作と外向きの操作〈PR にコメントが公開され通知が飛ぶ〉は人のセッション限定という設計判断で、backend の denyAPIToken が API トークンからの到達を拒否する）。ケースの実際の作成・更新には既存の create_test_case / update_test_case を使うこと。**提案し直したい（前回の提案を取り下げたい）場合も、このツールでは消せない。** 提案（status=PROPOSED のケース系アクション）を消す MCP ツールは存在しない（ClearProposedCaseActionsV1 も人のセッション限定）。代わりの手段を探さず、人に Web 画面でクリアしてもらうこと。\n\n**PR_COMMENT は提案しないこと。** 互換のため kind の enum には残っているが、ステップ6「対応の実行」画面からPR コメント投稿は実行されなくなった。PR への反映は、ステップ6 が示す実行例のプロンプトに従い、Claude Code から直接行う運用になった。\n\n**重複判定・突合は nagio ではなく、このツールを呼ぶあなたが行う。** タイトル一致のような機械的な突合を nagio は一切しない —— 人が手で書いたケースを機械が取り違えて書き換える事故を避けるため。**提案する前に search_cases（キーワード検索）や list_test_cases（スイート・条件での絞り込み）で既存ケースを検索し、重複や改訂対象を自分で特定すること。**\n\nkind ごとの対象の指定方法:\n- **CASE_CREATE**: targetCaseId は指定しない（実行時にサーバーが作ったケースの ID が入る）\n- **CASE_REVISE**: 直す対象の既存ケースを targetCaseId で明示する（**必須**）\n- **CASE_MERGE**: 残す側のケースを targetCaseId、アーカイブする側のケース群を payload.mergeSourceCaseIds で明示する（**両方必須**）\n- **PR_COMMENT**: 互換のため enum の値は残るが、このツールでは提案しない\n\n**承認済みのケースには触らない —— draft のみが対象**（既存の update_test_case が承認済みケースにfailed_precondition を返す挙動と揃える）。\n\n**再提案のときの突合の起点**: get_test_plan が返す testPlanActions[].targetCaseId は「この計画が過去にどのケースを作った・改訂したか」を保持している。ケース起票をやり直す前にこれを確認すれば、前回分をゼロから検索し直さずに突合の起点にできる。\n\n**応答は件数（count）と ID（actionIds）だけを返す**（提案した内容をそのまま返さない）。提案内容を確認したい場合はget_test_plan を呼び直すこと。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テスト計画 ID"
+          },
+          "actions": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "findingId": {
+                  "description": "この提案の元になった診断の ID。人が直接起票を促した提案（診断を経由しない）は省略",
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "TEST_PLAN_ACTION_KIND_PR_COMMENT",
+                    "TEST_PLAN_ACTION_KIND_CASE_CREATE",
+                    "TEST_PLAN_ACTION_KIND_CASE_REVISE",
+                    "TEST_PLAN_ACTION_KIND_CASE_MERGE"
+                  ],
+                  "description": "提案する手の種別。許容値: TEST_PLAN_ACTION_KIND_PR_COMMENT / TEST_PLAN_ACTION_KIND_CASE_CREATE / TEST_PLAN_ACTION_KIND_CASE_REVISE / TEST_PLAN_ACTION_KIND_CASE_MERGE"
+                },
+                "payload": {
+                  "description": "kind ごとに使うフィールドが決まる（上記各フィールドの説明を参照）",
+                  "type": "object",
+                  "properties": {
+                    "commentBody": {
+                      "description": "PR_COMMENT 用。PR に投稿する本文。現在は画面（ステップ6）から実行されないため、このツールでは提案しないこと",
+                      "type": "string"
+                    },
+                    "githubRepositoryId": {
+                      "description": "PR_COMMENT 用。投稿先 PR が属するリポジトリ ID。現在は画面（ステップ6）から実行されないため、このツールでは提案しないこと",
+                      "type": "string"
+                    },
+                    "prNumber": {
+                      "description": "PR_COMMENT 用。投稿先 PR 番号。現在は画面（ステップ6）から実行されないため、このツールでは提案しないこと",
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "caseTitle": {
+                      "description": "CASE_CREATE / CASE_REVISE 用。ケースのタイトル案。技法名だけではなく、何を確かめるかが一読で分かる具体的な一文にすること",
+                      "type": "string"
+                    },
+                    "casePerspectives": {
+                      "description": "CASE_CREATE / CASE_REVISE 用。観点タグの配列（tes_cases.perspectives に入る想定の内容）。画面ではケース候補のタグとして表示される。複数指定できる。list_perspective_catalogs の観点名に当てはまるものがあれば、その名前をそのまま使い、表記ゆれを避けること",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "caseTestTarget": {
+                      "description": "CASE_CREATE / CASE_REVISE 用。テスト対象。テスト計画ステップ3では見出し（グルーピングの単位）になるため、対象名は一貫した粒度・表記にすること",
+                      "type": "string"
+                    },
+                    "caseIntent": {
+                      "description": "CASE_CREATE / CASE_REVISE では必ず埋める。具体的な手順ではなく、このケースで確かめる中身を 1〜2 行で書く。元になった診断があれば action の findingId を渡すこと",
+                      "type": "string"
+                    },
+                    "caseRationale": {
+                      "description": "CASE_CREATE / CASE_REVISE では必ず埋める。なぜこの候補が必要かを 1 行で書く。根拠資料の引用番号 [n] を含めてもよい。元になった診断があれば action の findingId を渡すこと",
+                      "type": "string"
+                    },
+                    "caseStory": {
+                      "description": "このケースが検証するリリースの振る舞い（マトリクスとは別の読み方 —— ストーリー→観点→ケース —— を与えるためだけの中間結果。tes_cases には列を持たせないため、台帳に入ったあとはこの提案の記録にだけ残る）",
+                      "type": "string"
+                    },
+                    "mergeSourceCaseIds": {
+                      "description": "CASE_MERGE 用。targetCaseId（残す側）に統合してアーカイブする側のケース ID の一覧。どれとどれが重複かの判定はエージェントが行う（下記参照）",
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                },
+                "targetCaseId": {
+                  "description": "CASE_REVISE が直す対象、CASE_MERGE が残す側の既存ケース ID。**この 2 種別では必須**（どのケースを直すのか決まらないと提案を実行できない）。CASE_CREATE / PR_COMMENT では指定しない（CASE_CREATE は実行時にサーバーが作ったケースの ID がここに入る）",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "description": "提案する手（1 件以上）"
+          }
+        },
+        "required": [
+          "planId",
+          "actions"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "list_plan_comments",
+      "description": "テスト計画の資料・診断・要約に付いた人からの指摘コメントを新しい順で取得する（Viewer 以上で利用可、読み取り専用）。人が Web の各行・カードの「コメントする」欄に書いたフィードバックを読み、資料の直し忘れや診断の見落としを直す用途を想定している。\n\n各コメントの sourceId / findingId は**指摘の対象が資料 1 件か、診断 1 件か**を示す（排他。どちらも未設定なら要約（summary/summaryWhy/summaryWhat）全体への指摘）。sourceId は get_test_plan の testPlanSources[].sourceId、findingId は testPlanFindings[].findingId と突き合わせられる。\n\n解決済みのコメントは resolvedAt つきで含まれる。コメントの追加・解決・削除は人のセッション限定の画面操作で、対応する MCP ツールは無い（このツールは読み取り専用）。1 件も無ければ空配列を返す（エラーにはならない）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "テスト計画 ID（list_test_plans の planId）"
+          }
+        },
+        "required": [
+          "planId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "nagio",
+    "version": "0.22.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 5913,
+  "stderr": "[nagio-mcp] NAGIO_TOKEN が未設定です。ApiTokenService.CreateV1（Web の設定画面）で発行したトークンを設定してください。未設定のままだと全ツール呼び出しが unauthenticated で失敗します。\n[nagio-mcp] started (env=production, baseUrl=https://api.nagio.studio, build=1686bb6-dirty built 2026-10-05T07:42:35.178Z)\n"
+}

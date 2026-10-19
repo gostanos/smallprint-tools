@@ -1,0 +1,1049 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "dendro-react-mcp",
+  "version": "0.9.3",
+  "integrity": {
+    "dist": "sha512-9jxP/clAinIgeZtvuxrPhaaLcgRz0eaVA2BPpjYELuTOlVvOVY305gBJAjmid/fPHhC58hhaknsX2Eh5NqwYcg==",
+    "installed": "sha512-9jxP/clAinIgeZtvuxrPhaaLcgRz0eaVA2BPpjYELuTOlVvOVY305gBJAjmid/fPHhC58hhaknsX2Eh5NqwYcg=="
+  },
+  "bin": "node_modules/dendro-react-mcp/mcp-server.js",
+  "main": "mcp-server.js",
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-18T14:09:28.761Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_component_tree",
+      "description": "Start here for structure. Parses the STATIC IMPORT GRAPH from one entry file and returns the component tree: names, types (functional/class), state variables, parent-child edges. Scope: only components reachable from entryFile via static imports — lazy()/dynamic imports and other entry points are not in the tree, so absence from the tree does not mean absence from the app. Prefer analyze_codebase when you want tree + complexity + context in one call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entryFile": {
+            "type": "string",
+            "description": "Absolute path to the entry React component file (e.g., /path/to/App.jsx)"
+          },
+          "maxDepth": {
+            "description": "Maximum depth to traverse. Default: unlimited. Large responses are bounded previews with explicit omissions; use a displayed absolutePath as entryFile to expand a branch.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "entryFile"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_component_details",
+      "description": "Get detailed info about a single React component file: type (functional/class), state variables, imports, and direct children. Use after get_component_tree to drill into a specific component.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Absolute path to the component file"
+          }
+        },
+        "required": [
+          "filePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_component_contract",
+      "description": "Call this BEFORE editing a component — its full contract in one call: props (from the TypeScript type when resolvable, destructuring otherwise), state variables, hooks + contexts read, contexts provided, direct children, who imports it (workspace-wide blast radius with scope disclosed), per-component complexity, and re-render risk count. Resolves by COMPONENT NAME across the workspace (component names, not file basenames — index.tsx exports resolve correctly); pass a file path instead to skip resolution. The notCovered field lists what this deliberately omits (nav edges, per-prop flow, runtime values) so absence is never misread as none. Replaces the find → details → used_by → hook_deps chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string",
+            "description": "Component NAME (e.g. \"UserCard\") to resolve workspace-wide, or an absolute file path to skip resolution"
+          },
+          "searchDir": {
+            "description": "Narrow both name resolution and the used-by scan to this directory. Default: workspace root (complete answer).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_modified_components",
+      "description": "What changed, as components: every file changed vs a git ref (default HEAD — uncommitted work; pass base:\"main\" for PR scope) with the components each declares. Call this FIRST when reviewing or testing recent work, then get_component_contract on each result for blast radius — that pair is the \"what did I just touch and what depends on it\" loop. Changed files with no components still appear (empty components list); deleted files are excluded. Honest errors: not_a_git_repo, bad_ref (unknown or unsafe refs are rejected, never silently swapped for HEAD), and a clean tree says so in the note.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceRoot": {
+            "description": "Project root to diff. Default: the workspace root.",
+            "type": "string"
+          },
+          "base": {
+            "description": "Git ref to compare against (e.g. \"main\" for PR scope, a SHA, \"HEAD~3\"). Default: HEAD — shows uncommitted work (staged + unstaged + untracked).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "detect_circular_deps",
+      "description": "Detect circular import dependencies. Pass the project SOURCE ROOT as a directory for a full scan (scan is capped at depth 5 below rootPath, node_modules excluded — the response discloses the scanned scope, and hasCircularDeps:false only covers that scope). Returns each cycle with its file path and a fix recommendation. To show cycles visually afterwards: open_visualizer + visualize_batch with highlight (red, pulse) steps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "description": "Path to scan - can be a single file or a directory. If a directory, scans all .ts/.tsx/.js/.jsx files."
+          }
+        },
+        "required": [
+          "rootPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_used_by",
+      "description": "Find every component that imports the given component — its dependents / reverse dependency graph. Call this BEFORE modifying or renaming a component to measure blast radius; follow with get_prop_flow on affected edges. Scans the workspace root by default (depth ≤ 8, node_modules excluded) and the response reports the exact scope searched. An empty usedBy with workspace-root scope means genuinely unimported (a removal candidate); with a narrower searchDir it is inconclusive — widen and retry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "componentPath": {
+            "type": "string",
+            "description": "Absolute path to the component file to find usages of"
+          },
+          "searchDir": {
+            "description": "Directory to scan. Default: the workspace root (complete answer). Pass a subdirectory only to deliberately narrow the search — importers outside it will be missed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "componentPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_prop_flow",
+      "description": "Trace how a prop flows from a source component down through its children, tracking renames and pass-through HOCs. An empty flow means the prop is missing, never forwarded, or forwarded through a pattern the tracer cannot follow (spreads into unknown components, render props, context) — the response note disambiguates; it does NOT prove the prop is unused. Visualize afterwards with visualize_trace_flow (flowType: \"prop\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceFile": {
+            "type": "string",
+            "description": "Absolute path to the source component file where the prop originates"
+          },
+          "propName": {
+            "type": "string",
+            "description": "Name of the prop to trace through the component tree"
+          },
+          "maxDepth": {
+            "description": "Maximum depth to trace. Default: 10",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sourceFile",
+          "propName"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_hook_deps",
+      "description": "Analyze React hook dependencies in a component file. Returns details about useEffect, useMemo, useCallback, and other hooks including their dependency arrays, classified by source (prop, state, context, ref). Identifies potential issues like missing dependency arrays.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Absolute path to the React component file to analyze"
+          }
+        },
+        "required": [
+          "filePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_navigation_structure",
+      "description": "Parse the declaratively-defined routing structure. Auto-detects: React Navigation, Expo Router, Next.js App Router, Next.js Pages Router, React Router v6/v7, Remix. Returns navigators + screens + a formatted tree, and names which framework was detected when nothing parses. KNOWN LIMIT: models route DEFINITIONS only — transitions made imperatively (navigate(), router.push()) are not edges, so the graph can under-report reachability (a warning flags this when detected). Pass the PROJECT ROOT directory, not a component file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "description": "Path to the root navigation/routing file or directory containing the project"
+          }
+        },
+        "required": [
+          "rootPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_context_map",
+      "description": "Map React Context providers to their consumers: createContext(), Provider usage, useContext(), custom context hooks. Pass the project source root — the scan covers rootPath to depth 5 (node_modules excluded) and zero contexts outside that scope will be missed (the response note says what was scanned). NOT covered: Zustand/Redux/Jotai and other state libraries. Visualize afterwards with visualize_trace_flow (flowType: \"context\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "description": "Path to the root file or directory to scan for Context patterns"
+          }
+        },
+        "required": [
+          "rootPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_screen_components",
+      "description": "Map which screens use which components in a React Native codebase. Identifies screens from navigation configuration, screens/ folder, or *Screen suffix. For each screen, traces component imports and builds a usage tree showing all components used. Use maxDepth to limit tree depth for large codebases.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "description": "Path to the root file or directory to scan for screens and components"
+          },
+          "screenName": {
+            "description": "Optional: filter to a specific screen by name (case-insensitive, partial match)",
+            "type": "string"
+          },
+          "maxDepth": {
+            "description": "Maximum depth to traverse component imports (default: 6, range: 1-12). Lower values produce smaller output for large codebases.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rootPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_complexity_report",
+      "description": "Score every component's complexity (1-10) from ITS OWN declaration span — lines, JSX depth, props, and hooks are counted per component, so co-located components in one file each get their own accurate score. Use threshold 5+ for moderate issues, 7+ for refactoring candidates. Scope: rootPath scanned to depth 5, node_modules excluded; unparseable files are reported in warnings rather than silently dropped.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "description": "Path to scan for React components"
+          },
+          "threshold": {
+            "description": "Minimum complexity score to include (default: 0)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rootPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_rerender_risks",
+      "description": "Detect React re-render anti-patterns: inline objects/arrays/functions in JSX props, missing useCallback/useMemo. Returns risks by file with severity, line, and fix suggestions. Modern-React aware: when the project uses React Compiler, memoization findings are auto-downgraded to low (the compiler handles them — do NOT add manual memoization there); \"use server\" files are skipped (server code never re-renders); <form action> handlers are not flagged (React 19 idiom). Read the warnings field — it states every adjustment made.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "description": "Path to scan — a single file or directory of React components"
+          },
+          "minSeverity": {
+            "description": "Minimum severity to include. Default: all severities",
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "rootPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "open_visualizer",
+      "description": "Open the Dendro visualizer webview in VS Code. Call this ONCE before visualize_batch or visualize_analysis (they can also auto-open by passing an entryFile param). The response reports the parsed tree size — a 1-2 node tree means the entry file is likely a wrapper/layout; pick a higher-fan-out entry instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entryFile": {
+            "type": "string",
+            "description": "Absolute path to the entry React component file (e.g., /path/to/App.tsx)"
+          }
+        },
+        "required": [
+          "entryFile"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "visualize_batch",
+      "description": "Execute visualization commands sequentially and return correlated node-match/render acknowledgments. success:true means the entire batch was confirmed rendered with no missing targets. Manual walkthroughs return waiting_for_user after the first applied step; later steps have not run. Check progress using action:\"status\" with the returned requestId. Timeouts, partial matches, skipped/superseded batches and delivery failures are explicit. Always use this instead of parallel individual visual commands. Include labels; waitForUser:true gives users Back/Next/Skip pacing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "description": "Default: execute. status reads a previous request without dispatching commands.",
+            "type": "string",
+            "enum": [
+              "execute",
+              "status"
+            ]
+          },
+          "requestId": {
+            "description": "Required for action:status; use the ID returned by execute.",
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "commands": {
+            "description": "Required for execute: 1–100 commands to execute sequentially",
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "highlight",
+                    "zoom",
+                    "annotate",
+                    "traceFlow",
+                    "clear",
+                    "expand",
+                    "collapse",
+                    "fitAll"
+                  ],
+                  "description": "Command type"
+                },
+                "payload": {
+                  "description": "Command payload (same fields as individual tool)",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "label": {
+                  "description": "Human-readable step description shown in control bar (e.g., \"Highlighting complexity hotspots\"). Auto-generated from command type if omitted.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          "waitForResult": {
+            "description": "Default true: wait for completion or a manual pause. false returns queued, which does not establish matching or rendering.",
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "description": "Bounded acknowledgment wait, default 10000 ms. After timeout use action:status; commands may still finish.",
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 30000
+          },
+          "waitForUser": {
+            "description": "Show a \"Next\" button between commands so user controls pacing. Recommended: true for presentations and audits.",
+            "type": "boolean"
+          },
+          "delay": {
+            "description": "Auto-play delay between commands in ms (only used when waitForUser is false). Default: 800.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 30000
+          },
+          "entryFile": {
+            "description": "Entry file path — if provided and no visualizer is open, auto-opens one",
+            "type": "string"
+          },
+          "sessionId": {
+            "description": "Target specific visualizer session",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "export_analysis",
+      "description": "Export Dendro analysis in one of four formats: \"mermaid\" (flowchart syntax for docs), \"json\" (enriched multi-analysis document), \"svg\" (color-coded diagram image), \"markdown\" (formatted report — supports persona: developer/ceo/investor/eng-manager/onboarding). Format-specific options are ignored by other formats.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "mermaid",
+              "json",
+              "svg",
+              "markdown"
+            ],
+            "description": "Output format"
+          },
+          "entryFile": {
+            "type": "string",
+            "description": "Absolute path to the entry React component file"
+          },
+          "maxDepth": {
+            "description": "Maximum depth for tree traversal. Default: unlimited",
+            "type": "number"
+          },
+          "analyses": {
+            "description": "json/markdown: which analyses to include. Default: [\"tree\"] (markdown default depends on persona)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tree",
+                "navigation",
+                "context",
+                "complexity",
+                "screens"
+              ]
+            }
+          },
+          "direction": {
+            "description": "mermaid: graph direction. Default: LR",
+            "type": "string",
+            "enum": [
+              "TB",
+              "LR"
+            ]
+          },
+          "theme": {
+            "description": "svg: color theme. Default: dark",
+            "type": "string",
+            "enum": [
+              "light",
+              "dark"
+            ]
+          },
+          "persona": {
+            "description": "markdown: target audience — changes formatting, language, structure. Default: developer",
+            "type": "string",
+            "enum": [
+              "developer",
+              "ceo",
+              "investor",
+              "eng-manager",
+              "onboarding"
+            ]
+          }
+        },
+        "required": [
+          "format",
+          "entryFile"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "manage_snapshots",
+      "description": "Analysis snapshots for historical tracking, one tool, three actions: \"save\" (run analyses and store under .dendro/snapshots/ — requires entryFile), \"list\" (metadata for every saved snapshot), \"compare\" (diff two snapshots or a snapshot vs \"current\" live analysis — requires base and target; entryFile required when either side is \"current\"). Typical loop: save before a refactor, compare base:\"<id>\" target:\"current\" after.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "save",
+              "list",
+              "compare"
+            ],
+            "description": "What to do"
+          },
+          "workspaceRoot": {
+            "type": "string",
+            "description": "Absolute path to the workspace root directory"
+          },
+          "entryFile": {
+            "description": "save: entry file to analyze (required). compare: required when base or target is \"current\".",
+            "type": "string"
+          },
+          "label": {
+            "description": "save: human-readable label (defaults to filename)",
+            "type": "string"
+          },
+          "analyses": {
+            "description": "save: which analyses to include. Default: [\"tree\", \"complexity\", \"context\"]",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tree",
+                "navigation",
+                "context",
+                "complexity",
+                "screens"
+              ]
+            }
+          },
+          "base": {
+            "description": "compare: snapshot ID or \"current\"",
+            "type": "string"
+          },
+          "target": {
+            "description": "compare: snapshot ID or \"current\"",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "workspaceRoot"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "verify_state_flows",
+      "description": "Verified Projection in one call: generate testable state-flow hypotheses from static analysis, write Jest tests for them, run the tests, and annotate the visualizer tree (green=verified, red=failed, amber=inconclusive). Use stopAfter to run only part of the chain and inspect intermediates: \"hypotheses\" (static analysis only, no files written), \"tests\" (also writes Jest files to __dendro__/tests/), \"run\" (also executes them). Default runs everything including annotation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entryFile": {
+            "type": "string",
+            "description": "Absolute path to the entry React component file"
+          },
+          "workspaceRoot": {
+            "type": "string",
+            "description": "Absolute path to the workspace root directory"
+          },
+          "stopAfter": {
+            "description": "How far to run the chain. Default: annotate (full pipeline)",
+            "type": "string",
+            "enum": [
+              "hypotheses",
+              "tests",
+              "run",
+              "annotate"
+            ]
+          },
+          "maxHypotheses": {
+            "description": "Maximum hypotheses to generate. Default: 20",
+            "type": "number"
+          },
+          "flowTypes": {
+            "description": "Which flow types to analyze. Default: all three",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "context",
+                "prop",
+                "hook-state"
+              ]
+            }
+          },
+          "timeout": {
+            "description": "Jest execution timeout in ms. Default: 60000",
+            "type": "number"
+          },
+          "clearPrevious": {
+            "description": "annotate: clear existing annotations first. Default: true",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entryFile",
+          "workspaceRoot"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "batch_analysis",
+      "description": "Run multiple analyses across multiple entry files in one call. Returns per-entry results plus aggregate summary (total components, highest complexity, shared contexts). Ideal for monorepos and multi-entry apps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "entryFile": {
+                  "type": "string",
+                  "description": "Absolute path to an entry React component file"
+                },
+                "label": {
+                  "description": "Human-readable label for this entry",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "entryFile"
+              ]
+            },
+            "description": "Array of entry files to analyze"
+          },
+          "analyses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tree",
+                "navigation",
+                "context",
+                "complexity",
+                "screens"
+              ]
+            },
+            "description": "Which analyses to run on each entry"
+          },
+          "maxDepth": {
+            "description": "Maximum depth for tree traversal. Default: unlimited",
+            "type": "number"
+          }
+        },
+        "required": [
+          "entries",
+          "analyses"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "trigger_projection",
+      "description": "Diff runtime snapshots and project downstream effects. Call get_runtime_status first. Call once for baseline, then again after a re-render to see what changed and how data flows. Set verify=true to also run Verified Projection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entryFile": {
+            "type": "string",
+            "description": "Absolute path to the entry React component file (e.g., /path/to/App.tsx)"
+          },
+          "componentName": {
+            "description": "Filter to a specific component by name (case-insensitive, partial match)",
+            "type": "string"
+          },
+          "verify": {
+            "description": "If true, also run Verified Projection on changed components to annotate verification status",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entryFile"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "inspect_live_component",
+      "description": "Deep inspect a running component's props, state, hooks, and context values. Call get_runtime_status first to verify connection. Returns real runtime values. Use before modify_runtime_state. Pass diffFromPrevious:true on a SECOND call to get what changed since the last inspection of the same component (props/state/hooks/context deltas) instead of the full snapshot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "componentName": {
+            "type": "string",
+            "description": "Display name of the component to inspect (case-insensitive, partial match). Must be a user-defined component, not a host element like \"View\" or \"Text\"."
+          },
+          "diffFromPrevious": {
+            "description": "Compare against the previous inspection of this component and return only the deltas. Requires a prior call without this flag (that call is the baseline).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "componentName"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_state_owner",
+      "description": "Find which component(s) own a given state variable by name. Uses static analysis (getHookDeps) cross-referenced with the live runtime tree to identify mounted components that define the matching useState variable.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateName": {
+            "type": "string",
+            "description": "Name of the state variable to search for (case-insensitive, partial match). E.g., \"loading\", \"user\", \"email\""
+          },
+          "entryFile": {
+            "description": "Optional entry file path to scan if no matches found in source-mapped components",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stateName"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "modify_runtime_state",
+      "description": "Modify a component's props/state/hooks/context at runtime. Call inspect_live_component first to see current values and identify the right paths. For a simple single-value state change, targetType \"state\" with the hook index from inspect_live_component is the usual path.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "componentName": {
+            "type": "string",
+            "description": "Display name of the component to modify (case-insensitive, partial match)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "props",
+              "state",
+              "hooks",
+              "context"
+            ],
+            "description": "Which part of the component to modify"
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Path within the value to modify (e.g., [\"user\", \"name\"] for state.user.name). Empty array [] to replace the whole value."
+          },
+          "value": {
+            "description": "New value to set at the path"
+          },
+          "hookID": {
+            "description": "Hook ID for hook state overrides (from inspect_live_component hooks array)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "componentName",
+          "type",
+          "path",
+          "value"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "trace_live_prop",
+      "description": "Trace live prop changes through the component tree and animate in the visualizer. Call get_runtime_status first. Call once for baseline, then again after a prop change to see animated flow paths.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "componentName": {
+            "type": "string",
+            "description": "Display name of the component to trace prop flows from (case-insensitive, partial match)"
+          },
+          "entryFile": {
+            "type": "string",
+            "description": "Absolute path to the entry React component file (needed for static analysis)"
+          },
+          "propName": {
+            "description": "Specific prop name to trace. If omitted, auto-detects changed props via diff.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "componentName",
+          "entryFile"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_live_navigation",
+      "description": "Get live navigation state — which screens are mounted (active) vs defined but not visible. Cross-references runtime tree with static React Navigation analysis. Works without runtime too (static-only mode).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "description": "Path to the root navigation file or directory containing navigation files (same as get_navigation_structure)"
+          }
+        },
+        "required": [
+          "rootPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_runtime_status",
+      "description": "Check runtime connection status. MUST call this first before get_live_tree, get_runtime_state, or any live introspection tools. Returns connection status, component count, and setup instructions if disconnected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_live_tree",
+      "description": "Get the live component tree from a connected React Native app. Call get_runtime_status first to verify connection. Returns the full hierarchy as currently rendered, including component types and parent-child relationships.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootComponent": {
+            "description": "Filter to a specific root component by display name",
+            "type": "string"
+          },
+          "maxDepth": {
+            "description": "Maximum depth to return. Default: unlimited",
+            "type": "number"
+          },
+          "includeNative": {
+            "default": true,
+            "description": "Include native/host components like View, Text. Default: true",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_runtime_state",
+      "description": "Find a component in the live runtime tree by name. Call get_runtime_status first to verify connection. Returns source file path, parent, children, and position in the live tree.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "componentName": {
+            "type": "string",
+            "description": "Display name of the component to find (case-insensitive, partial match)"
+          },
+          "includeChildren": {
+            "default": true,
+            "description": "Include direct children in the response. Default: true",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "componentName"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_context_pack",
+      "description": "Whole-repo orientation in one dense CTX-PACK/0.1 text block (~200-400 tokens): directory rollups with lines-of-code and 6-month commit heat, the largest and hottest files, cross-directory import edges, and entry-point candidates. The header declares the row schema (D dir, F file, E edge, X entry), so the block is self-describing. Call this FIRST in a new repo — it replaces several exploratory listings with one read. Git unavailable degrades honestly (heat columns 0, noted in a comment).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "description": "Directory to pack (e.g. the project's src/). Default: the workspace root.",
+            "type": "string"
+          },
+          "topFiles": {
+            "description": "How many largest files get F rows (default 10). Files with 3+ recent commits are always included.",
+            "type": "number"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_usage_guide",
+      "description": "Get recommended workflows, tool categories, sequencing rules, and tips for using Dendro MCP effectively. Call this once at the start of a session to learn how to use the 36 available tools. Returns structured JSON with workflow recipes and best practices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "submit_feedback",
+      "description": "Send a feedback debrief about Dendro to its maker. REQUIRES EXPLICIT USER CONSENT — this is the only Dendro tool that sends anything off-machine, so ask first, every time. Make the invitation warm, not clinical, e.g.: \"Want me to send a quick feedback note to Dendro's maker? It's a short debrief of what worked and what fumbled this session — it directly shapes what gets fixed. Nothing is sent unless you say yes, and it never includes your code or file paths.\" Offer it when tools errored or the user voices an opinion about Dendro; never call it on your own initiative. What is sent: exactly the fields you pass, plus server version, platform, and per-tool call/error counts (tool names only — no error text, no file paths, no code). Write the debrief the way you would for a colleague: honest fumbles AND honest hooks.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "userConsented": {
+            "type": "boolean",
+            "description": "MUST be true, and only after the user explicitly agreed in this conversation. Passing true without asking the user is a violation of their trust."
+          },
+          "summary": {
+            "type": "string",
+            "description": "2-5 sentence honest overall assessment of using Dendro this session"
+          },
+          "fumbles": {
+            "description": "Retries, wrong guesses, confusing responses, dead ends — most valuable field",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hooks": {
+            "description": "Moments the tooling genuinely helped or impressed",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "wouldReuseUnprompted": {
+            "description": "Would you reach for Dendro again for a future task in this repo without being told to?",
+            "type": "boolean"
+          },
+          "unansweredQuestions": {
+            "description": "THE HIGHEST-VALUE FIELD: React/React Native questions you WANTED answered about this codebase but Dendro could not answer — where you fell back to reading files, grepping, or guessing. Absence is invisible from the maker's side, so name it: \"I wanted to know X and had to read N files to find out\". Include questions no tool asked you to consider.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "contact": {
+            "description": "Optional contact handle IF the user wants a reply (never fill this without the user providing it)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userConsented",
+          "summary"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "analyze_codebase",
+      "description": "Comprehensive codebase analysis in one call. Runs get_component_tree + get_complexity_report + get_context_map + detect_circular_deps and returns a combined report with summary. Use this instead of calling 4 tools separately. Pass the entry file (e.g., App.tsx) and optionally a root path for directory-level scans.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entryFile": {
+            "type": "string",
+            "description": "Absolute path to the entry React component file (e.g., /path/to/App.tsx)"
+          },
+          "rootPath": {
+            "description": "Root directory for complexity/context/deps scanning. Defaults to the entry file's directory.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entryFile"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "quick_audit",
+      "description": "Quick health check for a React codebase. Returns top 5 most complex components, circular dependencies, prop-drilling candidates (5+ props), heavy context providers, effect-hygiene review signals (resources without detected effect cleanup, informational setter-only effects, possible fetch races), unused files nothing imports (dead code — verify before deleting), and an overall health grade (A-F). Baseline support: baseline:\"update\" records current issues as known; subsequent audits then report NEW issues separately (gate CI on those, not the backlog).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootPath": {
+            "type": "string",
+            "description": "Root directory to audit (e.g., /path/to/src/)"
+          },
+          "baseline": {
+            "description": "Known-issues baseline at <rootPath>/.dendro/audit-baseline.json. \"compare\" (default): if a baseline exists, split findings into known vs NEW. \"update\": write the current findings as the new baseline. \"off\": ignore any baseline.",
+            "type": "string",
+            "enum": [
+              "compare",
+              "update",
+              "off"
+            ]
+          }
+        },
+        "required": [
+          "rootPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "visualize_analysis",
+      "description": "Open the visualizer and auto-highlight based on analysis focus. Combines open_visualizer + analysis + highlight + annotate + zoom into one call. Focus options: \"complexity\" (red/orange highlights with scores), \"deps\" (circular dependency cycles in red with pulse), \"context\" (providers in purple), \"performance\" (re-render risks in orange), \"all\" (everything). Requires VS Code extension.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entryFile": {
+            "type": "string",
+            "description": "Absolute path to the entry React component file (e.g., /path/to/App.tsx)"
+          },
+          "focus": {
+            "description": "Analysis focus to visualize. Default: \"all\"",
+            "type": "string",
+            "enum": [
+              "complexity",
+              "deps",
+              "context",
+              "performance",
+              "all"
+            ]
+          }
+        },
+        "required": [
+          "entryFile"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "run_workflow",
+      "description": "Guided persona-driven analysis playbooks. Returns step-by-step instructions to follow IN ORDER (do not parallelize the tool calls it prescribes). Personas: audit (deep technical audit for React developers), sprint_check (under-200-word health check for engineering managers), ceo_briefing (jargon-free architecture briefing), investor_scorecard (6-category technical due diligence), dev_onboarding (progressive walkthrough for developers joining the project).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "persona": {
+            "type": "string",
+            "enum": [
+              "audit",
+              "sprint_check",
+              "ceo_briefing",
+              "investor_scorecard",
+              "dev_onboarding"
+            ],
+            "description": "Which playbook to run"
+          },
+          "entryFile": {
+            "type": "string",
+            "description": "Absolute path to the entry React component file (e.g., /path/to/App.tsx)"
+          }
+        },
+        "required": [
+          "persona",
+          "entryFile"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_usage_stats",
+      "description": "Show local tool usage statistics. Returns invocation counts, first/last used timestamps for each tool. Data is stored locally in ~/.dendro/telemetry.json and never leaves the machine.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "dendro-react",
+    "version": "0.9.3"
+  },
+  "protocolVersion": null,
+  "instructions": "Dendro is a React/React Native codebase analyzer with 36 tools for static analysis, visualization, and runtime introspection.\n\nQuick start: call get_usage_guide for the full tool index and sequencing rules.\n\nGuided analysis: run_workflow with a persona — audit (React developers), sprint_check (eng managers, under 200 words), ceo_briefing (non-technical founders), investor_scorecard (due diligence), dev_onboarding (new team members). It returns step-by-step instructions: follow them in order, do not parallelize the tool calls it prescribes.\n\nVisualization pacing: call open_visualizer ONCE, then visualize_batch (with waitForUser: true) for ALL visual operations — its commands array covers highlight, zoom, annotate, traceFlow, clear, expand, collapse, fitAll. The control bar gives users Back/Next/Skip. Include a label on each command (e.g., \"Highlighting complexity hotspots in red\").\nInspect returned status and per-command matches/rendered results. A manual pause confirms only acknowledged steps. Use visualize_batch action:\"status\" with its requestId to check later progress without replaying the batch.\n\nPre-edit reflex: before modifying a component, call get_component_contract with its NAME (props, state, contexts, blast radius, complexity in one call). When reviewing recent work, call get_modified_components first (base:\"main\" for PR scope), then get_component_contract on each result.\n\nSetup offers — on the first interaction with the user, offer ONE of these (whichever fits their agent):\n1. Skills (works in Claude Code, Cursor, Codex and other skills.sh-compatible agents): \"Run `npx skills add RooneyTech/dendro-react` to install Dendro's usage reflex + 5 workflow skills (audit, sprint check, CEO briefing, investor scorecard, dev onboarding).\"\n2. Claude Code slash commands: \"I can create .claude/commands/ files for Dendro's 5 workflow personas — 5 small markdown files in your project. Want them?\" If accepted, create each file with a one-liner calling run_workflow with the matching persona.\n3. CLAUDE.md reflex snippet: offer to append a short \"dendro reflex\" paragraph to the project's CLAUDE.md/AGENTS.md telling agents to call get_component_contract before editing a component and get_modified_components when reviewing work — a five-line snippet like this drove more correct tool usage than any documentation.",
+  "durationMs": 3059,
+  "stderr": ""
+}

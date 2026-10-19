@@ -1,0 +1,3390 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@el4cteo/rbx-studio-mcp",
+  "version": "0.9.5",
+  "integrity": {
+    "dist": "sha512-ydVx5c9vqx71MskXxvrRcud8kjxa+6jFqJ3GVi+/l0j47hSyKYj9zFIcpwYjgYMyvDu47g/9ghtMrYLfZPtJCg==",
+    "installed": "sha512-ydVx5c9vqx71MskXxvrRcud8kjxa+6jFqJ3GVi+/l0j47hSyKYj9zFIcpwYjgYMyvDu47g/9ghtMrYLfZPtJCg=="
+  },
+  "bin": "node_modules/@el4cteo/rbx-studio-mcp/dist/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-18T11:42:24.458Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "studio_status",
+      "description": "One-call snapshot of the connected Roblox Studio: place name and id, whether it is in edit / run / play mode, the current selection, which scripts are open in the editor, and how big the data model is.\n\nCall this FIRST in any Studio session, and again whenever a tool reports NO_STUDIO or TIMEOUT — it is the cheapest way to tell a disconnected plugin apart from a genuinely failing request. Also call it before and after `playtest`, because most tools behave differently in run mode.\n\n`openScripts` is what the user is actually working on: for each open tab it gives the script's path, the cursor line, any selected text, and which lines are on screen. Use it whenever a request is deictic — 'this function', 'the script I'm in', 'fix this' — instead of searching the place or asking which file they mean. Studio exposes no focused-tab API, so with several open, prefer the one holding a selection and otherwise ask.\n\nReturns JSON. Selection is capped at 50 entries and selected text at 400 characters; use `find` or `script_read` for more.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "studioId": {
+            "description": "Target a specific Studio instance. Omit to use the active one (see list_studios / set_active_studio).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Studio status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_studios",
+      "description": "Lists every Roblox Studio window currently connected to this server, with its studioId, place name, transport (sse or poll), when it connected, and which one is active.\n\nCall this whenever a tool reports AMBIGUOUS_STUDIO, and whenever the user refers to 'the other place' or 'my other window'. With a single Studio open every other tool targets it automatically, so you can skip it then.\n\nNothing is targeted by default when several are connected: pick one with `set_active_studio`, or pass `studioId` to a single tool call to act on one place without changing the default.\n\nEach Studio is queried live, so `placeName` is the published name the user would recognise. A place never saved to Roblox has no published name and falls back to its data model name ('Place1').\n\n`context` matters more than it looks. Pressing Play adds a second entry for the playtest's server — same place, same name, same id as the editor session. Instances created or changed in a 'playtest' context are thrown away the moment the user stops, so building there looks like it worked and then vanishes. Target 'edit' unless the user specifically wants to inspect or affect the running game.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List connected Studios",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "set_active_studio",
+      "description": "Chooses which connected Studio window every other tool targets by default. Use it after list_studios when several places are open, and again whenever the user says to switch to another place.\n\nThe choice persists until it is changed or that Studio disconnects. While several Studios are connected and none has been chosen, tools refuse with AMBIGUOUS_STUDIO rather than guessing.\n\nThe choice belongs to this MCP connection alone. Several agents can share one Studio, and each keeps its own target, so calling this never moves another client's — two editors, or two sessions, can work on two places at once.\n\nSUBAGENTS SHARE THEIR PARENT'S CONNECTION, and therefore its target. A subagent calling this retargets its parent and every sibling, and the damage is silent: later calls that name no studioId still succeed, just against the wrong place — and if that place is a playtest, everything written there is discarded when it stops. Inside a subagent, pass `studioId` on each call instead of calling this.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "studioId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A studioId from list_studios."
+          }
+        },
+        "required": [
+          "studioId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Set active Studio",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "tree",
+      "description": "Lists the instance hierarchy under a path, breadth-first to a given depth. Returns a flat array of paths — flat is both cheaper and easier to act on than nested JSON, since every entry is directly usable as a path.\n\nUse this to orient yourself in an unfamiliar place. Use `find` instead when you already know what you are looking for; a deep `tree` over a whole place wastes context on instances you will never touch.\n\nWith `path` omitted it lists only the containers a place is authored in — Workspace, ReplicatedStorage, ServerScriptService and friends. Roblox exposes ~120 services at the root, almost all engine internals; those are hidden and the response says how many. Pass an explicit `path` to look inside one of them anyway.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "Dot-notation root, e.g. \"Workspace.Map\". Omit to list services from the root.",
+            "type": "string"
+          },
+          "depth": {
+            "default": 2,
+            "description": "Levels below `path` to walk. Keep low; each level multiplies the result.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "className": {
+            "description": "Only include instances of this class or a subclass, e.g. \"BasePart\".",
+            "type": "string"
+          },
+          "nameContains": {
+            "description": "Only include instances whose name contains this text (case-insensitive).",
+            "type": "string"
+          },
+          "detail": {
+            "default": "standard",
+            "description": "concise: compact identity. standard: selected facts. full: all readable properties for inspect; tree/find use the same columns as standard.",
+            "type": "string",
+            "enum": [
+              "concise",
+              "standard",
+              "full"
+            ]
+          },
+          "limit": {
+            "default": 100,
+            "description": "Maximum items to return (1-500).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "cursor": {
+            "description": "Opaque cursor from a previous call's `nextCursor`. Omit for the first page.",
+            "type": "string"
+          },
+          "target": {
+            "default": "studio",
+            "description": "client: read the actual player's playtest VM. Use the playtest server studioId.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "client"
+            ]
+          },
+          "player": {
+            "description": "client only: player name; required with multiple players.",
+            "type": "string"
+          },
+          "handles": {
+            "default": false,
+            "description": "Include bounded session handles usable in place of paths. Survive rename/reparent; refuse expired references.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Browse hierarchy",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "inspect",
+      "description": "Reads properties, attributes, tags and children of one or more instances. Pass every path you care about in a single call — batching costs one round trip instead of N.\n\nProperty selection comes from the live Roblox API dump for each instance's actual class, so it stays correct across engine updates:\n  concise  — class and child count only\n  standard — the properties that characterise the class (Part gets Size, Position, CFrame, Anchored, Material...)\n  full     — every readable property; expensive, use on one or two instances at most\n\nBad paths do not fail the call: they come back under `failures` while the valid ones still return, so one typo does not cost you the whole batch.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Instance paths, e.g. [\"Workspace.Baseplate\", \"Lighting\"]."
+          },
+          "detail": {
+            "default": "standard",
+            "description": "concise: compact identity. standard: selected facts. full: all readable properties for inspect; tree/find use the same columns as standard.",
+            "type": "string",
+            "enum": [
+              "concise",
+              "standard",
+              "full"
+            ]
+          },
+          "properties": {
+            "description": "Read exactly these properties instead of the detail-level default. Use when you want one specific value across many instances.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "physics": {
+            "default": false,
+            "description": "Also report mass, density, assembly root and centre of mass for any BasePart. Mass appears nowhere in Studio — it is computed from volume and material — so this is the only way to answer 'why does this fall over', 'why does it sink', or 'why did half the model stay behind when I moved it'.",
+            "type": "boolean"
+          },
+          "includeChildren": {
+            "default": true,
+            "description": "Include a name/class listing of direct children.",
+            "type": "boolean"
+          },
+          "target": {
+            "default": "studio",
+            "description": "client: read the actual player's playtest VM. Use the playtest server studioId.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "client"
+            ]
+          },
+          "player": {
+            "description": "client only: player name; required with multiple players.",
+            "type": "string"
+          },
+          "handles": {
+            "default": false,
+            "description": "Include bounded session handles usable in place of paths. Survive rename/reparent; refuse expired references.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Inspect instances",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "find",
+      "description": "Searches the data model by name, class, property value and/or tag. Every filter you supply must match, so one call answers questions that would otherwise take several: \"anchored BaseParts under Workspace.Map whose name contains door\" is a single request.\n\nThis replaces separate name / class / property / tag search tools. Prefer it over `tree` whenever you know what you are looking for.\n\nTag searches are answered from CollectionService's index rather than by walking the tree, so they stay fast on large places. Narrow with `path` if a search reports TOO_BROAD.\n\n`op=\"tags\"` lists which tags the place actually USES, with counts and a few example paths. Call it before filtering by tag on a place you do not know: a tag search that returns nothing looks the same whether you spelled it wrong or nothing carries it, and the tag names are often the clearest description of how a game is organised (Enemy, Checkpoint, Interactable say more than the folder layout does).\n\n`selector` is the engine's own query language and is the fastest option of all — the matching happens in C++ and only survivors come back. Reach for it when the shape of the tree is part of the question (`Model > Part`) or when one call should answer two (`Part, Model`); the filters above still apply on top of it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "default": "find",
+            "description": "'find' searches for instances. 'tags' lists which CollectionService tags exist in the place, with counts — use it when you do not know the tag names yet.",
+            "type": "string",
+            "enum": [
+              "find",
+              "tags"
+            ]
+          },
+          "path": {
+            "description": "Limit the search to this subtree, e.g. \"Workspace.Map\". Omit for everything.",
+            "type": "string"
+          },
+          "nameContains": {
+            "description": "Substring of the instance name, case-insensitive.",
+            "type": "string"
+          },
+          "className": {
+            "description": "Class or superclass, e.g. \"BasePart\", \"Script\".",
+            "type": "string"
+          },
+          "tag": {
+            "description": "CollectionService tag the instance must carry.",
+            "type": "string"
+          },
+          "selector": {
+            "description": "Engine query selector, matched inside Studio. Supports a class name (\"Part\", superclasses included), \"#ExactName\", \"[Anchored=true]\", either-or with \"Part, Model\", direct children with \"Model > Part\" and descendants with \"Model >> Part\". No substring names and no < > comparisons — use nameContains and propertyValue for those. Combines with the other filters.",
+            "type": "string"
+          },
+          "propertyName": {
+            "description": "Property that must exist, e.g. \"Anchored\". Combine with propertyValue.",
+            "type": "string"
+          },
+          "properties": {
+            "description": "Project just these properties on matching rows, avoiding a second inspect call. Unreadable names are reported.",
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "propertyValue": {
+            "description": "Required value of `propertyName`, compared as text — \"true\", \"0, 5, 0\", \"Enum.Material.Neon\". Omit to match any instance that has the property.",
+            "type": "string"
+          },
+          "detail": {
+            "default": "standard",
+            "description": "concise: compact identity. standard: selected facts. full: all readable properties for inspect; tree/find use the same columns as standard.",
+            "type": "string",
+            "enum": [
+              "concise",
+              "standard",
+              "full"
+            ]
+          },
+          "limit": {
+            "default": 100,
+            "description": "Maximum items to return (1-500).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "cursor": {
+            "description": "Opaque cursor from a previous call's `nextCursor`. Omit for the first page.",
+            "type": "string"
+          },
+          "target": {
+            "default": "studio",
+            "description": "client: read the actual player's playtest VM. Use the playtest server studioId.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "client"
+            ]
+          },
+          "player": {
+            "description": "client only: player name; required with multiple players.",
+            "type": "string"
+          },
+          "handles": {
+            "default": false,
+            "description": "Include bounded session handles usable in place of paths. Survive rename/reparent; refuse expired references.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Find instances",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "script_read",
+      "description": "Reads Luau source from one or more scripts, with line numbers that `script_edit` accepts back verbatim.\n\nSource comes from the Studio script editor's live buffer, so anything the user has typed but not yet saved is included. Reading the saved property instead would hand you stale code and you would 'fix' the change they just made.\n\nPass every script you need in one call, including when you want a different part of each: an entry may be a bare path for the whole file, or `{path, startLine, endLine}` for a window into that one script. The top-level `startLine`/`endLine` are the default for entries that do not carry their own.\n\nA script bound to a file on disk is flagged in the result. Editing one of those is a race: whatever writes the file wins, and your change disappears the next time it does, with nothing anywhere reporting a failure.\n\n`open` puts a script on the user's screen at a line, instead of telling them where to look. Ask for it when you are pointing at something they should see; it is not automatic, and reading twenty scripts does not rearrange their editor.\n\n`target=\"live\"` reads the code of the PUBLISHED place instead, with no Studio involved — which is how you check what is actually deployed rather than what is on someone's machine. Two limits are real and worth knowing before you reach for it: Roblox's Instance API can only see Folders and scripts, so a path through a Model or a Part cannot be walked at all; and it addresses things by GUID with no search, so each segment of the path costs a round trip. Expect seconds. `list: true` shows what is under a path instead of reading it, which is how you find your way down.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "default": "read",
+            "description": "'read' returns source. 'open' opens the first path in the user's Studio editor at `line` and returns nothing to read.",
+            "type": "string",
+            "enum": [
+              "read",
+              "open"
+            ]
+          },
+          "line": {
+            "description": "open only: line to put the cursor on.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "target": {
+            "default": "studio",
+            "description": "'studio' reads the open place. 'live' reads the published place over Open Cloud, Folders and scripts only.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "live"
+            ]
+          },
+          "list": {
+            "description": "live only: list what is under the first path instead of reading it. Pass `paths: [\"\"]` to see the top level.",
+            "type": "boolean"
+          },
+          "universeId": {
+            "description": "live only: omit to use `cloud universe`.",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "live only: omit to use `cloud place`.",
+            "type": "string"
+          },
+          "paths": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A script path, read in full."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "The script to read."
+                    },
+                    "startLine": {
+                      "description": "First line of the window for this script, 1-based and inclusive.",
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "endLine": {
+                      "description": "Last line of the window for this script, inclusive.",
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                }
+              ]
+            },
+            "description": "Scripts to read, e.g. [\"ServerScriptService.Systems.Combat\"] or [{ path: \"...Combat\", startLine: 120, endLine: 180 }]."
+          },
+          "startLine": {
+            "description": "Default first line for entries without their own, 1-based and inclusive. Omit to start at the top.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "endLine": {
+            "description": "Default last line for entries without their own, inclusive. Omit to read to the end.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Read scripts",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "script_edit",
+      "description": "Edits Luau source through the Studio script editor. This is the tool to use for any change to existing code.\n\nEvery edit in one call is all-or-nothing: the whole batch is resolved against current source before anything is written, so if one edit cannot be applied nothing is. Batch related changes together, even across different scripts.\n\nEach edit picks exactly one mode:\n  find/replace — literal text, not a pattern. Preferred: it survives line numbers shifting. Fails if the text is not unique, unless you set `replaceAll`, so include enough surrounding lines to pin it down.\n  startLine/endLine + replacement — for line ranges from `script_read`. Numbers refer to the file as you read it; several line edits to one script are applied bottom-up so they do not shift each other.\n  source — replaces the whole script. Only for small files or a rewrite; it discards anything the user changed since you read it.\n\nPass `revision` on every edit. `script_read` prints it as `rev` beside each file, and sending it back makes the write conditional: if the script changed since you read it the batch is refused with STALE_SCRIPT and nothing is written. Line-range and `source` edits REQUIRE it (NEEDS_REVISION otherwise), because they cannot notice a change: a line range lands on whatever moved into those lines, and `source` discards the other side's work. Another agent editing the same place, or the user typing in the editor, is enough. find/replace works without it.\n\nWrites go through `ScriptEditorService:UpdateSourceAsync`, so an open editor tab updates in place and unsaved work is preserved. Undo for source changes is the script editor's own, per script — Ctrl+Z in a script tab reverts that script, not the whole batch.\n\n`target=\"live\"` edits the PUBLISHED place instead. It takes ONE edit, it replaces the whole `source` rather than finding and replacing, and there is no undo of any kind — so read the script with `script_read target=\"live\"` first and send back the whole thing, with its `rev` as `revision` so the write is refused if someone published in between. Needs `confirm: true`.\n\nIt changes the SAVED place, not running servers: people already playing keep the old code until their server empties. Follow it with `universe op=\"restart\"` to roll them over.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "default": "studio",
+            "description": "'studio' edits the open place. 'live' rewrites a script in the published place over Open Cloud — one file, whole source, no undo.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "live"
+            ]
+          },
+          "path": {
+            "description": "live only: the script, e.g. \"ServerScriptService.Main\".",
+            "type": "string"
+          },
+          "source": {
+            "description": "live only: the complete new source.",
+            "type": "string"
+          },
+          "revision": {
+            "description": "live only, required: the `rev` `script_read target=\"live\"` printed. The write is refused if the published script changed since.",
+            "type": "string"
+          },
+          "universeId": {
+            "description": "live only: omit to use `cloud universe`.",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "live only: omit to use `cloud place`.",
+            "type": "string"
+          },
+          "confirm": {
+            "description": "Required for target=\"live\".",
+            "type": "boolean"
+          },
+          "edits": {
+            "description": "Edits to apply together as one undoable step. Required unless target is \"live\". The result carries each script's new `rev`, so a follow-up edit needs no re-read.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Script to edit, e.g. \"ServerScriptService.Systems.Combat\"."
+                },
+                "find": {
+                  "description": "Exact text to replace, whitespace included. Literal, not a regex or Lua pattern.",
+                  "type": "string"
+                },
+                "replace": {
+                  "description": "Text to put in its place. Required with `find`; empty string deletes.",
+                  "type": "string"
+                },
+                "replaceAll": {
+                  "description": "Replace every occurrence. Without this a non-unique `find` is refused rather than guessing which one you meant.",
+                  "type": "boolean"
+                },
+                "startLine": {
+                  "description": "First line to replace, 1-based and inclusive.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "endLine": {
+                  "description": "Last line to replace, inclusive. Defaults to `startLine`. Set it one below `startLine` to insert without replacing anything.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "replacement": {
+                  "description": "New text for that line range. Required with `startLine`.",
+                  "type": "string"
+                },
+                "source": {
+                  "description": "Complete new source for the script, replacing everything.",
+                  "type": "string"
+                },
+                "revision": {
+                  "description": "The `rev` value script_read printed for this file. Pass it and the edit is refused if the script changed since you read it, instead of being applied to source you have not seen. Required for line-range and `source` edits.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Edit scripts",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "script_grep",
+      "description": "Searches inside Luau source across the place and returns matching lines with their paths and line numbers.\n\nUse this to find where something is defined or used before editing it — it is far cheaper than reading whole scripts to look for one call.\n\nPatterns are Lua patterns, which are not regular expressions: `%` escapes instead of backslash, there is no alternation, and `-` means a lazy quantifier. Set `literal` to search for text exactly as written, which is usually what you want for identifiers.\n\nTo look for several identifiers, pass them together as `patterns` (literal, up to 16): one pass over the place instead of one per name, and each line says which of them it matched. `mode=\"files\"` lists matching scripts only; `mode=\"counts\"` gives matching-line counts per pattern.\n\nResults are grouped by script with its `rev`, which `script_edit` accepts as `revision`. Matches come from the script editor's live buffer, so unsaved edits are searched too.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "description": "Lua pattern, or exact text when `literal` is set, e.g. \"PlayerAdded\".",
+            "type": "string",
+            "minLength": 1
+          },
+          "patterns": {
+            "description": "Several literal strings searched in one pass, instead of `pattern`.",
+            "minItems": 1,
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "mode": {
+            "default": "lines",
+            "description": "'lines': matching lines. 'files': one row per matching script. 'counts': matching-line counts per pattern.",
+            "type": "string",
+            "enum": [
+              "lines",
+              "files",
+              "counts"
+            ]
+          },
+          "path": {
+            "description": "Limit to this subtree, e.g. \"ServerScriptService\". Omit to search everywhere.",
+            "type": "string"
+          },
+          "literal": {
+            "default": false,
+            "description": "Treat `pattern` as plain text rather than a Lua pattern.",
+            "type": "boolean"
+          },
+          "ignoreCase": {
+            "default": false,
+            "description": "Case-insensitive. Both sides are lowercased, so pattern classes like %u stop being meaningful — combine with `literal`.",
+            "type": "boolean"
+          },
+          "contextLines": {
+            "default": 0,
+            "description": "Lines of context to show either side of each match.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "className": {
+            "description": "Restrict to one script class: \"Script\", \"LocalScript\" or \"ModuleScript\".",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "description": "Maximum items to return (1-500).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "cursor": {
+            "description": "Opaque cursor from a previous call's `nextCursor`. Omit for the first page.",
+            "type": "string"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Search script source",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "script_create",
+      "description": "Creates Script, LocalScript or ModuleScript instances with their source.\n\nBatch related scripts into one call: they are created inside one ChangeHistoryService recording, so the user can drop a whole generated system in a single undo. The response says whether that recording was actually opened — Studio refuses while another one is in progress.\n\nPrefer `Script` with `runContext: \"Client\"` over `LocalScript` in new work — a Script with an explicit RunContext runs wherever you parent it, while LocalScript only runs under a player's character, backpack or PlayerGui.\n\nThe exception is the starter containers — `StarterGui`, `StarterPack`, `StarterPlayerScripts`, `StarterCharacterScripts`. They are COPIED into each player, so a Script with a non-Legacy RunContext there runs once where it sits and again in every copy, while a Legacy one does not run at all. Use `LocalScript` inside those. Creating one anyway comes back with a warning, because Studio's own warning about it goes to its Output and never reaches `console`.\n\nUse `script_edit` to change a script that already exists.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scripts": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parent": {
+                  "type": "string",
+                  "description": "Path of the parent instance, e.g. \"ServerScriptService.Systems\"."
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Name for the new script."
+                },
+                "className": {
+                  "type": "string",
+                  "enum": [
+                    "Script",
+                    "LocalScript",
+                    "ModuleScript"
+                  ],
+                  "description": "Which kind of script to create."
+                },
+                "source": {
+                  "description": "Initial Luau source. Omit for Roblox's default stub.",
+                  "type": "string"
+                },
+                "runContext": {
+                  "description": "Where a `Script` runs. 'Legacy' means server-only and only under a server container. Ignored for the other classes.",
+                  "type": "string",
+                  "enum": [
+                    "Legacy",
+                    "Server",
+                    "Client"
+                  ]
+                },
+                "disabled": {
+                  "description": "Create it disabled, so it does not run on the next playtest.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "parent",
+                "name",
+                "className"
+              ]
+            },
+            "description": "Scripts to create together as one undoable step."
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scripts"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create scripts",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "create",
+      "description": "Creates instances with their properties, attributes and tags set at creation, as one undoable step.\n\nNest with `children` to build a whole model in a single call. That is both faster and safer than creating a parent and then addressing it: a new instance's path is not knowable until it exists, and same-named siblings make guessing it unreliable.\n\nProperty names are checked against the live Roblox API dump before anything is sent to Studio, so a typo comes back with the closest real names rather than an engine error.\n\nUse `script_create` for Script, LocalScript and ModuleScript — it takes source directly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instances": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parent": {
+                  "description": "Where to put it, e.g. \"Workspace\". Required at the top level only.",
+                  "type": "string"
+                },
+                "className": {
+                  "type": "string",
+                  "description": "Concrete class to create, e.g. \"Part\", \"Folder\", \"Model\", \"SpawnLocation\"."
+                },
+                "name": {
+                  "description": "Name for the new instance.",
+                  "type": "string"
+                },
+                "properties": {
+                  "description": "Properties to set, as name → value. Values are written the way Studio's Properties panel shows them: \"12, 0, 5\" for a Vector3, \"0.2, 0.6, 1\" for a Color3, \"Neon\" or \"Enum.Material.Neon\" for an enum, true/false for a bool.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "attributes": {
+                  "description": "Attributes to set, as name → value. A bare string, number or boolean is stored as-is; for any other type pass { type, value }, e.g. { type: \"Vector3\", value: \"0, 5, 0\" }. An empty string removes an attribute.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "string",
+                              "boolean",
+                              "number",
+                              "BrickColor",
+                              "CFrame",
+                              "Color3",
+                              "ColorSequence",
+                              "Font",
+                              "NumberRange",
+                              "NumberSequence",
+                              "Rect",
+                              "UDim",
+                              "UDim2",
+                              "Vector2",
+                              "Vector3"
+                            ],
+                            "description": "Roblox type to store the attribute as. Needed for anything but a plain string, number or boolean — a bare string stays a string."
+                          },
+                          "value": {
+                            "description": "The value, written as the Properties panel shows it: \"0, 5, 0\".",
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "tags": {
+                  "description": "CollectionService tags to add or remove.",
+                  "type": "object",
+                  "properties": {
+                    "add": {
+                      "description": "CollectionService tags to add.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "remove": {
+                      "description": "Tags to remove.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "children": {
+                  "description": "Instances to create inside this one. Each takes the same fields as this entry (className, name, properties, attributes, tags, children), nested as deep as needed. Build a whole model in one call rather than creating a parent and then addressing it by a path you have to guess.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": [
+                "className"
+              ]
+            },
+            "description": "Instances to create together as one undoable step."
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instances"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create instances",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "modify",
+      "description": "Sets properties, attributes and tags on existing instances, as one undoable step.\n\nEach entry takes a list of `paths`, so one entry can apply the same change to many instances — anchoring 200 parts is one entry, not 200. Combine with `find` to build the path list.\n\nThe batch is all-or-nothing: if any value is rejected the recording is cancelled and every instance reverts, rather than leaving the place half-changed.\n\nValues use the same notation the Properties panel shows — see the `properties` field. To change a script's code use `script_edit`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targets": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "paths": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Instances to change, e.g. [\"Workspace.Part[3]\", \"Workspace.Wall\"]."
+                },
+                "properties": {
+                  "description": "Properties to set, as name → value. Values are written the way Studio's Properties panel shows them: \"12, 0, 5\" for a Vector3, \"0.2, 0.6, 1\" for a Color3, \"Neon\" or \"Enum.Material.Neon\" for an enum, true/false for a bool.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "attributes": {
+                  "description": "Attributes to set, as name → value. A bare string, number or boolean is stored as-is; for any other type pass { type, value }, e.g. { type: \"Vector3\", value: \"0, 5, 0\" }. An empty string removes an attribute.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "string",
+                              "boolean",
+                              "number",
+                              "BrickColor",
+                              "CFrame",
+                              "Color3",
+                              "ColorSequence",
+                              "Font",
+                              "NumberRange",
+                              "NumberSequence",
+                              "Rect",
+                              "UDim",
+                              "UDim2",
+                              "Vector2",
+                              "Vector3"
+                            ],
+                            "description": "Roblox type to store the attribute as. Needed for anything but a plain string, number or boolean — a bare string stays a string."
+                          },
+                          "value": {
+                            "description": "The value, written as the Properties panel shows it: \"0, 5, 0\".",
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "tags": {
+                  "description": "CollectionService tags to add or remove.",
+                  "type": "object",
+                  "properties": {
+                    "add": {
+                      "description": "CollectionService tags to add.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "remove": {
+                      "description": "Tags to remove.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "required": [
+                "paths"
+              ]
+            },
+            "description": "Changes to apply together as one undoable step."
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targets"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Modify instances",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "delete",
+      "description": "Destroys instances and everything inside them, as one undoable step.\n\nDeleting a container deletes its whole subtree, so the response reports how many descendants went with each one — check it before telling the user what happened.\n\nServices cannot be deleted and are refused. Paths shift when same-named siblings are removed, so read fresh paths from `find` or `tree` before a second delete rather than reusing indexes from an earlier call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Instances to destroy, e.g. [\"Workspace.OldModel\"]."
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Delete instances",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "move",
+      "description": "Reparents instances, or clones them into a new parent, as one undoable step.\n\nSet `mode: \"clone\"` to copy instead of move — that is how to duplicate something, optionally renaming it in the same call.\n\nMoving an instance into itself or its own descendant is refused: it silently detaches the branch from the data model and undo does not bring it back.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Instance to move or clone."
+                },
+                "to": {
+                  "type": "string",
+                  "description": "New parent's path."
+                },
+                "mode": {
+                  "default": "move",
+                  "description": "'move' reparents the original; 'clone' leaves it and copies.",
+                  "type": "string",
+                  "enum": [
+                    "move",
+                    "clone"
+                  ]
+                },
+                "name": {
+                  "description": "Rename it as part of the same step. Useful with clone.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "to"
+              ]
+            },
+            "description": "Moves to apply together as one undoable step."
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Move or clone instances",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "console",
+      "description": "Reads Studio or playtest client output — prints, warnings and runtime errors, newest last.\n\nThis is how to find out what actually happened after a playtest or an `execute_luau` call. An error here usually names the script and line, which `script_read` can then open directly.\n\nUse `target=\"client\"` with the playtest server studioId to read continuously captured client output. In multiplayer, select a player by name. Pass the returned `nextCursor` as `since` to read only newer lines; cursors belong to one session and player. Evicted or limit-skipped lines are reported.\n\nFilter with `level` to see only errors, or `pattern` to follow one subsystem's logging. Up to 2000 lines are held, so prefer a filter over a large `limit`.\n\n`mode=\"drain\"` reads a busy log without gaps: oldest unread matches first, and a cursor that stops at the first one not shown. Keep the same filters while draining. `group` collapses identical lines into one with a count. An error whose stack trace arrived late comes back once more, marked `update`.\n\nEach connected session keeps its own log, recorded from the moment its plugin loaded — the editor session and a running playtest server do not share one. To read what a playtest printed, target the playtest's studioId (see `list_studios`); the editor's log will not have it. Nothing printed before the plugin or client relay loaded is recoverable.\n\nA quiet log is not proof nothing was said. Messages Studio itself emits — the ones the Output window attributes to \"Studio\" rather than to a script — are inconsistent, and they arrive in the session that RAISED them, which is not always the one you are looking at: the warning that a Script with a non-legacy RunContext inside a starter container will run multiple times shows up in the playtest server's log, where the script actually loads, and never in the editor's, where it was created. Do not read silence as an all-clear — when a script misbehaves in a way nothing here explains, check the Output window yourself, or ask the user what it says.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "default": "studio",
+            "description": "Output source; client requires a running playtest server studioId.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "client"
+            ]
+          },
+          "player": {
+            "description": "Client only: player name, required when multiple players are present.",
+            "type": "string"
+          },
+          "since": {
+            "description": "Opaque nextCursor from a previous console response; return only newer matching lines.",
+            "type": "string"
+          },
+          "mode": {
+            "default": "tail",
+            "description": "'tail': the newest matches, cursor at the end of the log. 'drain': the oldest unread matches, cursor at the first one not shown, so a loop reads every line once.",
+            "type": "string",
+            "enum": [
+              "tail",
+              "drain"
+            ]
+          },
+          "group": {
+            "default": false,
+            "description": "Collapse identical lines into one row with a count and first/last times.",
+            "type": "boolean"
+          },
+          "level": {
+            "description": "Only this severity. Omit for everything.",
+            "type": "string",
+            "enum": [
+              "print",
+              "info",
+              "warning",
+              "error"
+            ]
+          },
+          "pattern": {
+            "description": "Lua pattern the message must match, e.g. \"Combat\" or \"^%[Server%]\". Lua patterns escape with %, not backslash.",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "description": "Maximum items to return (1-500).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Read Studio output",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "performance",
+      "description": "Reads the engine's own counters, and can run the script profiler.\n\n`snapshot` returns what the Developer Console shows: frame, physics and render times in milliseconds, instance and part counts, draw calls, network rates, and memory broken down by category. Use it to answer 'why is this place heavy' with numbers instead of guesses.\n\n`profile` runs Studio's script profiler — the Script Performance window — for `seconds` and reports which scripts consumed CPU. It blocks for that long, so keep it short. It only sees code that actually runs, so start a playtest first; profiling an idle edit session returns nothing.\n\n`coverage` reports which lines of which scripts actually executed — dead code, untested branches, whether a fix was even reached. Pass `enable` first, then play, then read the coverage back FROM THE PLAYTEST session, not the editor: instrumenting is per data model, and the playtest is a different one. `enable` is remembered for the place and re-applied by each new session as it loads. Pass an empty `enable` array to stop.\n\nWhat it can and cannot see: instrumentation is fixed when a script is first compiled, so it measures modules required after that point — where most game logic lives — but never a script that starts with the place, which the data model compiles before any plugin exists. Those report 0 lines and are named as unmeasurable rather than counted as dead code.\n\n`scene` breaks the place down by what it is actually made of: instances by category, triangles and draw calls FOR WHAT THE CAMERA CAN SEE, and the assets holding script, animation and audio memory — each named, so \"2.4GB of memory\" becomes \"this animation is 138KB and these are the Animators using it\". It also reports UNPARENTED INSTANCES, which is the closest thing here to a leak detector: objects still alive with nothing holding them in the tree, invisible to `find` and to `tree` because they are in neither.\n\nThe triangle and draw-call section is the one number here that depends on where the camera is pointing, and it moves enormously: the same place measured 332 triangles looking at empty sky and 29,060 looking at 1,800 parts, seconds apart. So it answers \"how heavy is this view\", not \"how heavy is this place\" — point the camera first with `viewport op=\"focus\"`, and compare two views only if both were framed the same way.\n\n`audit` is a health check rather than a performance one: it finds every reference in the place that points at NOTHING. A Sound whose id was deleted or made private plays silence, a Decal shows nothing, an Animation does nothing — none of them errors, none warns, and the instance looks perfectly healthy because the id is still a string. The only other way to find them is to play the game and notice something missing. It also reports ids left blank, scripts left Disabled, and same-named siblings, which is what makes WaitForChild return the wrong one.\n\n`audit` fetches the assets to test them, so Studio's Output window will show load errors for the dead ones. That is the engine confirming the finding, not a fault in the tool.\n\nFrame and network figures are only meaningful while something is running. Instance counts and memory are useful in edit mode too.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "default": "studio",
+            "description": "client: read the actual player's playtest VM. Use the playtest server studioId.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "client"
+            ]
+          },
+          "player": {
+            "description": "client only: player name; required with multiple players.",
+            "type": "string"
+          },
+          "op": {
+            "default": "snapshot",
+            "description": "'snapshot' reads counters now; 'profile' samples running scripts; 'coverage' reports which lines have executed; 'scene' breaks the place down by what it is made of; 'audit' finds broken asset references and other silent faults.",
+            "type": "string",
+            "enum": [
+              "snapshot",
+              "profile",
+              "coverage",
+              "scene",
+              "audit"
+            ]
+          },
+          "section": {
+            "description": "scene only: return just one section instead of all six.",
+            "type": "string",
+            "enum": [
+              "composition",
+              "triangles",
+              "scriptMemory",
+              "animationMemory",
+              "audioMemory",
+              "unparented"
+            ]
+          },
+          "enable": {
+            "description": "coverage only: scripts to start measuring. Remembered for this place and switched on by every session that loads afterwards, so a playtest instruments them before its scripts run. An empty array stops instrumenting.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "seconds": {
+            "default": 5,
+            "description": "profile only: how long to sample. The call blocks for this long.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "frequency": {
+            "default": 1000,
+            "description": "profile only: samples per second. Higher is more precise and costlier.",
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 10000
+          },
+          "includePlugins": {
+            "default": false,
+            "description": "profile only: include Studio plugins in the results. Off by default — an idle Studio is mostly plugin activity, which buries the place's own scripts.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Performance and memory",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "playtest",
+      "description": "Starts and stops playtests, so scripts can be made to run and then observed without asking the user to press anything.\n\n`play` is the Play button: a character spawns and `Players.PlayerAdded` fires. `run` is Run mode, which executes scripts with no player at all. `multiplayer` starts a test with several players for testing replication. `addPlayers` joins more players to a running multiplayer test, for late joins and lobby fill-up. `state` reports without changing anything.\n\nPlay and multiplayer return the playtest server's studioId once it connects. Use that ID directly for `console`, `performance` and `execute_luau`; the editor session has a separate log. If connection takes too long, the reply says so and `list_studios` can find it later.\n\nA test does not block this call: it starts and the reply reports the state reached. Studio only ends it when something inside calls `StudioTestService:EndTest(value)` or when `stop` is used here; whatever EndTest passed comes back as `lastResult` on a later `state`. That makes a scripted check possible end to end: `args` is readable inside the test via `StudioTestService:GetTestArgs()`, so a test can be told what to do and report back what happened.\n\nStopping discards everything the playtest changed, exactly as pressing Stop does. Build in edit mode, then play — not the other way round.\n\nThe reply says whether the mode actually moved, not merely that Studio accepted the request.\n\nThe panel's `playtests on` grants permission, never a requirement: obey AGENTS.md, CLAUDE.md, user instructions and project guidance that prohibit playtesting even when ON. `playtests off` is a hard MCP lock: play, run, multiplayer and addPlayers are refused regardless of instructions to test; state and stop remain available. The lock only blocks starting simulation: screenshots, tree, inspect, script reads, edit-mode execute_luau and UI inspection stay available. Continue using edit-mode tools and static inspection where possible. Only the user can re-enable it with `playtests on` in the panel. Do not bypass the lock through execute_luau, Studio APIs or another operation. Manual Studio Play is unaffected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "play",
+              "run",
+              "multiplayer",
+              "addPlayers",
+              "stop",
+              "state"
+            ],
+            "description": "'play' starts a playtest with a character, 'run' runs scripts with no player, 'multiplayer' starts a several-player test, 'addPlayers' joins more to a running multiplayer test, 'stop' ends it and discards its changes, 'state' only reports."
+          },
+          "players": {
+            "description": "multiplayer: how many players to start (default 2). addPlayers: how many to add (default 1).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "args": {
+            "description": "Value handed to the test, readable inside it with `StudioTestService:GetTestArgs()`. Use it to tell a test which case to exercise.",
+            "type": "string"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Run, pause and stop the simulation",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "execute_luau",
+      "description": "Runs Luau in Studio's plugin context and returns whatever it printed, returned, or threw.\n\nThis is the escape hatch. Reach for it only when no dedicated tool fits — `create`, `modify`, `delete`, `move`, `script_edit` and `find` validate their input, type values from the live API dump, and wrap writes in an undo recording. Code run here does none of that, so a typo becomes a runtime error instead of a suggestion, and changes it makes may not be undoable as one step.\n\nGood uses: reading something no tool exposes, a one-off calculation over many instances, or calling an engine API the tools do not cover.\n\nOutput printed while it runs is captured and returned, so `print` is a reasonable way to get values out. `return` works too, including returning a table — it comes back as a structure, not a summary. There is no timeout for target=\"studio\": an infinite loop will hang Studio until it is force-quit.\n\nAgainst a running playtest server, Studio disables `loadstring`, so the code is compiled through a ModuleScript instead and runs at script identity — plugin-only APIs are unavailable there. When that happens it is stated in the result rather than left to be inferred from a failure.\n\nWith target=\"studio\", do not use `require` to read live state out of a running game. This runs in the plugin's own Luau VM with its own module cache, so `require` here returns a second, freshly-initialised copy of the ModuleScript — its counters and caches read as empty while the real one is running fine, and a zero is indistinguishable from a genuine zero. Read live state off the DataModel instead (instances, attributes, properties), or have the game print it and read that with `console`. The result warns when a call could have hit this.\n\n`target=\"client\"` runs in the selected player's actual playtest client VM, including its live require cache. Requires a running playtest server studioId. Output is capped at 200 lines, 10 returns, table depth 4 and 50 entries. The relay is removed on completion or timeout; non-yielding code can still stall the client. Connections/hooks created by the temporary relay (such as Connect or RenderStepped) do not persist after the call returns.\n\n`target=\"live\"` runs the script on Roblox's servers against the PUBLISHED place instead, with no Studio involved. That is how you read or repair production: a real player's data store entry, what the live game actually holds, a migration over saved data. Everything the script prints comes back in `logs`.\n\nBE CAREFUL WITH IT. The Studio path has an undo stack and a place nobody is playing. This one touches live data and live players, and nothing here can put any of it back — so it needs `confirm: true` and you should read before you write. Roblox queues it as a task, so expect seconds, not milliseconds, and a `state` of COMPLETE or FAILED rather than a bare value.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resultId": {
+            "description": "Retrieve a retained result without rerunning source. Keep its original target/player/studioId.",
+            "type": "string"
+          },
+          "resultPath": {
+            "description": "Retained result path, default [returned,1]. Use [] for its root; [output,1,message] for a log string.",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              ]
+            }
+          },
+          "resultOffset": {
+            "default": 0,
+            "description": "Result page offset; use nextOffset from the previous page. String offsets are UTF-8 bytes.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "resultLimit": {
+            "default": 25,
+            "description": "Retained table entries per page.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "resultFields": {
+            "description": "Project these fields on retained table rows.",
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "description": "Luau to run. In an editor session this has plugin permissions, so `game`, `workspace` and plugin-only APIs are all reachable.",
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "default": "studio",
+            "description": "'studio' runs in the connected Studio, with plugin permissions. 'live' runs on Roblox's servers against the published place — production, with no undo. 'client' runs in a player's playtest client VM.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "live",
+              "client"
+            ]
+          },
+          "player": {
+            "description": "client only: player name; required with multiple players.",
+            "type": "string"
+          },
+          "universeId": {
+            "description": "live only: which game. Omit to use `cloud universe`.",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "live only: which place. Omit to use `cloud place`.",
+            "type": "string"
+          },
+          "timeoutSeconds": {
+            "description": "live/client only: timeout in seconds. Defaults to 30.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "confirm": {
+            "description": "Required for target=\"live\". This runs against the game people are playing and nothing here can undo it.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Run Luau in Studio",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "viewport",
+      "description": "Works with the 3D view and the Studio selection.\n\n`select` sets, extends or shrinks what is highlighted in Studio. Select what you just built or changed — it shows the user the result, and puts the instance under Studio's own move and scale handles. `studio_status` reports the current selection; this sets it.\n\n`focus` aims the Studio camera at an instance and frames it so the whole thing is on screen. This is what makes `screenshot` worth having: a picture of wherever the camera happened to be answers nothing, while a picture of the thing you just built answers 'does it look right', which no amount of reading properties can. Build, focus, screenshot.\n\nThe distance is computed from the subject's size and the camera's field of view, so a doorway and a whole map both arrive filling a similar share of the frame. `from` changes the angle you view it from, and `padding` how tightly it is framed.\n\n`camera` sets or reads the camera directly, for shots framing cannot express — standing inside a room, or looking along a corridor.\n\n`raycast` fires a ray through the world and reports the first thing it hits, with position, surface normal, distance and material. This answers 'what occupies this space', which the data model alone cannot: use it to find the ground under a spawn point, or check whether a gap is clear before placing something.\n\n`ui` audits a whole interface for the faults that are invisible in the data model: elements off the side of the screen, elements covering each other, zero-size elements, text too small to read, and text that overflows its label. A button positioned off a phone screen has a perfectly correct Position and Size — nothing about the instance is wrong, it is just somewhere nobody can reach.\n\nIt measures against whatever `device` is currently emulating, so the way to use it is twice: once as-is, then `device op=\"set\"` a phone and again. Layout is live in edit mode — no playtest needed.\n\n`textbounds` measures how big a piece of text actually renders. Point it at a TextLabel, TextButton or TextBox with `path` and it reads that label's own text, font, size and width and answers whether the text fits inside it. Give `text` and `size` directly and it just measures. There is no other honest way to answer 'will this label overflow' — character counts ignore the font, and font size is not a width.\n\n`uisnap` records every UI element under `path` (default StarterGui, or the PlayerGui with target=\"client\"): layout, absolute position and size, colours, fonts, text, images, strokes, corners and padding, and returns a snapshot id. Take one before restyling a UI, then call `uisnap` again with `compareTo` set to that id: the reply lists what was added, removed and changed, property by property, including what you did not mean to touch. Every call stores a new id, so passes chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "select",
+              "raycast",
+              "focus",
+              "camera",
+              "textbounds",
+              "ui",
+              "uisnap",
+              "pick"
+            ],
+            "description": "'focus' points the camera at something and frames it, 'camera' sets it explicitly, 'select' changes the Studio selection, 'textbounds' measures rendered text, 'raycast' queries the world, 'ui' audits an interface, 'uisnap' snapshots one and diffs it against an earlier snapshot."
+          },
+          "path": {
+            "description": "focus: the instance to look at. ui/uisnap: the UI root to read. textbounds: the label.",
+            "type": "string"
+          },
+          "at": {
+            "description": "focus only: look at this point instead of an instance, e.g. \"0, 10, 0\".",
+            "type": "string"
+          },
+          "from": {
+            "description": "focus only: direction to view from, e.g. \"0, 1, 0\" for directly above or \"1, 0, 0\" from the side. Defaults to a raised three-quarter view.",
+            "type": "string"
+          },
+          "padding": {
+            "default": 1.5,
+            "description": "focus only: how much room to leave around the subject. 1 is tight.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "position": {
+            "description": "camera only: where to put the camera, e.g. \"0, 20, 30\".",
+            "type": "string"
+          },
+          "lookAt": {
+            "description": "camera only: the point to aim at.",
+            "type": "string"
+          },
+          "fieldOfView": {
+            "description": "camera only: field of view in degrees. Lower is more zoomed in.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 120
+          },
+          "paths": {
+            "description": "select only: instances to select. An empty array clears the selection.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mode": {
+            "default": "set",
+            "description": "select only: replace the selection, extend it, or remove from it.",
+            "type": "string",
+            "enum": [
+              "set",
+              "add",
+              "remove"
+            ]
+          },
+          "origin": {
+            "description": "raycast only: where the ray starts, e.g. \"0, 50, 0\".",
+            "type": "string"
+          },
+          "direction": {
+            "description": "raycast only: which way it points, e.g. \"0, -1, 0\" for straight down.",
+            "type": "string"
+          },
+          "maxDistance": {
+            "default": 1000,
+            "description": "raycast only: how far to look, in studs.",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "ignore": {
+            "description": "raycast only: instances the ray passes through.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "text": {
+            "description": "textbounds only: the string to measure. Defaults to the label's own text.",
+            "type": "string"
+          },
+          "textSize": {
+            "description": "textbounds only: font size in pixels. Defaults to the label's.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "font": {
+            "description": "textbounds only: an Enum.Font name, e.g. \"GothamMedium\". Defaults to the label's.",
+            "type": "string"
+          },
+          "wrapWidth": {
+            "description": "textbounds only: wrap at this width. 0 means do not wrap. Defaults to the label's width.",
+            "type": "number",
+            "minimum": 0
+          },
+          "target": {
+            "default": "studio",
+            "description": "client: read the actual player's playtest VM. Use the playtest server studioId.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "client"
+            ]
+          },
+          "player": {
+            "description": "client only: player name; required with multiple players.",
+            "type": "string"
+          },
+          "x": {
+            "description": "pick: normalized X in the full uncropped viewport.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "y": {
+            "description": "pick: normalized Y in the full uncropped viewport.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "richText": {
+            "description": "textbounds only: treat the text as rich text. Defaults to the label's setting.",
+            "type": "boolean"
+          },
+          "compareTo": {
+            "description": "uisnap only: id of an earlier snapshot to diff the new one against.",
+            "type": "string"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Viewport and selection",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "debug",
+      "description": "Sets breakpoints that record the stack and variables when they are hit, then reads back what they caught.\n\nThese are tracepoints, not a step debugger. A breakpoint fires, captures the call stack and the variables in scope, and lets execution continue; `op: \"snapshots\"` returns what was captured. Studio's debugger has to decide whether to resume the instant it stops, and cannot wait for a tool call to come back with an answer, so stepping through code line by line is not possible this way — but 'what was this value when it got here' is, which is usually the actual question.\n\n`condition` is a Luau expression evaluated where the breakpoint sits, so a breakpoint can fire only on the case that matters — `health < 0`, `player.Name == \"someone\"`.\n\n`logMessage` is ALSO a Luau expression, not a template string: its value is printed when the breakpoint is hit, so write `\"health=\" .. health` rather than `health={health}`. Prose is a syntax error. Read the lines back with `console`.\n\nTwo things about it are measured, not assumed, and both waste your time otherwise. A breakpoint fires ONCE PER RUN, not once per pass: on a five-iteration loop it printed a single line, for the first iteration only. It is not a way to watch a value change inside a loop — to see every pass, have the code itself print and read that with `console`. And a log expression CANNOT SEE THE LOOP CONTROL VARIABLE: on `for index = 1, 5 do`, a breakpoint in the body read the body's own locals correctly and `index` as nil. Wrap values in `tostring` so a nil prints as \"nil\" instead of throwing.\n\nA log expression that throws is reported as \"Breakpoint ... ignored\" in `console`, NOT here — `set` still returns Verified, because Studio only compiles the expression once the line is reached.\n\nSo the two kinds cost different things: a `logMessage` breakpoint never stops and gives you one line you composed in advance, while one without it stops briefly and gives you the whole frame — every local and its type, without having to guess beforehand which value would matter. Both give you that for one pass only. Reach for the log when you know what to watch, the capture when you do not.\n\nOnly one breakpoint exists per line, so the same line cannot both log and capture.\n\nPut the breakpoint on a line that does something. A `return`, an `end` or a bare declaration can verify and then never fire — measured, not guessed: the same breakpoint moved from `return squared, tag` to the assignment above it went from silent to firing on every pass. If one verifies but catches nothing, suspect the line before suspecting the condition.\n\nBreakpoints belong to the session that holds them. Set them in the editor session BEFORE starting a playtest, since code that already ran cannot be caught retroactively.\n\nNothing here leaves a thread stopped waiting for you. A capture breakpoint stops for as long as it takes to read the frame and then resumes itself, so a script with one mid-loop still runs to its last line, and the user is never left with a frozen Studio to rescue.\n\n`remotes` passively observes RemoteEvent traffic for one playtest player in both directions. Returns counts, calls/sec and two short argument-shape samples per remote; no raw payload dumps or RemoteFunction interception. Requires the playtest server studioId. Captures 5 seconds by default (max 15), at most 2000 events and 40 rows within 12 KB; reports truncation when a limit is reached.\n\n`collisions` watches a part, or every part under a model, with the engine's collision summaries and returns one row per colliding pair, hardest impact first: contact point, surface normal, relative velocity, area, impact speed along the normal and total speed. Use it to tune impact FX, sound and damage from real numbers, or to find what a part keeps hitting. Needs physics running (a playtest); `target=client` reads the client's own simulation. Resting contact reports every frame, so set `minSpeed` to keep impacts only; it filters on impact speed, so sliding does not count.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "default": "studio",
+            "description": "client: read the actual player's playtest VM. Use the playtest server studioId.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "client"
+            ]
+          },
+          "player": {
+            "description": "watch client/remotes: player name; required with multiple players.",
+            "type": "string"
+          },
+          "properties": {
+            "description": "watch: properties to observe.",
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "attributes": {
+            "description": "watch: attribute names; omit for all, [] for none.",
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "children": {
+            "default": true,
+            "description": "watch: include direct child additions/removals.",
+            "type": "boolean"
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "set",
+              "clear",
+              "snapshots",
+              "exceptions",
+              "remotes",
+              "watch",
+              "collisions"
+            ],
+            "description": "'set' adds breakpoints, 'clear' removes one or all, 'snapshots' reads what has been captured, 'exceptions' controls breaking on errors, 'remotes' traces RemoteEvents."
+          },
+          "minSpeed": {
+            "description": "collisions: ignore contacts that hit softer than this, in studs/s along the contact normal.",
+            "type": "number",
+            "minimum": 0
+          },
+          "seconds": {
+            "description": "watch/remotes/collisions: bounded capture seconds, default 5. Pair watch with concurrent input to observe a reaction.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 15
+          },
+          "breakpoints": {
+            "description": "set only: breakpoints to add.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Script path, e.g. \"ServerScriptService.Combat\"."
+                },
+                "line": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991,
+                  "description": "Line to break on."
+                },
+                "condition": {
+                  "description": "Luau expression; the breakpoint only fires when it is true, evaluated in scope at that line, e.g. \"count > 100\".",
+                  "type": "string"
+                },
+                "logMessage": {
+                  "description": "Write this to the output when hit, instead of capturing a snapshot.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "line"
+              ]
+            }
+          },
+          "path": {
+            "description": "clear: script to clear. remotes: remote or subtree path, default game. Narrow this if discovery is truncated. watch: instance. collisions: part, model or folder.",
+            "type": "string"
+          },
+          "line": {
+            "description": "clear only: which line to remove.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "mode": {
+            "description": "exceptions only: break on every error, only unhandled ones, or never. Defaults to Unhandled.",
+            "type": "string",
+            "enum": [
+              "Never",
+              "Always",
+              "Unhandled"
+            ]
+          },
+          "limit": {
+            "default": 10,
+            "description": "snapshots only: how many of the most recent to return.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 40
+          },
+          "clear": {
+            "default": false,
+            "description": "snapshots only: discard what is returned, so the next read starts fresh.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Breakpoints and runtime inspection",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "screenshot",
+      "description": "Takes a picture of the Studio viewport and returns it as an image you can actually look at.\n\nEvery other tool here reads the data model — names, properties, numbers — which answers 'is it there' but never 'does it look right'. A part can be at the correct position, anchored, correctly sized, and still be buried inside a wall, facing backwards, or hidden behind a GUI. Take a screenshot after building something visual, and before reporting that it worked.\n\nIt captures the viewport as the user currently sees it, so it shows their camera angle, not a framing of your choosing. Frame the subject with `viewport op=\"focus\"` first — that is what makes this tool worth calling.\n\nWorks during a playtest too — address it at the playtest's studioId and you get the player's own view, which is the only way to check what a GUI actually looks like in front of the game. That one is taken on the client and read back through the editor session, so it is a little slower and needs the editor window still connected; the caption says `playtest client` when it came from there.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "width": {
+            "default": 800,
+            "description": "Largest width of the image, in pixels; height follows the aspect ratio. Never scales up. To read small text, zoom with `path` or `rect` rather than raising this.",
+            "type": "integer",
+            "minimum": 160,
+            "maximum": 1600
+          },
+          "path": {
+            "description": "Zoom to this instance at full resolution: a GUI element, a part, a model, or a folder of parts. Also resolves client-only instances in playtests; it must be on screen.",
+            "type": "string"
+          },
+          "rect": {
+            "description": "Zoom to \"x, y, width, height\" in viewport pixels. Read them off an earlier screenshot using the scale its caption states.",
+            "type": "string"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          },
+          "player": {
+            "description": "Playtest only: whose screen to capture. Required when the test has several players.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "See the Studio viewport",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "input",
+      "description": "Sends real keyboard and mouse input to a running playtest — the same events a person pressing the keys would produce.\n\nThis is how to test what `character` cannot reach. `character` drives the Humanoid directly, which answers 'can it get to the door'; this answers 'does pressing E open it', 'does the sprint key work' — anything bound to input rather than to movement. Use `character` for going places and this for controls.\n\nRoblox reserves some keys for its own menus and refuses to send them — Escape, Tab, F9, and others depending on the place (One is the backpack hotbar). A refused key comes back as a WARNING naming it; the other steps still run.\n\nSteps run in order, so a sequence is one call: tap E, wait, click at a point, type a name. `hold` is how long a key or button stays down, `after` is how long to wait before the next step — a jump held for a second is a different test from a tapped one.\n\nREQUIRES A RUNNING PLAYTEST, and must be addressed to the playtest's studioId from `list_studios`, not the editor's.\n\nA pointer is drawn on screen and travels to each target before the click, so the user can see what you are aiming at. Turn it off with `cursor: false`.\n\nHow it works, because it explains the one thing that will surprise you: input belongs to the data model that creates it, and the character is driven by the CLIENT. Sending from the playtest's server succeeds and moves nothing. So this parents a short script into the player's PlayerGui, which runs on their client, and that reports back when the input has actually been delivered. Nothing is reported as sent until the client confirms it. If confirmation never arrives you get an error, not a success — check where things really are with `character op=\"state\"`.\n\nMouse coordinates are viewport pixels from the top-left, so pair this with `screenshot` to see what is where before clicking it, and send what you read off the picture unchanged. The reply's `landed` shows the same click in the game's own coordinates, which sit a topbar lower — that difference is two ways of describing one point, not an error to correct for. Under an emulated device it is a real distortion instead, and the reply says so; there, re-read it after each click rather than reusing an earlier one.\n\nTake the screenshot immediately before clicking. The reply is measured against the viewport as it is NOW, and a Studio window that changed size since the picture was taken moves everything in it — measured, a window that went from 435 to 952 pixels wide between a screenshot and a click, where the click reported success and hit nothing.\n\nA `text` step types into the FOCUSED TextBox. Click the box in the same call, one step before the text, and the focus is taken for you; with no box to type into the step is reported as having done nothing rather than as delivered.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "minItems": 1,
+            "maxItems": 40,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "default": "key",
+                  "description": "'key' presses a keyboard key, 'click' a mouse button at a point, 'move' just moves the pointer, 'text' types a string.",
+                  "type": "string",
+                  "enum": [
+                    "key",
+                    "click",
+                    "move",
+                    "text"
+                  ]
+                },
+                "key": {
+                  "description": "key only: an Enum.KeyCode name — \"W\", \"Space\", \"E\", \"LeftShift\".",
+                  "type": "string"
+                },
+                "action": {
+                  "description": "'tap' presses and releases (the default), 'press' holds it down until a later 'release', 'release' lets go. Use press/release across steps to hold a key while doing something else.",
+                  "type": "string",
+                  "enum": [
+                    "tap",
+                    "press",
+                    "release"
+                  ]
+                },
+                "button": {
+                  "description": "click only: which button. Defaults to left.",
+                  "type": "string",
+                  "enum": [
+                    "MouseButton1",
+                    "MouseButton2",
+                    "MouseButton3"
+                  ]
+                },
+                "target": {
+                  "description": "click/text only: client GUI path, e.g. PlayerGui.HUD.BuyButton. Clicks its centre; focuses TextBoxes before typing.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "x": {
+                  "description": "click/move only: viewport pixels from the left.",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "click/move only: viewport pixels from the top.",
+                  "type": "number"
+                },
+                "text": {
+                  "description": "text only: the string to type. Goes to the focused TextBox — click it first, in the same call.",
+                  "type": "string"
+                },
+                "hold": {
+                  "description": "Seconds to hold the key or button down before releasing it.",
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 10
+                },
+                "after": {
+                  "description": "Seconds to wait after this step before the next one.",
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 10
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "Input steps, delivered in order."
+          },
+          "player": {
+            "description": "Which player, by name. Omit for the only one; needed in a multiplayer test.",
+            "type": "string"
+          },
+          "cursor": {
+            "default": true,
+            "description": "Draw a pointer on screen that travels to each target before the click, with a ripple where it lands. On by default: synthetic input is otherwise invisible, so the user watching sees effects with no cause, and a click that misses looks identical to one that hit. Turn it off only when recording something where the pointer would be in the way.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "The PLAYTEST session's id — not the editor's. See list_studios.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Send keyboard and mouse input",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "device",
+      "description": "Resizes the Studio viewport to a real device, so you can see what a player on that device sees.\n\nMost Roblox players are on a phone and most UI is built on a desktop monitor, which is where interfaces break: a button under the notch, a menu off the bottom of a 393-pixel-tall screen, text sized for a display three times larger. None of that is visible in the data model — every one of those instances has perfectly correct properties — so this is the only way to find it short of owning the hardware.\n\nThe workflow is: `set` a device, `screenshot`, look. Pair it with `playtest` to check a running game's HUD rather than the editor.\n\n`list` gives the ids, each with its real name, form factor and resolution — ids look like \"iphone_16\", \"ipad_a16\", \"samsung_galaxy_s25_ultra\", \"xbox\", \"meta_quest_3\".\n\n`network` degrades the connection on purpose — latency, jitter and packet loss — which is the other half of what a phone player actually gets. A menu that works at 0ms is not evidence that it works at 300: the spinner that never stops, the button that fires twice, the HUD that arrives after the round started are all invisible on a local connection. Use a `preset` (`wifi`, `4g`, `3g`, `poor`, `clear`) or set the numbers yourself, then `playtest` and watch.\n\n`stop` returns Studio to the normal editor viewport AND clears the network shaping. Do that when you are finished: a left-over emulated device makes every later screenshot the wrong shape, a left-over 400ms delay makes the whole place feel broken, and nothing on screen says why in either case.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "default": "state",
+            "description": "'list' shows the available devices, 'set' switches to one, 'network' shapes the connection, 'stop' undoes both, 'state' only reports.",
+            "type": "string",
+            "enum": [
+              "list",
+              "set",
+              "network",
+              "stop",
+              "state"
+            ]
+          },
+          "device": {
+            "description": "set only: the device id, e.g. \"iphone_16\". See `list`.",
+            "type": "string"
+          },
+          "orientation": {
+            "description": "set only: which way up. Portrait is worth testing separately — most mobile players hold the phone upright and most UI is only ever checked in landscape.",
+            "type": "string",
+            "enum": [
+              "LandscapeLeft",
+              "LandscapeRight",
+              "Portrait",
+              "Sensor"
+            ]
+          },
+          "form": {
+            "description": "list only: show only devices of this form factor.",
+            "type": "string",
+            "enum": [
+              "Phone",
+              "Tablet",
+              "Console",
+              "Desktop",
+              "VR"
+            ]
+          },
+          "preset": {
+            "description": "network only: a whole connection in one word. clear=0ms (normal), wifi=15ms, 4g=60ms/0.1% loss, 3g=150ms/0.3% loss, poor=400ms/0.5% loss. Named fields below override whichever part you name.",
+            "type": "string",
+            "enum": [
+              "clear",
+              "wifi",
+              "4g",
+              "3g",
+              "poor"
+            ]
+          },
+          "latency": {
+            "description": "network only: minimum delay in milliseconds, up to 1000 — the engine's own ceiling. 0 clears it.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "jitter": {
+            "description": "network only: how much the delay varies, in milliseconds. Jitter breaks things steady latency does not — it is what makes replicated motion stutter rather than simply lag.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "loss": {
+            "description": "network only: percentage of packets thrown away, up to 0.5 — Roblox caps it there so the simulation does not fight congestion control. Latency makes a game feel slow; loss makes unreliable remotes arrive out of order or not at all.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 0.5
+          },
+          "memory": {
+            "description": "network only: pretend the machine has this many MB of memory. A cheap phone is a small screen AND little memory; this is the half that makes textures unload. 0 removes the cap, restoring the real amount.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65536
+          },
+          "direction": {
+            "description": "network only: which way to degrade. 'in' is the player with a bad connection, 'out' is everyone else seeing that player late. Defaults to both.",
+            "type": "string",
+            "enum": [
+              "in",
+              "out",
+              "both"
+            ]
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Emulate a phone, tablet or console",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "api",
+      "description": "Lists the properties, methods and events of any Roblox class, read from the engine that is running.\n\nUse it before writing Luau against a class you are not certain of. Guessing a method name costs a runtime error and a round trip; this costs one call and is never out of date, because the answer comes from the running binary rather than from a published dump or from training data. That matters most for exactly the classes worth checking — new ones, and ones that changed recently.\n\nMembers come back as signatures rather than bare names — `AddAccessory(accessory: Instance)`, `HoldDuration: number` — because a name tells you something exists and a signature tells you how to call it, which is the actual question.\n\n`describe` takes a class name and gives the members it declares itself, counting the inherited ones separately. `classes` searches class names, which is how to find one whose exact spelling you do not have.\n\nDeprecated members are never listed, only counted — `Instance` has eight, including `clone`, `remove` and `getChildren`. They still run, so picking one from a list gives you working code and a deprecation warning in the user's output. Members no script may use at all are counted with them.\n\nThis is not the same as `inspect`. `inspect` reads the values on an instance that exists; this reads the shape of a class whether or not anything in the place is one — which is what you need when deciding what to create in the first place.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "default": "describe",
+            "description": "'describe' details one class, 'classes' searches class names.",
+            "type": "string",
+            "enum": [
+              "describe",
+              "classes"
+            ]
+          },
+          "className": {
+            "description": "describe only: the class, e.g. \"TweenService\", \"ProximityPrompt\", \"Humanoid\". Case-sensitive.",
+            "type": "string"
+          },
+          "contains": {
+            "description": "classes only: substring to match, case-insensitive, e.g. \"constraint\" or \"gui\". Omit to list everything.",
+            "type": "string"
+          },
+          "include": {
+            "description": "describe only: which member kinds to return. Defaults to all three; narrow it when you only need one and the class is large.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "properties",
+                "methods",
+                "events"
+              ]
+            }
+          },
+          "inherited": {
+            "default": false,
+            "description": "describe only: include members inherited from Instance and Object. Off by default because they swamp the answer — ProximityPrompt has 2 methods of its own and 42 inherited, and the two you want are not the ones you already know. The inherited count is reported either way.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "What a class can do",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "audio",
+      "description": "Builds and inspects the modern audio API — AudioPlayer, emitters, effects and the Wires between them.\n\nRoblox's modern audio is a signal graph, not one instance with a Play method. An `AudioPlayer` holds the asset, an `AudioEmitter` puts the sound in the world or an `AudioDeviceOutput` sends it to the player's speakers, effects sit in between, and NOTHING is connected until a `Wire` joins two named pins. A place can hold a perfectly configured AudioPlayer with the right asset and the right volume and be completely silent, with no error anywhere, because the wire was never made. That is what this tool is for: `create` can make each instance, but the pin names, the direction and the choice of sink are where it actually goes wrong.\n\n`graph` is the one to reach for: it builds a whole working chain in one undoable step. `kind=\"world\"` gives a sound that comes from a part; `kind=\"ui\"` gives one with no position, for menus and music. Add `effects` to splice reverb, EQ or a fader into the chain.\n\n`wire` joins two instances you already have. `inspect` reads an existing graph back and reports every connection — including the ones that report Connected = false, which the Explorer does not show and which are the usual reason for silence.\n\nThe old `Sound` instance still works and is still shorter for a plain one-off noise; use `create` for that. Come here when the case needs effects, per-listener mixing, or one emitter fed by several sources.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "default": "graph",
+            "description": "'graph' builds a whole working chain, 'wire' joins two existing instances, 'inspect' reads a graph back.",
+            "type": "string",
+            "enum": [
+              "graph",
+              "wire",
+              "inspect"
+            ]
+          },
+          "kind": {
+            "description": "graph only: 'world' is a sound heard from a place — it needs a part to come from. 'ui' has no position: menu clicks, music. Defaults to 'world'.",
+            "type": "string",
+            "enum": [
+              "world",
+              "ui"
+            ]
+          },
+          "parent": {
+            "description": "graph only: where the graph goes. For kind=\"world\" this is the part or attachment the sound comes from.",
+            "type": "string"
+          },
+          "asset": {
+            "description": "graph only: the audio id, e.g. \"rbxassetid://1234\". Find one with `assets op=\"search\" category=\"audio\"`. Leave it out to build the chain now and set the asset later.",
+            "type": "string"
+          },
+          "name": {
+            "description": "graph only: name for the AudioPlayer.",
+            "type": "string"
+          },
+          "effects": {
+            "description": "graph only: effect classes to splice between the player and the output, in order, e.g. [\"AudioFader\", \"AudioReverb\"]. Also accepts AudioEqualizer, AudioCompressor, AudioEcho, AudioDistortion, AudioPitchShifter, AudioChorus, AudioFlanger and AudioLimiter.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "from": {
+            "description": "wire only: the instance sound comes OUT of.",
+            "type": "string"
+          },
+          "to": {
+            "description": "wire only: the instance sound goes INTO.",
+            "type": "string"
+          },
+          "fromPin": {
+            "description": "wire only: the source's output pin. Defaults to \"Output\", which is right for everything but a channel splitter.",
+            "type": "string"
+          },
+          "toPin": {
+            "description": "wire only: the target's input pin. Defaults to \"Input\". A wrong pin name is accepted by the engine and produces silence, so the name is checked against the instance before the wire is made.",
+            "type": "string"
+          },
+          "path": {
+            "description": "inspect only: where to look. Omit to walk the whole place, which is the right call when tracking down silence of unknown origin.",
+            "type": "string"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Wire up Roblox's audio graph",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "universe",
+      "description": "Acts on the PUBLISHED experience and the people in it — not on the place open in Studio.\n\n`restart` rolls live servers onto the version you just published. Publishing on its own changes nothing for anyone already playing: they stay on their server, running the old code, until it empties. This is the step people forget. By default it bleeds off over 10 minutes — matchmaking stops and players finish what they are doing — rather than shutting servers down under them, which is what Roblox's own default does.\n\n`message` publishes to MessagingService, reaching every live server at once. Only servers with a `SubscribeAsync` listener on that exact topic receive it, and nothing reports whether anything was listening, so success here does not mean delivery.\n\n`ban` and `unban` set a player's game-join restriction. A ban with no `durationSeconds` is PERMANENT. `displayReason` is shown to the player; `privateReason` is for your records. Scope it to one place with `placeId`, or leave that out to cover the whole experience. `bans` lists who is currently restricted.\n\n`user` looks up a user id — the name-to-id step most other calls need. `inventory` reports what someone owns: passes, badges, assets.\n\n`servers` lists the place's live servers — players, uptime, frame rate, memory, version — and `logs` reads one server's errors and warnings by its `jobId`, with stack traces and structured-log context. That is where a player's bug report actually happened; Studio only shows your own test. Roblox keeps warnings and errors only, and they arrive about three minutes after they are written.\n\n`products` lists the game's developer products and game passes with their ids and prices — the ids a purchase script needs. `sell` creates one, or changes one given `itemId`. Creating checks the name first, so a retried create cannot leave two \"100 Coins\" products.\n\n`analytics` reads the game's own numbers over a date range: players, revenue, retention, crashes, frame rate, as a time series, optionally split by a `breakdown` such as Platform or Country. Common metrics: DailyActiveUsers, Visits, DailyRevenue, PayingUsers, ForwardD1Retention, AverageSessionLengthMinutes, PeakConcurrentPlayers, ClientCrashCount, ClientFpsP50. Give `days` for the last N whole UTC days, or `startTime` and `endTime`.\n\n`events` lists the game's scheduled events, or reads one by `eventId`. `schedule` creates one (`title`, `startTime`, `endTime`) or changes one given `eventId`; `cancel` deletes it. Players see these on the experience's page.\n\nEverything here needs an Open Cloud key and a universe id. The user sets both once with `cloud` in the Studio panel.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "restart",
+              "message",
+              "ban",
+              "unban",
+              "bans",
+              "user",
+              "inventory",
+              "servers",
+              "logs",
+              "products",
+              "sell",
+              "analytics",
+              "events",
+              "schedule",
+              "cancel"
+            ],
+            "description": "'restart' rolls servers onto the new version, 'message' publishes to MessagingService, 'ban'/'unban'/'bans' manage player access, 'user' and 'inventory' look someone up, 'servers' and 'logs' read live servers, 'products' and 'sell' manage products and passes, 'analytics' reads metrics, 'events'/'schedule'/'cancel' manage scheduled events."
+          },
+          "universeId": {
+            "description": "Which game. Omit to use the one set with `cloud universe <id>`.",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "ban/unban: restrict to this place only, instead of the whole experience. restart: only restart this place's servers. servers/logs: which place, defaulting to `cloud place`.",
+            "type": "string"
+          },
+          "jobId": {
+            "description": "logs only: the server, as listed by `servers`.",
+            "type": "string"
+          },
+          "severity": {
+            "description": "logs only: just this level. Omit for both.",
+            "type": "string",
+            "enum": [
+              "error",
+              "warning"
+            ]
+          },
+          "search": {
+            "description": "logs only: case-insensitive text to find in the message, stack trace or context.",
+            "type": "string"
+          },
+          "topic": {
+            "description": "message only: the MessagingService topic.",
+            "type": "string"
+          },
+          "message": {
+            "description": "message only: the payload, as a string.",
+            "type": "string"
+          },
+          "userId": {
+            "description": "ban/unban/user/inventory: the player's user id.",
+            "type": "string"
+          },
+          "durationSeconds": {
+            "description": "ban only: how long, in seconds. OMIT THIS AND THE BAN IS PERMANENT — say so to the user before you do it.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "displayReason": {
+            "description": "ban only: shown to the player when they are turned away.",
+            "type": "string",
+            "maxLength": 400
+          },
+          "privateReason": {
+            "description": "ban only: your own record. The player never sees it.",
+            "type": "string",
+            "maxLength": 1000
+          },
+          "excludeAltAccounts": {
+            "description": "ban only: if true, the ban applies to this account alone rather than to alts Roblox links to it. Defaults to false.",
+            "type": "boolean"
+          },
+          "bleedOffMinutes": {
+            "description": "restart only: minutes to let existing servers drain. 0 shuts them down immediately, moving players mid-game. Defaults to 10.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60
+          },
+          "filter": {
+            "description": "inventory: an Open Cloud filter, e.g. `gamePassIds=123` or `assetIds=456`, to ask about specific items rather than listing everything. servers: a CEL filter over the server fields, e.g. `occupancy > 0`. analytics: Dimension=a,b;Dimension=c, e.g. `Platform=Phone,Tablet;Country=US`.",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "bans/inventory/servers/logs/events: how many rows to return. analytics: most breakdown series.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "confirm": {
+            "description": "Required for restart, message, ban, unban, sell, schedule and cancel. Each of these is visible to players the moment it runs and none can be undone from here.",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "products/sell: 'product' is a developer product (bought again and again: currency, boosts), 'pass' a game pass (bought once: VIP, perks). products lists both when omitted; sell needs it.",
+            "type": "string",
+            "enum": [
+              "product",
+              "pass"
+            ]
+          },
+          "itemId": {
+            "description": "sell only: the product or pass to change. Omit to create a new one.",
+            "type": "string"
+          },
+          "name": {
+            "description": "sell only: the item's name. Required to create.",
+            "type": "string"
+          },
+          "description": {
+            "description": "sell/schedule: the item's or event's description.",
+            "type": "string"
+          },
+          "price": {
+            "description": "sell only: price in Robux.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "forSale": {
+            "description": "sell only: whether players can buy it. Say it explicitly when creating.",
+            "type": "boolean"
+          },
+          "image": {
+            "description": "sell only: path to a local .png/.jpg/.bmp/.tga icon.",
+            "type": "string"
+          },
+          "metric": {
+            "description": "analytics only: the metric, e.g. DailyActiveUsers.",
+            "type": "string"
+          },
+          "granularity": {
+            "description": "analytics only: size of each time bucket. Default OneDay. Which a metric allows varies.",
+            "type": "string",
+            "enum": [
+              "OneMinute",
+              "HalfHour",
+              "OneHour",
+              "OneDay",
+              "OneWeek",
+              "OneMonth",
+              "None"
+            ]
+          },
+          "breakdown": {
+            "description": "analytics only: dimensions to split by, e.g. [\"Platform\"].",
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "days": {
+            "description": "analytics only: the last N whole UTC days, not counting today. Default 7.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 730
+          },
+          "startTime": {
+            "description": "analytics/schedule: ISO 8601 UTC start, e.g. 2026-11-07T18:00:00Z. analytics: inclusive.",
+            "type": "string"
+          },
+          "endTime": {
+            "description": "analytics/schedule: ISO 8601 UTC end. analytics: exclusive.",
+            "type": "string"
+          },
+          "eventId": {
+            "description": "events/schedule/cancel: the event, as listed by `events`.",
+            "type": "string"
+          },
+          "title": {
+            "description": "schedule only: the event's title.",
+            "type": "string",
+            "maxLength": 100
+          },
+          "subtitle": {
+            "description": "schedule only: a line under the title.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "visibility": {
+            "description": "schedule only: e.g. public.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Operate the live game",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "datastore",
+      "description": "Reads and writes the game's saved data — DataStore and MemoryStore — from the connected Studio.\n\nThis is the only tool here that looks at anything outside the place file. Every other tool answers 'is the instance right'; this one answers 'is what the player saved right', which is a different question and the one behind most reports of lost progress, reset stats, or items that come back after a rejoin.\n\n`kind=\"data\"` (the default) is DataStoreService: permanent, per-player, and version-tracked. `kind=\"memory\"` is MemoryStoreService: a shared scratchpad that expires on its own — queues, locks, live leaderboards.\n\nThe workflow for a bug report is: `list` with no store to see what exists, `list` with one to see its keys, `get` the player's key, and — the part worth knowing about — `versions` then `get` with a `version` to see what that same key held BEFORE it broke. You cannot diagnose a bad save by looking only at the bad save.\n\nWrites need `confirm: true` on `kind=\"data\"`, because nothing in this server can undo one: there is no recording to cancel and no Ctrl+Z. Read the key first.\n\nDataStore needs 'Enable Studio Access to API Services' ticked in Game Settings → Security, and a published place. If it is off, this tool says so in those words rather than reporting the raw 502. MemoryStore needs neither.\n\n`target=\"live\"` is the other half of this tool and the one that answers a real bug report. It goes to Roblox directly instead of through Studio, so it sees exactly what the running servers see — not what the place happens to be connected to, and with no Studio API toggle involved. Use it whenever the question is about a player who is actually playing. It needs an Open Cloud key and a universe id; the user sets both once with `cloud` in the Studio panel.\n\n`kind=\"ordered\"` (live only) is OrderedDataStoreService, the leaderboard backend: numbers only, always sorted, no history. `list` returns it ranked highest first, which is the leaderboard itself.\n\n`op=\"snapshot\"` is the safety net. It tells Roblox to snapshot every data store in the experience, so support can roll them back. TAKE ONE BEFORE ANY LIVE WRITE. Roblox allows one per experience per UTC day, and the result says whether this call actually took one — a second call the same day reports success while doing nothing, and anything written since the first one is not covered.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "default": "studio",
+            "description": "'studio' reads through the connected Studio — right while building. 'live' goes to Roblox over Open Cloud and sees what the published game's servers see — right for a bug report.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "live"
+            ]
+          },
+          "universeId": {
+            "description": "live only: which game. Omit to use the one set with `cloud universe <id>` in the panel.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "live increment only: how much to add. Negative subtracts. Safer than get-then-set for currency, which loses whatever the player earned in between.",
+            "type": "number"
+          },
+          "create": {
+            "description": "live set only: allow writing a key that does not exist yet. Off by default — Open Cloud separates create from update, and a typo'd key silently creating a second empty save beside the real one is exactly what looks like a player's data resetting.",
+            "type": "boolean"
+          },
+          "op": {
+            "default": "list",
+            "description": "'list' shows stores (no `store`) or a store's keys (with one). 'versions' is DataStore only and is how you see a key's history.",
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "versions",
+              "set",
+              "remove",
+              "increment",
+              "snapshot"
+            ]
+          },
+          "kind": {
+            "default": "data",
+            "description": "'data' = DataStoreService, permanent and versioned. 'memory' = MemoryStoreService, shared and expiring. They are separate storage — a key in one is not in the other.",
+            "type": "string",
+            "enum": [
+              "data",
+              "memory",
+              "ordered"
+            ]
+          },
+          "store": {
+            "description": "Data store name, or the sorted map's name for memory. Omit on `list` to see which stores exist.",
+            "type": "string"
+          },
+          "scope": {
+            "description": "DataStore scope, if the game uses them. Omit for the default — but if a store reads as empty and you expected data, a scope is the usual reason.",
+            "type": "string"
+          },
+          "key": {
+            "description": "The key. Usually the player's UserId as a string.",
+            "type": "string"
+          },
+          "value": {
+            "description": "set only: the new value as JSON — {\"coins\":10}, 42, or a bare string. Read the key first and edit what comes back rather than writing a value from scratch: a save is usually a whole table and writing part of one deletes the rest.",
+            "type": "string"
+          },
+          "version": {
+            "description": "get only: read this exact version instead of the current value. From `versions`.",
+            "type": "string"
+          },
+          "at": {
+            "description": "get only: read the version that was current at this Unix time in MILLISECONDS. Use when the player says when it broke but no version id is known.",
+            "type": "number"
+          },
+          "ttl": {
+            "description": "memory set only: seconds before the value expires. Defaults to an hour.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3888000
+          },
+          "prefix": {
+            "description": "list only: only names starting with this.",
+            "type": "string"
+          },
+          "cursor": {
+            "description": "list only: continue from a previous call's cursor.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "list/versions only: rows to return. Defaults to 50.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "confirm": {
+            "description": "Required for set and remove on kind=\"data\". This is real player data and nothing here can put it back.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Read and write saved data",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "terrain",
+      "description": "Fills, repaints and clears Roblox terrain — hills, water, caves, roads.\n\nTerrain is not made of instances, so none of the instance tools reach it: there is nothing to `create`, no path for `find`, and no property for `modify`. This is the only way to shape it short of writing FillBall calls by hand through `execute_luau`.\n\n`fill` takes an ARRAY of solids and applies them as one undo step, which is how terrain is actually built: a hill is several overlapping balls, a road is a row of blocks. Shapes are `block` (needs `size`), `ball` (needs `radius`), `cylinder` (needs `radius` and `height`) and `wedge` (needs `size`).\n\nTo CARVE, fill with material `Air`. That is not a special mode — a cave is a ball of Air inside a hill, and a tunnel is a row of them.\n\n`replace` swaps one material for another inside a region and leaves the shape alone, which is how you turn a grass hill to snow without rebuilding it. `clear` empties a region, or everything with confirm=true. `stats` says whether the place uses terrain at all -- call it first in an unfamiliar place. It cannot say WHERE the terrain is: Roblox exposes no bounding box for it. Take a `screenshot` to see the shape.\n\nPositions are the centre of the solid, in studs, as \"x, y, z\". Terrain snaps to a 4-stud voxel grid, so small features come out blockier than the numbers suggest; nothing thinner than about 4 studs survives.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "default": "stats",
+            "description": "'fill' adds solids (use material Air to carve), 'replace' swaps a material in place, 'clear' empties a region or everything, 'stats' reports what is there.",
+            "type": "string",
+            "enum": [
+              "fill",
+              "replace",
+              "clear",
+              "stats"
+            ]
+          },
+          "shapes": {
+            "description": "fill only: the solids to apply, together, as one undo step.",
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "shape": {
+                  "default": "block",
+                  "description": "Which solid to fill.",
+                  "type": "string",
+                  "enum": [
+                    "block",
+                    "ball",
+                    "cylinder",
+                    "wedge"
+                  ]
+                },
+                "position": {
+                  "type": "string",
+                  "description": "Centre of the solid in studs, e.g. \"0, 20, 0\"."
+                },
+                "size": {
+                  "description": "block and wedge: extent in studs, e.g. \"100, 20, 100\".",
+                  "type": "string"
+                },
+                "radius": {
+                  "description": "ball and cylinder: radius in studs.",
+                  "type": "number"
+                },
+                "height": {
+                  "description": "cylinder: height in studs.",
+                  "type": "number"
+                },
+                "orientation": {
+                  "description": "Rotation in degrees, e.g. \"0, 45, 0\". Omit for none.",
+                  "type": "string"
+                },
+                "material": {
+                  "default": "Grass",
+                  "description": "Terrain material — Grass, Rock, Sand, Water, Snow, Basalt, Mud, LeafyGrass... Use \"Air\" to carve out existing terrain.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "position"
+              ]
+            }
+          },
+          "position": {
+            "description": "replace and clear: centre of the region, e.g. \"0, 0, 0\".",
+            "type": "string"
+          },
+          "size": {
+            "description": "replace and clear: extent of the region in studs, e.g. \"512, 256, 512\".",
+            "type": "string"
+          },
+          "from": {
+            "description": "replace only: the material to look for.",
+            "type": "string"
+          },
+          "to": {
+            "description": "replace only: the material to write instead.",
+            "type": "string"
+          },
+          "confirm": {
+            "description": "clear only: required to empty ALL terrain. Omit it and give `position`/`size` to clear one region instead.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Build and edit terrain",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "geometry",
+      "description": "Every operation that reshapes solid geometry, in one place.\n\n**Boolean** - `union` merges parts into one solid, `subtract` cuts the `with` parts out of `path`, `intersect` keeps only the overlap. This is how to build a shape that is not a box without importing a mesh.\n\n**Breaking apart** - `fragment` shatters a part into random debris, for destruction. `segment` is the opposite kind of break: it cuts a MeshPart into parts you NAME, so a solid car mesh becomes a body and four wheels a script can find and turn. Use `fragment` for rubble and `segment` for articulation.\n\n**Motion** - `sweep` builds the volume a part passes through as it moves, which is the only real answer to 'does this door hit the wall when it opens'. Give `to` for a slide, or `spin` degrees with a `pivot` for a hinge. Pass `checkAgainst` and it reports what the swept volume overlaps; with `keep: false` it measures and cleans up after itself, leaving nothing behind.\n\n`subtract` and `intersect` need the parts to actually overlap, and they fail differently when they do not. `intersect` returns nothing, which comes back as an error rather than a silent no-op. `subtract` returns the subject UNCHANGED - a full-size copy of it, reported as a created part - because cutting nothing out of something legitimately leaves it whole. So a subtract that succeeds is not proof that anything was cut: check the positions overlap with `inspect` first, or compare the result's size against the original.\n\nResults keep the original's material, colour, texture and anchoring. Roblox returns bare grey MeshParts, so a brick wall with a hole cut in it would otherwise come back as a grey slab - correct geometry that looks like a mistake.\n\n`mesh` reads the real triangle and vertex counts of MeshParts, which is the only way to tell a 40,000-triangle tree from a 400-triangle one — they are identical in the Explorer and in Properties, and the difference is whether the place runs on a phone. It also reports mesh size against part size: the same triangles stretched over a bigger object is the usual reason a model costs more than it looks like it should.\n\n`mesh` only works on meshes the signed-in Studio user or the experience owner OWNS. Roblox refuses to open anyone else's, so a model inserted from the Creator Store cannot be measured this way — the tool says which parts were skipped rather than failing the whole batch.\n\n`mirror` flips instances across a plane and has no engine API behind it — Studio simply cannot do this, which is why people ask for it. Mirroring about the middle of the selection is the default, because mirroring a building at x=200 about the world origin puts it 400 studs away rather than flipping it in place. It COPIES by default; pass `copy: false` to flip the originals. MeshParts move and rotate correctly but their meshes are not remade, so an asymmetric mesh still reads the same way round.\n\n`segment` runs Roblox's Cube model and takes tens of seconds; the rest are fast. Each call is one undo step.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "union",
+              "subtract",
+              "intersect",
+              "fragment",
+              "sweep",
+              "segment",
+              "mesh",
+              "mirror"
+            ],
+            "description": "'union' merges, 'subtract' cuts `with` out of `path`, 'intersect' keeps only the overlap, 'fragment' shatters into debris, 'sweep' builds a motion volume, 'segment' cuts a mesh into named parts, 'mesh' reads triangle counts, 'mirror' flips instances across a plane."
+          },
+          "path": {
+            "description": "The part being operated on - the one cut from, for subtract. Required for every op except mesh and mirror, which take `paths`.",
+            "type": "string"
+          },
+          "about": {
+            "description": "mirror only: the plane position, e.g. \"0, 0, 0\". Defaults to the middle of what is being mirrored, which flips it in place.",
+            "type": "string"
+          },
+          "copy": {
+            "description": "mirror only: leave the originals and add mirrored copies. True by default — that is what builds a symmetrical structure from half of one. False flips the originals in place.",
+            "type": "boolean"
+          },
+          "with": {
+            "description": "The other parts. Required for union, subtract and intersect.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pieces": {
+            "default": 8,
+            "description": "fragment only: roughly how many pieces to break into.",
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 100
+          },
+          "groups": {
+            "description": "segment only: the part names to cut into, e.g. [\"body\", \"lid\"]. Overrides `schema`.",
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "schema": {
+            "description": "segment only: a built-in split. 'Car5' gives a body and four wheels under fixed names; 'Body1' gives one mesh. Ignored when `groups` is set.",
+            "type": "string",
+            "enum": [
+              "Body1",
+              "Car5"
+            ]
+          },
+          "keepOriginal": {
+            "default": false,
+            "description": "segment only: leave the source MeshPart in place instead of replacing it.",
+            "type": "boolean"
+          },
+          "to": {
+            "description": "sweep only: slide to this position, e.g. \"0, 10, 0\".",
+            "type": "string"
+          },
+          "spin": {
+            "description": "sweep only: rotate this many degrees. Use with `pivot` for a hinge.",
+            "type": "number"
+          },
+          "axis": {
+            "description": "sweep: axis to spin around, e.g. \"0, 1, 0\" (defaults to up). mirror: which axis to flip across — \"X\", \"Y\" or \"Z\", defaulting to X.",
+            "type": "string"
+          },
+          "pivot": {
+            "description": "sweep only: the hinge point. Defaults to the part's own centre, which spins it in place - a door needs its hinge edge here.",
+            "type": "string"
+          },
+          "positions": {
+            "description": "sweep only: an explicit path of positions to sweep along.",
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "steps": {
+            "default": 12,
+            "description": "sweep only: how many samples along the motion. Too few cuts corners off an arc.",
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 64
+          },
+          "checkAgainst": {
+            "description": "sweep only: report what the volume overlaps. An empty array checks against everything; a list checks only those.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keep": {
+            "default": true,
+            "description": "sweep only: leave the volume as a part. Off measures and cleans up.",
+            "type": "boolean"
+          },
+          "transparency": {
+            "default": 0.5,
+            "description": "sweep only: how see-through the volume is.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "name": {
+            "description": "Name for the result. Defaults to the original's.",
+            "type": "string"
+          },
+          "parent": {
+            "description": "Where to put the result. Defaults to the original's parent.",
+            "type": "string"
+          },
+          "position": {
+            "description": "segment only: where to place the result. Defaults to where the source was.",
+            "type": "string"
+          },
+          "scaleTo": {
+            "description": "segment only: scale so the longest side is this many studs.",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "anchor": {
+            "default": true,
+            "description": "segment only: anchor every part.",
+            "type": "boolean"
+          },
+          "keepOriginals": {
+            "default": false,
+            "description": "Leave the input parts in place instead of consuming them.",
+            "type": "boolean"
+          },
+          "collisionFidelity": {
+            "default": "Default",
+            "description": "How exactly the result collides. Precise is expensive - raise it only for a surface players walk on. Tunable picks a precision from the size and handles thin details better; adjust it afterwards with `modify` on CollisionPrecision.",
+            "type": "string",
+            "enum": [
+              "Default",
+              "Hull",
+              "Box",
+              "PreciseConvexDecomposition",
+              "Tunable"
+            ]
+          },
+          "splitApart": {
+            "default": false,
+            "description": "Return disconnected chunks as separate parts rather than one.",
+            "type": "boolean"
+          },
+          "paths": {
+            "description": "mesh and mirror: the instances to read or flip.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Mesh operations",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "assets",
+      "description": "Searches Roblox's Creator Store and inserts models into the place.\n\n`search` looks through the same public index Studio's own asset browser uses. It reports script COUNT, triangles, whether the creator is verified, whether the asset is free, and what Roblox thinks it is (\"Door/Furniture\"). `insert` puts one into the place by id.\n\nResults are ranked by approval WEIGHTED BY vote count, because the raw percentage lies: 100% from two voters outranks 82% from five thousand unless the count is taken into account. The vote count is shown beside the percentage for the same reason.\n\nFilters — `excludeScripts`, `maxTriangles`, `verifiedOnly`, `freeOnly`, `minVotes` — are applied here, not by Roblox, and several pages are fetched to fill the results. Roblox's own sort and creator filters are accepted by the endpoint and silently ignored, so they are not offered.\n\nALWAYS check `hasScripts` before inserting. Free models carrying scripts are the oldest hazard on the platform, and a model dropped into someone's game can run whatever it likes. The insert reports the script count again, and names them, so it can still be undone.\n\n`peek` is the safer half of that: it loads the asset in memory WITHOUT putting it in the place and tells you exactly what is inside — every class, every script by name. Nothing is parented, so there is nothing to undo. Use it whenever `hasScripts` says YES and the model still looks worth having.\n\nAudio searches take a different path from everything else here. They go to the engine's own audio index, so results carry duration, artist and whether the clip is music or a sound effect — the fields that actually decide which sound you want. They return SOUND EFFECTS by default; pass `audioType: \"Music\"` for tracks. Filter with `minDuration` / `maxDuration` — a footstep is under a second and a music bed is minutes.\n\nOnly public assets can be inserted. A private or deleted id fails with a message saying so rather than inserting nothing quietly.\n\n`bake` is unrelated to the Creator Store and does not upload anything. It turns EditableMesh and EditableImage data into static content, which frees the editable memory budget and lets a mesh built at runtime replicate from the server down to clients.\n\nREAD THIS BEFORE REACHING FOR IT. What it produces is scoped to the data model session it was made in. Baking in edit mode therefore carries NOTHING into a playtest — a playtest is a new data model, and the content reads as empty there. Measured, not assumed. Its real use is against a RUNNING playtest server session: pass that `studioId`, and baking a mesh the game just built is what lets clients see it.\n\nIt does not help `generate` at all. Generated meshes hold opaque content, which the engine refuses to bake.\n\nTHE OTHER DIRECTION: `upload` sends a local file TO Roblox and gives you the asset id. Audio, an image, a 3D model or a video, picked by extension — .mp3/.ogg/.wav/.flac, .png/.jpg/.bmp/.tga, .fbx/.gltf/.glb, .mp4/.mov. This closes the one hole nothing else here covers: a sound effect sitting in a folder on disk used to need Studio's import dialog before anything could reference it.\n\nUploads are moderated and count against a real monthly quota. Do not guess what it is — Roblox's own guide and the live API disagree, and the account's verification level changes it. Ask `op=\"quota\"`. Do not upload speculatively, and do not re-upload to retry: the first one probably worked.\n\n`grant` gives a game or a person permission to use assets you own. You do NOT need this for your own assets in your own game — those always work. It is for a collaborator's place, or a group game you do not own. A grant to a game is PERMANENT; Roblox provides no way to revoke one, so it needs `confirm: true`.\n\n`publish` sends a .rbxl or .rbxlx from disk to a place. It SAVES a new version by default and only goes live with `confirm: true`. Note a real limitation: Roblox's publishing API does not update EditableImage, EditableMesh, PartOperation, SurfaceAppearance or BaseWrap instances, and reports success anyway — publish from Studio if the place uses any of those.\n\nPublishing alone does NOT move anyone already playing — they stay on their server running the old code until it empties. Pass `restart: true` to roll live servers onto the new version, which bleeds them off over 10 minutes rather than dropping players.\n\n`quota` reports how many uploads are left before Roblox starts refusing them, per asset type, read from the account itself. Check it before a batch rather than discovering the ceiling halfway through.\n\nAll of these need an Open Cloud API key. The user sets it once by typing `cloud` in the Studio panel; never ask them to paste a key into this conversation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "search",
+              "peek",
+              "insert",
+              "bake",
+              "upload",
+              "grant",
+              "publish",
+              "quota"
+            ],
+            "description": "'search' finds assets, 'peek' shows what is inside one without inserting it, 'insert' adds one to the place, 'bake' makes in-memory mesh and image data replicate, 'upload' sends a local file to Roblox, 'grant' shares one you own with another game or person, 'publish' pushes a place file live."
+          },
+          "file": {
+            "description": "upload/publish: path to the file on disk. Omit on `upload` to check whether the credentials are set up without sending anything.",
+            "type": "string"
+          },
+          "description": {
+            "description": "upload only: public description. Moderated.",
+            "type": "string"
+          },
+          "assetType": {
+            "description": "upload only: override the type derived from the extension. Rarely right — Roblox validates the type against the file's real content.",
+            "type": "string",
+            "enum": [
+              "Audio",
+              "Decal",
+              "Model",
+              "Video"
+            ]
+          },
+          "insertAs": {
+            "description": "upload only: put the finished asset in the place at this parent path once it is approved. Decals and Models only — an audio id belongs in an AudioPlayer, so use `audio op=\"graph\"` with the id this returns.",
+            "type": "string"
+          },
+          "assetIds": {
+            "description": "grant only: the assets to share. You must own them.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "subjectType": {
+            "description": "grant only: who gets access. 'Universe' is a game and is the usual one. Defaults to 'Universe'.",
+            "type": "string",
+            "enum": [
+              "Universe",
+              "User",
+              "Group"
+            ]
+          },
+          "subjectId": {
+            "description": "grant only: the universe, user or group id. Omit for a Universe grant to use the one set with `cloud universe <id>`.",
+            "type": "string"
+          },
+          "universeId": {
+            "description": "publish only: which game. Omit to use `cloud universe`.",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "publish only: which place. Omit to use `cloud place`.",
+            "type": "string"
+          },
+          "restart": {
+            "description": "publish only: also roll live servers onto the new version. Without this, players already in a server keep running the old code until it empties.",
+            "type": "boolean"
+          },
+          "stripScripts": {
+            "description": "insert only: delete every Script, LocalScript and ModuleScript from the asset on the way in. The safe way to take geometry from a free model without taking whatever its scripts do.",
+            "type": "boolean"
+          },
+          "confirm": {
+            "description": "Required to make a `publish` go live rather than only save, and required for `grant`, whose effect Roblox cannot undo.",
+            "type": "boolean"
+          },
+          "keyword": {
+            "description": "search only: what to look for, e.g. \"medieval door\".",
+            "type": "string"
+          },
+          "category": {
+            "default": "model",
+            "description": "search only: what kind of asset. Only models insert as instances.",
+            "type": "string",
+            "enum": [
+              "model",
+              "decal",
+              "mesh",
+              "audio"
+            ]
+          },
+          "limit": {
+            "default": 8,
+            "description": "search only: how many results.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "excludeScripts": {
+            "default": false,
+            "description": "search only: drop every result that contains scripts. The single safest filter — a free model's scripts run with your game's full permissions.",
+            "type": "boolean"
+          },
+          "maxTriangles": {
+            "description": "search only: drop models heavier than this. A prop you place fifty times wants to be in the hundreds, not the tens of thousands.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "verifiedOnly": {
+            "default": false,
+            "description": "search only: only results from verified creators.",
+            "type": "boolean"
+          },
+          "freeOnly": {
+            "default": false,
+            "description": "search only: drop paid assets, which cannot just be inserted.",
+            "type": "boolean"
+          },
+          "minVotes": {
+            "description": "search only: require at least this many votes. Filters out models with a perfect score from three people.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "minDuration": {
+            "description": "audio search only: shortest clip to return, in seconds.",
+            "type": "number",
+            "minimum": 0
+          },
+          "maxDuration": {
+            "description": "audio search only: longest clip to return, in seconds. Set it to 3 or so for effects — otherwise full-length music dominates the results.",
+            "type": "number",
+            "minimum": 0
+          },
+          "audioType": {
+            "default": "SoundEffect",
+            "description": "audio search only. Defaults to SoundEffect, which is what a noise in a game is. Ask for \"Music\" only when you want a track — the engine's own default is Music, and it makes \"footstep\" return three-minute ambient songs with footsteps in the title.",
+            "type": "string",
+            "enum": [
+              "SoundEffect",
+              "Music"
+            ]
+          },
+          "assetId": {
+            "description": "insert and peek only: the asset id.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "parent": {
+            "description": "insert only: where to put it. Defaults to Workspace.",
+            "type": "string"
+          },
+          "position": {
+            "description": "insert only: where to place it, e.g. \"0, 10, 0\". Defaults to wherever it was saved.",
+            "type": "string"
+          },
+          "name": {
+            "description": "insert only: rename it on the way in.",
+            "type": "string"
+          },
+          "paths": {
+            "description": "bake only: MeshParts to convert, or models containing them.",
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Creator Store",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "undo",
+      "description": "Steps Studio's undo history backwards or forwards.\n\nEvery write this server makes is already wrapped in an undo recording, so this reverses your own work as cleanly as the user pressing Ctrl+Z — one tool call is one step. Use it when the user says an edit was wrong, instead of trying to reconstruct the previous state by hand, which is guesswork and usually incomplete.\n\nIt reports how many steps actually applied, which is not always what was asked: the stack runs out, and an undo that did nothing otherwise looks exactly like one that worked.\n\nStudio's history covers the whole session, including the user's own edits — undoing more steps than you made will start reverting THEIR work. Undo only what you just did, and only when asked.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "default": "status",
+            "description": "'status' reports what is available without changing anything.",
+            "type": "string",
+            "enum": [
+              "undo",
+              "redo",
+              "status"
+            ]
+          },
+          "steps": {
+            "default": 1,
+            "description": "How many steps to take. Keep it to what you did yourself.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Undo and redo",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "collision",
+      "description": "Controls which parts physically collide with which.\n\nThis is the right answer to 'these should pass through each other'. The alternative — turning CanCollide off — disables collision against everything, so a ghost that should pass through walls also falls through the floor.\n\nThe order is: `create` a group, `assign` parts to it, then set what it is `collidable` with. A group with nothing assigned does nothing.\n\nAssigning a Model assigns every part inside it, which is almost always what is meant.\n\nGroups are not undoable and not scoped to a session: `remove` when one was created to try something and is no longer wanted, rather than leaving it registered in the place indefinitely. The built-in \"Default\" group cannot be removed.\n\nGroups belong to a world, not to the place. The Workspace is the default and is what nearly every question is about; a `WorldModel` inside a ViewportFrame keeps its own separate registry, so pass `worldModel` to reach that one. A group of the same name in each is two different groups.\n\nTHE SAME TOOL ANSWERS WHAT IS ACTUALLY THERE. `cast` fires a ray, block or sphere and reports the first thing it meets — the part, the hit point, the surface normal, the material and the distance. `overlap` lists everything inside a box, a radius, or overlapping an existing part.\n\nThat is the one question the Explorer cannot answer. A path tells you an instance exists and where its pivot sits; it does not tell you the door frame is clipping into the wall, that the spawn is buried a stud inside the floor, or that nothing stands between the turret and the player. Geometry wrong in exactly those ways looks perfect in `inspect`.\n\nThe queries live here because they ARE collision queries: they honour the very groups the other half of this tool manages. A cast run in the wrong `collisionGroup` reports a clear path through a wall the player cannot walk through — a wrong answer indistinguishable from a right one. A miss comes back as `hit: false`, which is a real answer and usually the one being checked for.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "default": "list",
+            "description": "Groups: 'list' shows them and changes nothing, then 'create', 'assign', 'collidable', 'remove' (which unregisters a group entirely — not the same as un-assigning parts). Queries: 'cast' fires a shape and reports the first hit, 'overlap' lists what is inside a volume.",
+            "type": "string",
+            "enum": [
+              "list",
+              "create",
+              "assign",
+              "collidable",
+              "remove",
+              "cast",
+              "overlap"
+            ]
+          },
+          "shape": {
+            "description": "cast only: 'ray' is a line and the usual choice. 'block' and 'sphere' sweep a volume along the same path — use them when the thing moving has width, e.g. whether a character fits through a gap rather than whether a point does.",
+            "type": "string",
+            "enum": [
+              "ray",
+              "block",
+              "sphere"
+            ]
+          },
+          "from": {
+            "description": "cast only: where the cast starts, e.g. \"12, 0, 5\".",
+            "type": "string"
+          },
+          "to": {
+            "description": "cast only: a point to aim at. Use this for sightlines — it saves working out a direction vector, which is where sign errors live.",
+            "type": "string"
+          },
+          "direction": {
+            "description": "cast only: which way to go, e.g. \"0, -1, 0\" for down. Used with `distance`.",
+            "type": "string"
+          },
+          "distance": {
+            "description": "cast only: how far along `direction`. Defaults to 100.",
+            "type": "number"
+          },
+          "size": {
+            "description": "cast shape=\"block\" or overlap region=\"box\": the volume size. Defaults to \"1, 1, 1\" for a cast and \"4, 4, 4\" for an overlap.",
+            "type": "string"
+          },
+          "radius": {
+            "description": "cast shape=\"sphere\" or overlap region=\"radius\": the radius. Defaults to 1 for a cast and 4 for an overlap.",
+            "type": "number"
+          },
+          "region": {
+            "description": "overlap only: 'box' and 'radius' need `at`; 'part' takes `path` and reports what overlaps that part — the fastest way to find things clipping through each other. Defaults to 'box'.",
+            "type": "string",
+            "enum": [
+              "box",
+              "radius",
+              "part"
+            ]
+          },
+          "at": {
+            "description": "overlap only: the centre, for region \"box\" or \"radius\".",
+            "type": "string"
+          },
+          "path": {
+            "description": "overlap region=\"part\" only: the part to test against.",
+            "type": "string"
+          },
+          "only": {
+            "description": "cast/overlap: consider ONLY these instances and their descendants.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ignore": {
+            "description": "cast/overlap: skip these and their descendants. The usual case is the character doing the looking, which otherwise blocks its own cast at zero distance.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "collisionGroup": {
+            "description": "cast/overlap: run the query as if from a part in this group. Required for a truthful answer in any place that uses groups.",
+            "type": "string"
+          },
+          "respectCanCollide": {
+            "description": "cast/overlap: skip parts with CanCollide off. Off by default, matching the engine — leave it off to ask what is there, turn it on to ask what would stop a player.",
+            "type": "boolean"
+          },
+          "ignoreWater": {
+            "description": "cast only: pass through terrain water instead of hitting it.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "overlap only: how many parts to list. Defaults to 50.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "group": {
+            "description": "The group's name. Required for everything but list.",
+            "type": "string"
+          },
+          "paths": {
+            "description": "assign only: parts or models to put in the group.",
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "with": {
+            "description": "collidable only: the other group.",
+            "type": "string"
+          },
+          "collidable": {
+            "default": true,
+            "description": "collidable only: whether the two groups collide. False makes them pass through.",
+            "type": "boolean"
+          },
+          "worldModel": {
+            "description": "Path to a WorldModel whose own collision groups this call is about, e.g. \"StarterGui.Preview.Viewport.WorldModel\". Omit for the Workspace, which is what you want unless the parts in question live inside a ViewportFrame.",
+            "type": "string"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Collision groups",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "generate",
+      "description": "Makes 3D geometry from a text prompt, using Roblox's Cube model.\n\nTHE SCHEMA IS THE IMPORTANT ARGUMENT. It decides how the result is broken up, and it cannot be changed afterwards without another generation:\n- `Body1` — one MeshPart. Right for props: a crate, a tree, a lamp.\n- `Car5` — a body and four wheels, under the fixed names `body`, `front left wheel`, `front right wheel`, `rear left wheel`, `rear right wheel`. Right for anything that has to drive, because a script can find the wheels by name.\n- `groups` — your own list of part names, for a structure the two predefined schemas do not cover.\n\nAsking for a car under `Body1` gives you a car-shaped rock. It looks right and nothing can be articulated. If you only realise afterwards, `geometry op=\"segment\"` cuts an existing mesh into named parts without generating it again.\n\nExpect tens of seconds per call. The service is metered and moderated: a rejected prompt and a rate limit both come back as a failure that says which, so read the hint before retrying.\n\n`imageAssetId` conditions the generation on a picture — supply it with a prompt or instead of one. `size` suggests proportions and `maxTriangles` caps the poly count (low values give a faceted, low-poly look). Results are anchored on arrival, because a multi-part model dropped into the workspace unanchored falls apart.\n\nEDIT MODE ONLY, for now. A generated mesh does not survive into a playtest: inside one, its MeshContent and TextureContent read as empty. `assets op=\"bake\"` does not fix this — the engine refuses to bake the kind of content generation produces. So generate for building and greyboxing, and do not rely on a generated mesh being visible in a test or after a reopen until it has been published as a real asset.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "description": "What to generate, e.g. \"a weathered stone well\".",
+            "type": "string"
+          },
+          "schema": {
+            "default": "Body1",
+            "description": "How to split the result. Ignored when `groups` is given.",
+            "type": "string",
+            "enum": [
+              "Body1",
+              "Car5"
+            ]
+          },
+          "groups": {
+            "description": "Custom part names to split into, e.g. [\"body\", \"lid\"]. Overrides `schema`.",
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "imageAssetId": {
+            "description": "An image asset id to condition the generation on.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "size": {
+            "description": "Suggested size as \"x, y, z\". Approximate — use `scaleTo` for exact.",
+            "type": "string"
+          },
+          "maxTriangles": {
+            "description": "Cap the triangle count. Lower is more faceted. Default is about 10000.",
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 100000
+          },
+          "textures": {
+            "default": true,
+            "description": "Generate textures. Off gives bare geometry.",
+            "type": "boolean"
+          },
+          "scaleTo": {
+            "description": "Scale the result so its longest side is this many studs.",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "name": {
+            "description": "Name for the model.",
+            "type": "string"
+          },
+          "parent": {
+            "description": "Where to put it. Defaults to Workspace.",
+            "type": "string"
+          },
+          "position": {
+            "description": "Where to place it, e.g. \"0, 10, 0\".",
+            "type": "string"
+          },
+          "anchor": {
+            "default": true,
+            "description": "Anchor every part. Turn off only if physics should act on it.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Generate 3D models",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "character",
+      "description": "Moves and acts as the player character in a running playtest, so gameplay can be tested without asking the user to play it.\n\n`moveTo` walks to a position or to an instance, following a path computed around walls and gaps rather than a straight line into them. It reports whether it ACTUALLY ARRIVED and how far short it stopped — a route blocked by something you did not know about otherwise looks identical to a successful walk.\n\n`act` does the one-shot things worth testing: jump, sit, stand, respawn, kill (to exercise the death and respawn path), teleport, and `equip`/`activate` to use a Tool — which is how combat gets tested, since Activate is exactly what a mouse click triggers. Note that teleport skips everything in between, so triggers and collisions along the route do not fire — walk if you are testing those.\n\n`state` reports position, health, walk speed and what the humanoid is doing. Call it before and after anything else here.\n\nThis drives the Humanoid directly rather than simulating keystrokes, which is the right tool for going places: pathfinding around a wall is one call here and a sequence of guessed key presses otherwise. For anything bound to a control rather than to movement — does E open the door, does the sprint key work, does Escape close the menu — use `input`, which sends real key and mouse events.\n\nREQUIRES A RUNNING PLAYTEST, and the character lives in the playtest's data model — address these to the playtest's studioId from `list_studios`, not the editor's. Run mode has no character at all; use `playtest op=play`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "moveTo",
+              "path",
+              "act",
+              "state"
+            ],
+            "description": "'moveTo' walks somewhere, 'path' checks a route without walking it, 'act' performs an action, 'state' only reports."
+          },
+          "to": {
+            "description": "Target position, e.g. \"25, 5, -10\". Used by moveTo and by teleport.",
+            "type": "string"
+          },
+          "path": {
+            "description": "moveTo only: walk to this instance instead of a coordinate.",
+            "type": "string"
+          },
+          "from": {
+            "description": "path only: where the route starts, e.g. \"0, 5, 0\". Defaults to the character.",
+            "type": "string"
+          },
+          "fromPath": {
+            "description": "path only: an instance to start from, e.g. \"Workspace.SpawnLocation\".",
+            "type": "string"
+          },
+          "toPath": {
+            "description": "path only: an instance to end at instead of `to`.",
+            "type": "string"
+          },
+          "agentRadius": {
+            "description": "How wide the walker is, in studs. Defaults to 2 — a standard character. Raise it to ask whether a bigger NPC fits through the same gaps a player does.",
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 50
+          },
+          "agentHeight": {
+            "description": "How tall the walker is. Defaults to 5, a standard character.",
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 100
+          },
+          "canClimb": {
+            "description": "Whether it may climb truss. Off by default.",
+            "type": "boolean"
+          },
+          "spacing": {
+            "description": "Studs between waypoints, default 4. Tighter follows the geometry more closely; wider is a coarser route.",
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 100
+          },
+          "costs": {
+            "description": "Material or PathfindingModifier label → cost, e.g. { \"Water\": 20 } to avoid swimming. Higher is more avoided; the route chosen is the cheapest total, not the shortest.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "direct": {
+            "default": false,
+            "description": "moveTo only: walk straight at the target without pathfinding. Use when a route is reported unreachable but you want to see what happens.",
+            "type": "boolean"
+          },
+          "canJump": {
+            "default": true,
+            "description": "moveTo only: allow the path to include jumps.",
+            "type": "boolean"
+          },
+          "action": {
+            "description": "act only: what to do. 'equip' takes a Tool from the Backpack or StarterPack, 'activate' uses it (what a mouse click triggers).",
+            "type": "string",
+            "enum": [
+              "jump",
+              "stop",
+              "sit",
+              "stand",
+              "respawn",
+              "kill",
+              "teleport",
+              "equip",
+              "activate",
+              "unequip"
+            ]
+          },
+          "tool": {
+            "description": "equip only: the Tool's name.",
+            "type": "string"
+          },
+          "player": {
+            "description": "Which player, by name. Omit for the only one; needed in a multiplayer test.",
+            "type": "string"
+          },
+          "studioId": {
+            "description": "The PLAYTEST session's id — not the editor's. See list_studios.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Drive the player during a playtest",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "sync",
+      "description": "Mirrors the place's scripts into a folder on disk, so you can work on code with your own file tools -- read a window, search, edit in place, diff -- and then send it back to Studio in one call. Studio stays where the game runs: use playtest, screenshot, console and input to check the result.\n\nLayout mirrors the instance tree, Rojo-style: `ServerScriptService/Main.server.luau` is a Script, `.client.luau` a LocalScript, `.luau` a ModuleScript, and a script with scripts inside is a folder holding `init.server.luau` (or `init.client.luau`, `init.luau`). New files become new scripts, and a file moved or renamed moves the script itself, keeping its identity.\n\nOps: `status` shows what would change without changing anything. `sync` goes both ways, `pull` only Studio -> disk, `push` only disk -> Studio. `watch` keeps them in step until `stop`: edit files and Studio follows within a second, and edits in Studio land on disk.\n\nNothing is overwritten blind. The last sync is remembered per file, so a file changed on both sides is a conflict, reported and left alone -- settle it, or pass `prefer`. Deleting a file deletes the script (one Ctrl+Z in Studio); a script deleted in Studio moves its file to `.rbx-sync/trash`. Nothing is deleted on a first sync.\n\nUI and other instance trees: `export` writes one as a build file (e.g. `StarterGui/Shop.build.json`, the same fields `create` takes, only non-default properties). Edit it, then `build` -- or any sync -- rebuilds the tree in one undo step, keeping the scripts inside it. Build files are two-way too: a tree edited in Studio is written back to its file, and edits on both sides are a conflict rather than one silently undoing the other.\n\nConflicts leave Studio's version in `.rbx-sync/conflicts/`. Merge into the file (or fix Studio) and sync again: whichever side changed since the conflict wins. While `watch` runs, new conflicts and errors are appended to your next tool reply.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "status",
+              "sync",
+              "pull",
+              "push",
+              "watch",
+              "stop",
+              "export",
+              "build"
+            ],
+            "description": "'status': dry run. 'sync': both ways. 'pull': Studio -> disk. 'push': disk -> Studio. 'watch'/'stop': continuous two-way sync. 'export': instance trees -> build files. 'build': build files -> instance trees."
+          },
+          "dir": {
+            "description": "Sync folder, relative to the working directory. Default \"studio\".",
+            "type": "string"
+          },
+          "roots": {
+            "description": "Studio paths to sync, e.g. [\"ServerScriptService\", \"ReplicatedStorage.Shared\"]. Default: every service scripts are authored in. Remembered for the folder once given.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prefer": {
+            "description": "Settle conflicts in favour of one side instead of reporting them.",
+            "type": "string",
+            "enum": [
+              "studio",
+              "disk"
+            ]
+          },
+          "paths": {
+            "description": "export: instances to write as build files, e.g. [\"StarterGui.Shop\"].",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "files": {
+            "description": "build: build files to apply, relative to the folder. Default: those changed since last built.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirmDeletes": {
+            "description": "Allow a run that deletes most of what the folder tracks. Check `status` first.",
+            "type": "boolean"
+          },
+          "rebind": {
+            "description": "Let a folder synced with one place follow a different place. Almost never what you want.",
+            "type": "boolean"
+          },
+          "studioId": {
+            "description": "Target Studio; omit for the active one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Sync scripts with files on disk",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "roblox-studio-mcp",
+    "version": "0.9.5"
+  },
+  "protocolVersion": null,
+  "instructions": "Drives a live Roblox Studio session through a companion plugin.\n\nStart with `studio_status` to confirm Studio is connected. Instances are addressed by dot-notation path from the DataModel root, e.g. \"Workspace.Map.Spawn\" or \"ServerScriptService.Systems.Combat\". Paths are case-sensitive.\n\nThe user may have several Studio windows open on different places. When more than one is connected, no place is targeted by default and tools refuse with AMBIGUOUS_STUDIO: call `list_studios`, ask the user which place they mean, then `set_active_studio`. Do the same whenever they mention their other place — never assume a switch.\n\nPrefer the batch tools: `create`, `modify`, `delete`, `move` and `script_edit` all take arrays. Instance batches are a single undo step (script source uses the script editor's own undo, per script), so one call beats a loop of calls both in latency and in how cleanly the user can revert your work. Reach for `execute_luau` only when no dedicated tool fits — it is the escape hatch, not the default.",
+  "durationMs": 5800,
+  "stderr": ""
+}

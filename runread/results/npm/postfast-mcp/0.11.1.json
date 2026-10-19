@@ -1,0 +1,1279 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "postfast-mcp",
+  "version": "0.11.1",
+  "integrity": {
+    "dist": "sha512-TiRgcxcDxJjFGYCeBPXhCRGD9r5X8n7HbHGt+WL6vJbde25yWo8EYeEjTJoJFWZBunsSVOkqo0cy3BjBYu02Aw==",
+    "installed": "sha512-TiRgcxcDxJjFGYCeBPXhCRGD9r5X8n7HbHGt+WL6vJbde25yWo8EYeEjTJoJFWZBunsSVOkqo0cy3BjBYu02Aw=="
+  },
+  "bin": "node_modules/postfast-mcp/dist/stdio/index.js",
+  "main": "./dist/stdio/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "POSTFAST_API_KEY"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-18T11:47:35.520Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "list_posts",
+      "description": "List social media posts with optional filters for specific IDs, accounts, platform, status, and date range. Failed or missed posts carry a lastError { message, code }; codes include MISSED_DISCONNECTED (the account was disconnected when the post was due — reconnect, then retry) and MISSED_NOT_PUBLISHED (passed its scheduled time plus a 2h grace window without publishing). Each post also carries controls { threadsTopicTag, instagramPublishType, facebookContentType, tiktokIsDraft, youtubePrivacy }, each null when unset. Only the field for the post's own platform (its account's platform in list_accounts) is meaningful: posts created through the API store every platform's defaults, so the other fields can be non-null.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "default": 0,
+            "description": "Page number (0-based)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "default": 20,
+            "description": "Posts per page (max 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "ids": {
+            "description": "Fetch only these post ids (workspace-scoped; max 100; AND-ed with other filters)",
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "socialMediaIds": {
+            "description": "Only posts on these accounts (ids from list_accounts; max 100; AND-ed with other filters)",
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "platforms": {
+            "description": "Filter by platforms",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "FACEBOOK",
+                "INSTAGRAM",
+                "X",
+                "TIKTOK",
+                "LINKEDIN",
+                "YOUTUBE",
+                "BLUESKY",
+                "THREADS",
+                "PINTEREST",
+                "TELEGRAM",
+                "GOOGLE_BUSINESS_PROFILE"
+              ]
+            }
+          },
+          "statuses": {
+            "description": "Filter by post statuses",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "DRAFT",
+                "SCHEDULED",
+                "PUBLISHED",
+                "FAILED"
+              ]
+            }
+          },
+          "from": {
+            "description": "Start date filter (ISO 8601, e.g. 2026-01-01T00:00:00.000Z)",
+            "type": "string"
+          },
+          "to": {
+            "description": "End date filter (ISO 8601, e.g. 2026-01-31T23:59:59.999Z)",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Posts",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "create_posts",
+      "description": "Create and schedule social media posts (batch up to 15). Each post targets one social account (socialMediaId from list_accounts). SCHEDULED requires scheduledAt on every post; DRAFT must omit scheduledAt. Scheduling to a disconnected account (connectionStatus DISABLED in list_accounts) is rejected with HTTP 400 \"socialMediaDisconnected\" — pre-check connectionStatus before calling. Saving as DRAFT to a disconnected account is allowed. TikTok, Instagram, YouTube, and Pinterest require at least one media item EVEN FOR DRAFTS — attach media first (ask the user for an image/video, or generate+upload one, if none was provided). Google Business Profile accepts text-only posts, or one image and no video. A post carries at most 10 media items. Attach media via the key returned by upload_media / get_upload_urls. A Threads post can carry one topic, set with controls.threadsTopicTag; like every control it applies to every post in the call, so put Threads posts with different topics in separate calls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "posts": {
+            "minItems": 1,
+            "maxItems": 15,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Post text content"
+                },
+                "firstComment": {
+                  "description": "First comment posted automatically after publishing. Supported on X, Instagram, Facebook, YouTube, Threads, and TikTok (TikTok: max 1,200 chars).",
+                  "type": "string"
+                },
+                "mediaItems": {
+                  "description": "Media attachments",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "Media key from upload_media / get_upload_urls (e.g. image/<uuid>.jpg)"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "IMAGE",
+                          "VIDEO"
+                        ]
+                      },
+                      "sortOrder": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "coverImageKey": {
+                        "description": "Media key of a custom cover/thumbnail for video posts. Supported on Instagram Reels, Facebook Reels, Pinterest video pins, and TikTok videos.",
+                        "type": "string"
+                      },
+                      "coverTimestamp": {
+                        "description": "Video cover timestamp in milliseconds (e.g. \"5000\" = 5s). Fallback when coverImageKey is also provided.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "type",
+                      "sortOrder"
+                    ]
+                  }
+                },
+                "scheduledAt": {
+                  "description": "Schedule time (ISO 8601). Required when status is SCHEDULED.",
+                  "type": "string"
+                },
+                "socialMediaId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "Target social account id (from list_accounts)"
+                }
+              },
+              "required": [
+                "content",
+                "socialMediaId"
+              ]
+            },
+            "description": "Array of posts to create (1-15)"
+          },
+          "status": {
+            "default": "SCHEDULED",
+            "description": "Post status. SCHEDULED requires scheduledAt on every post.",
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "SCHEDULED"
+            ]
+          },
+          "approvalStatus": {
+            "default": "APPROVED",
+            "description": "Approval workflow status",
+            "type": "string",
+            "enum": [
+              "PENDING_APPROVAL",
+              "APPROVED"
+            ]
+          },
+          "controls": {
+            "description": "Platform-specific controls (shared across all posts in the batch)",
+            "type": "object",
+            "properties": {
+              "xRetweetUrl": {
+                "type": "string"
+              },
+              "tiktokPrivacy": {
+                "description": "Deprecated. TikTok videos use the account default privacy (no per-post control) and photos default to public; use a draft for private posts.",
+                "type": "string",
+                "enum": [
+                  "PUBLIC",
+                  "MUTUAL_FRIENDS",
+                  "FOLLOWER_OF_CREATOR",
+                  "ONLY_ME"
+                ]
+              },
+              "tiktokIsDraft": {
+                "type": "boolean"
+              },
+              "tiktokAllowComments": {
+                "type": "boolean"
+              },
+              "tiktokAllowDuet": {
+                "type": "boolean"
+              },
+              "tiktokAllowStitch": {
+                "type": "boolean"
+              },
+              "tiktokBrandOrganic": {
+                "type": "boolean"
+              },
+              "tiktokBrandContent": {
+                "type": "boolean"
+              },
+              "tiktokAutoAddMusic": {
+                "description": "Let TikTok add a recommended sound. Photo/carousel posts only (ignored on videos). Mutually exclusive with tiktokMusicSoundId (sending both is rejected).",
+                "type": "boolean"
+              },
+              "tiktokIsAigc": {
+                "description": "Declare the post as AI-generated content (videos and photo posts). Instagram's equivalent is instagramIsAiGenerated, YouTube's is youtubeContainsSyntheticMedia.",
+                "type": "boolean"
+              },
+              "tiktokTitle": {
+                "description": "Title for TikTok photo posts (max 90 chars; photo posts only). When set, the full post content becomes the description; without it, content auto-splits on the first newline into title + description.",
+                "type": "string",
+                "maxLength": 90
+              },
+              "tiktokMusicSoundId": {
+                "description": "Commercial Music Library sound id from list_tiktok_sounds. TikTok photo, carousel and video posts. On videos the track plays at 50% volume over the video's original audio at 50%, like the TikTok app; there are no volume or trim controls. Mutually exclusive with tiktokAutoAddMusic (sending both is rejected). Not applied when tiktokIsDraft is true. Omit for no sound.",
+                "type": "string",
+                "maxLength": 128
+              },
+              "tiktokMusicSoundName": {
+                "description": "Display label for the chosen sound, e.g. 'Ok I Like It — Milky Chance'. Stored for the composer UI only; set it whenever tiktokMusicSoundId is set.",
+                "type": "string",
+                "maxLength": 256
+              },
+              "instagramPostToGrid": {
+                "type": "boolean"
+              },
+              "instagramPublishType": {
+                "type": "string",
+                "enum": [
+                  "TIMELINE",
+                  "STORY",
+                  "REEL"
+                ]
+              },
+              "instagramTrialReelStrategy": {
+                "description": "Publish as an Instagram trial reel — shown only to non-followers until it graduates to your followers. MANUAL: you graduate it yourself in the Instagram app. SS_PERFORMANCE: Instagram graduates it automatically if it performs well. Requires instagramPublishType REEL (otherwise rejected with HTTP 400 \"instagram.trialReelOnlyForReels\") and cannot be combined with instagramCollaborators (\"instagram.trialReelNoCollaborators\"). Omit for a normal reel.",
+                "type": "string",
+                "enum": [
+                  "MANUAL",
+                  "SS_PERFORMANCE"
+                ]
+              },
+              "instagramCollaborators": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "instagramLocationId": {
+                "description": "Geotag a single-media IG post — a numeric Facebook Page id with location data from search_places (same id as facebookPlaceId). Image/video/reel/story only, NOT carousels.",
+                "type": "string"
+              },
+              "instagramLocationName": {
+                "description": "Display-only place label from search_places (stored for your portal; never sent to Meta)",
+                "type": "string",
+                "maxLength": 255
+              },
+              "instagramIsAiGenerated": {
+                "description": "Adds Instagram's 'AI info' label to the post — set it when the image or video was AI-generated. Applies to images, reels, stories and carousels; on a carousel it labels the whole post, not individual slides. Set at creation only: the label cannot be added or removed after publishing. TikTok's equivalent is tiktokIsAigc, YouTube's is youtubeContainsSyntheticMedia.",
+                "type": "boolean"
+              },
+              "youtubePrivacy": {
+                "type": "string",
+                "enum": [
+                  "PUBLIC",
+                  "PRIVATE",
+                  "UNLISTED"
+                ]
+              },
+              "youtubeTags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "youtubeCategoryId": {
+                "type": "string"
+              },
+              "youtubeIsShort": {
+                "type": "boolean"
+              },
+              "youtubeMadeForKids": {
+                "type": "boolean"
+              },
+              "youtubeContainsSyntheticMedia": {
+                "description": "Discloses that the video contains realistic altered or synthetic (AI) content. Sent to YouTube only when true. Set at creation only. Instagram's equivalent is instagramIsAiGenerated, TikTok's is tiktokIsAigc.",
+                "type": "boolean"
+              },
+              "youtubeTitle": {
+                "type": "string"
+              },
+              "youtubePlaylistId": {
+                "description": "YouTube playlist id — the playlistId field from list_youtube_playlists",
+                "type": "string"
+              },
+              "youtubeThumbnailKey": {
+                "description": "Media key for a custom YouTube thumbnail (image, max 2MB, min 640px wide, 1280x720 recommended)",
+                "type": "string"
+              },
+              "facebookContentType": {
+                "type": "string",
+                "enum": [
+                  "POST",
+                  "REEL",
+                  "STORY"
+                ]
+              },
+              "facebookAllowComments": {
+                "type": "boolean"
+              },
+              "facebookPrivacy": {
+                "type": "string",
+                "enum": [
+                  "PUBLIC",
+                  "FRIENDS_OF_FRIENDS",
+                  "FRIENDS",
+                  "SELF"
+                ]
+              },
+              "facebookCarouselMainLink": {
+                "type": "string"
+              },
+              "facebookCarouselShowEndCard": {
+                "type": "boolean"
+              },
+              "facebookReelsCollaborators": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "facebookTargetCountries": {
+                "description": "Limit who can see a Facebook FEED post by country — ISO 3166-1 alpha-2 codes (case-insensitive), max 25. Audience gating (hidden from everyone else), feed posts only — not Reels/Stories/video.",
+                "maxItems": 25,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 2
+                }
+              },
+              "facebookPlaceId": {
+                "description": "Geotag a Facebook FEED post — a numeric Facebook Page id with location data from search_places (same id as instagramLocationId). Feed posts only (text/photo/carousel) — not Reels/Stories/video.",
+                "type": "string"
+              },
+              "facebookPlaceName": {
+                "description": "Display-only place label from search_places (stored for your portal; never sent to Meta)",
+                "type": "string",
+                "maxLength": 255
+              },
+              "gbpLocationId": {
+                "description": "GBP location resource name — the locationId field from list_gbp_locations",
+                "type": "string"
+              },
+              "gbpTopicType": {
+                "description": "Post type",
+                "type": "string",
+                "enum": [
+                  "STANDARD",
+                  "EVENT",
+                  "OFFER"
+                ]
+              },
+              "gbpCallToActionType": {
+                "type": "string",
+                "enum": [
+                  "BOOK",
+                  "ORDER",
+                  "LEARN_MORE",
+                  "SIGN_UP",
+                  "CALL",
+                  "SHOP"
+                ]
+              },
+              "gbpCallToActionUrl": {
+                "description": "CTA button URL (not needed for CALL, ignored for OFFER)",
+                "type": "string"
+              },
+              "gbpEventTitle": {
+                "description": "Title for EVENT/OFFER posts (max 58 chars)",
+                "type": "string"
+              },
+              "gbpEventStartDate": {
+                "description": "Start date for EVENT/OFFER (ISO 8601)",
+                "type": "string"
+              },
+              "gbpEventEndDate": {
+                "description": "End date for EVENT/OFFER (ISO 8601)",
+                "type": "string"
+              },
+              "gbpOfferCouponCode": {
+                "description": "Coupon code (OFFER only)",
+                "type": "string"
+              },
+              "gbpOfferRedeemUrl": {
+                "description": "Redemption URL (OFFER only)",
+                "type": "string"
+              },
+              "gbpOfferTerms": {
+                "description": "Terms and conditions (OFFER only)",
+                "type": "string"
+              },
+              "pinterestBoardId": {
+                "description": "Pinterest board id — the boardId field from list_pinterest_boards (NOT the account's socialMediaId)",
+                "type": "string"
+              },
+              "pinterestLink": {
+                "type": "string"
+              },
+              "linkedinAttachmentKey": {
+                "type": "string"
+              },
+              "linkedinAttachmentTitle": {
+                "type": "string"
+              },
+              "threadsTopicTag": {
+                "description": "Threads topic for the post: one topic, not a list; 1-50 characters, no '.' or '&'. Takes precedence over a #hashtag in the post content, which then stays plain text. Used only by Threads posts; applies to every post in this call, so use separate calls for different topics. Omit for no topic.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50
+              }
+            }
+          }
+        },
+        "required": [
+          "posts"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create Posts",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "delete_post",
+      "description": "Delete a social media post by id. This removes the post from PostFast — its record, its schedule, and its stored media. It does NOT delete anything from the social platform: a post that has already published stays live there and must be removed on the platform itself. Deleting a SCHEDULED post that has not published yet does prevent it from publishing. The deletion cannot be undone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Post id to delete"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Delete Post",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_post_analytics",
+      "description": "Fetch published posts with their latest performance metrics (impressions, reach, likes, comments, shares). Only returns published posts that have a platform post ID. LinkedIn personal accounts are excluded. Supported: Instagram, Facebook, TikTok, Threads, YouTube, LinkedIn (company pages), Pinterest (Business accounts). Metric counts are returned as strings. Pinterest extras include pin_clicks, outbound_clicks, saves_90d, save_rate_90d (saves are 90-day rolling because Pinterest API does not expose lifetime totals); video pins additionally surface mrc_views, views_10s, avg_watch_time, v50_watch_time, video_starts, quartile_95_views. Video posts also include normalized watch-time on latestMetric: avgWatchTimeSeconds, totalWatchTimeSeconds, videoViews (Facebook, Instagram Reels, YouTube, Pinterest, LinkedIn company pages, TikTok). Instagram posts also include on latestMetric: saveRate (saves / reach as a percentage, rounded to 2 decimals — on IG feed posts, reels, and carousels with metrics) and reelsSkipRate (Instagram Reels only — percentage of viewers who skipped the reel in the first 3 seconds, as reported by Instagram, rounded to 2 decimals; may be absent on low-view reels or until metrics refresh). TikTok also exposes total_time_watched, average_time_watched, and full_video_watched_rate in metric.extras.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "description": "Start of date range (ISO 8601, e.g. 2026-01-01T00:00:00.000Z)"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "End of date range (ISO 8601, e.g. 2026-01-31T23:59:59.999Z)"
+          },
+          "platforms": {
+            "description": "Filter by platforms",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "FACEBOOK",
+                "INSTAGRAM",
+                "X",
+                "TIKTOK",
+                "LINKEDIN",
+                "YOUTUBE",
+                "BLUESKY",
+                "THREADS",
+                "PINTEREST",
+                "TELEGRAM",
+                "GOOGLE_BUSINESS_PROFILE"
+              ]
+            }
+          },
+          "socialMediaIds": {
+            "description": "Filter by specific social media account ids",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        },
+        "required": [
+          "startDate",
+          "endDate"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get Post Analytics",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_accounts",
+      "description": "List all social media accounts connected to the workspace. Each account includes connectionStatus (CONNECTED or DISABLED) and disabledReason (null unless DISABLED), plus followerCount (latest stored snapshot, a string; absent for platforms without follower data), followerCountUpdatedAt, and inboxCapable (whether the account can appear in the social inbox, i.e. comment ingestion is supported). A DISABLED account will not publish until the user reconnects it — pre-check before scheduling. For a follower trend over time, use get_follower_history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Accounts",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_pinterest_boards",
+      "description": "List Pinterest boards for a connected Pinterest account (pass its socialMediaId). Use a returned board’s boardId field as controls.pinterestBoardId in create_posts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "socialMediaId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Pinterest account id (from list_accounts)"
+          }
+        },
+        "required": [
+          "socialMediaId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Pinterest Boards",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_youtube_playlists",
+      "description": "List YouTube playlists for a connected YouTube account (pass its socialMediaId). Use a returned playlist’s playlistId field as controls.youtubePlaylistId in create_posts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "socialMediaId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "YouTube account id (from list_accounts)"
+          }
+        },
+        "required": [
+          "socialMediaId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List YouTube Playlists",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_gbp_locations",
+      "description": "List Google Business Profile locations for a connected GBP account (pass its socialMediaId). Use a returned location’s locationId field as controls.gbpLocationId in create_posts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "socialMediaId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "GBP account id (from list_accounts)"
+          }
+        },
+        "required": [
+          "socialMediaId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Google Business Profile Locations",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_follower_history",
+      "description": "Daily follower-count snapshots for one connected account (pass its socialMediaId from list_accounts). Returns currentFollowerCount, delta (current − first snapshot in range), trackingStartedAt (when PostFast began recording this account), and a series of { capturedAt, followerCount } points. All counts are strings (bigint); currentFollowerCount, delta, and trackingStartedAt may be absent until the account has its first snapshot. Optional from/to bound the range (ISO 8601; default last 90 days, capped at 365). Snapshots are forward-only — no data before trackingStartedAt. Coverage: Facebook Pages, Instagram, YouTube, Pinterest, Threads, Bluesky, Telegram, LinkedIn company pages, and TikTok. Not available: X, personal Facebook.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "socialMediaId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Account id (from list_accounts)"
+          },
+          "from": {
+            "description": "Range start (ISO 8601, e.g. 2026-03-01T00:00:00.000Z). Defaults to 90 days ago.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Range end (ISO 8601). Defaults to now; range is capped at 365 days.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "socialMediaId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get Follower History",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "search_places",
+      "description": "Search for a place to geotag a post. Pass free text (min 2 chars, e.g. a venue name or address); returns matching places, each with an id that works as BOTH controls.facebookPlaceId (Facebook feed posts) and controls.instagramLocationId (Instagram single-media posts). Only Facebook Pages that carry location data are returned.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 2,
+            "description": "Place search text, min 2 characters (e.g. \"eiffel tower\")"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Search Places",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "generate_connect_link",
+      "description": "Generate a shareable link for external clients to connect their social accounts to the workspace. Can be scoped to specific platforms and return the user to your own app when done.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "expiryDays": {
+            "default": 7,
+            "description": "Link expiry in days (1-30, default 7)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "sendEmail": {
+            "default": false,
+            "description": "Send the link via email",
+            "type": "boolean"
+          },
+          "email": {
+            "description": "Recipient email (required when sendEmail is true)",
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          },
+          "platforms": {
+            "description": "Restrict the link to these platforms, e.g. [\"INSTAGRAM\"]. Omit to offer all of them. Enforced server-side, so a scoped link cannot connect any other platform.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "FACEBOOK",
+                "INSTAGRAM",
+                "X",
+                "TIKTOK",
+                "LINKEDIN",
+                "YOUTUBE",
+                "BLUESKY",
+                "THREADS",
+                "PINTEREST",
+                "TELEGRAM",
+                "GOOGLE_BUSINESS_PROFILE"
+              ]
+            }
+          },
+          "redirectUrl": {
+            "description": "Where the connect page offers to send the user once connecting finishes, with status, platform, accountId and externalId on the query string, plus accountIds (every account connected, comma-separated) after a Facebook or LinkedIn page step. For Facebook, accountId is the first chosen Page. Must be https (http is accepted only on localhost).",
+            "type": "string",
+            "maxLength": 2000
+          },
+          "externalId": {
+            "description": "Your own reference for this link, echoed back unchanged on the return URL. Letters, digits and - . _ ~ : @ only.",
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Generate Connect Link",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_upload_urls",
+      "description": "Get signed upload URLs for media files. Upload your file to the returned URL via PUT, then use the key in create_posts mediaItems.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contentType": {
+            "type": "string",
+            "description": "MIME type of the file. Supported: image/jpeg, image/png, image/gif, image/webp, video/mp4, video/webm, video/quicktime"
+          },
+          "count": {
+            "default": 1,
+            "description": "Number of upload URLs (1-8 for images, 1 for videos)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          }
+        },
+        "required": [
+          "contentType"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get Upload URLs",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "upload_media",
+      "description": "Upload a local file to PostFast and get back a media key for use in create_posts. Handles the full flow: detects content type, gets a signed URL, uploads the file, and returns the key and type.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Absolute path to the local file (e.g. /Users/me/photo.jpg)"
+          }
+        },
+        "required": [
+          "filePath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Upload Media",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_inbox_conversations",
+      "description": "List comment conversations from the social inbox — comments on your connected accounts' posts, grouped per post, newest activity first. Covers TikTok, Instagram, Facebook Pages, and Threads; an account's inboxCapable flag (from list_accounts) tells you whether comments can flow for it today. Comments arrive within seconds of being posted and only from connect/launch onward (no history backfill). Each conversation carries a server-computed reply capability — canReply, maxReplyLength, windowState, disabledReason — plus unreadCount, status (OPEN | SNOOZED | CLOSED), and assignedToUserId. ALWAYS derive whether and how long you can reply from those fields; never assume platform rules. postPreview carries the post's caption and, when available, its public permalink — use the permalink to link the user to the post on the platform (null on Instagram for now).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "default": 0,
+            "description": "Page number (0-based)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "default": 20,
+            "description": "Conversations per page (max 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "platforms": {
+            "description": "Filter by platforms",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "FACEBOOK",
+                "INSTAGRAM",
+                "X",
+                "TIKTOK",
+                "LINKEDIN",
+                "YOUTUBE",
+                "BLUESKY",
+                "THREADS",
+                "PINTEREST",
+                "TELEGRAM",
+                "GOOGLE_BUSINESS_PROFILE"
+              ]
+            }
+          },
+          "socialMediaIds": {
+            "description": "Filter by specific social media account ids (from list_accounts)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "statuses": {
+            "description": "Filter by conversation statuses",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "OPEN",
+                "SNOOZED",
+                "CLOSED"
+              ]
+            }
+          },
+          "unreadOnly": {
+            "description": "Only conversations with unread comments",
+            "type": "boolean"
+          },
+          "assignedToUserId": {
+            "description": "Only conversations assigned to this workspace member",
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Inbox Conversations",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_inbox_conversation",
+      "description": "Fetch one inbox conversation by id, including its server-computed reply capability (canReply, maxReplyLength, windowState, disabledReason) — derive reply ability from these fields, never from hardcoded platform rules. postPreview carries the post's caption and, when available, its public permalink — use the permalink to link the user to the post on the platform (null on Instagram for now). Returns null when the conversation does not exist in the workspace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Conversation id (from list_inbox_conversations)"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get Inbox Conversation",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_inbox_items",
+      "description": "List the items of one inbox conversation — the comments and the replies sent to them — oldest first by default (order=DESC for newest first). Items carry direction (INBOUND | OUTBOUND), state (VISIBLE | HIDDEN | DELETED), author info, and on Instagram comments canPrivateReply (eligibility for send_inbox_private_reply). Replies sent from PostFast appear exactly once — no duplicates when the platform reports them back.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Conversation id (from list_inbox_conversations)"
+          },
+          "page": {
+            "default": 0,
+            "description": "Page number (0-based)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "default": 20,
+            "description": "Items per page (max 50)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "order": {
+            "description": "Sort by comment time. Default ASC (oldest first); DESC for newest first.",
+            "type": "string",
+            "enum": [
+              "ASC",
+              "DESC"
+            ]
+          }
+        },
+        "required": [
+          "conversationId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Inbox Items",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_inbox_unread_count",
+      "description": "Total unread comment count across all inbox conversations in the workspace (the sum of per-conversation unreadCount). Use mark_inbox_conversation_read after presenting a conversation to the user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get Inbox Unread Count",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reply_to_inbox_item",
+      "description": "Reply publicly UNDER a specific comment — pass the comment item's id (from list_inbox_items), not the conversation id. BEFORE replying, check the conversation's canReply and maxReplyLength and stay within them; the caps are per platform (TikTok 1,200, Instagram 2,200, Facebook 8,000, Threads 500 characters) but the server-computed fields are authoritative — never assume. Failures return inbox.* codes (e.g. replyTooLong, replyNotSupported, rateLimited).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "The comment item id to reply under (from list_inbox_items)"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Reply text. Must fit the conversation's maxReplyLength."
+          }
+        },
+        "required": [
+          "itemId",
+          "text"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Reply to Inbox Comment",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "send_inbox_private_reply",
+      "description": "Instagram only: send ONE private reply to a comment — it arrives as a direct message to the commenter and may land in their Message Requests folder. Allowed once per comment, within 7 days of the comment, up to 1,000 bytes (emoji and non-Latin text count multi-byte — roughly 1,000 characters, less with emoji). Check the item's canPrivateReply first (from list_inbox_items). A second attempt on the same comment fails with inbox.privateReplyAlreadySent; other failures include privateReplyWindowExpired and privateReplyNotSupported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "The Instagram comment item id to reply privately to (canPrivateReply must be true)"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Private reply text (max 1,000 bytes)"
+          }
+        },
+        "required": [
+          "itemId",
+          "text"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Send Instagram Private Reply",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "set_inbox_item_state",
+      "description": "Moderate a comment on the platform: HIDE hides it from the public, UNHIDE restores it, DELETE removes the comment on the platform — cannot be undone. HIDE/UNHIDE work on TikTok, Instagram, Facebook, and Threads; DELETE is not supported on Threads (inbox.deleteNotSupported). State changes made on the platform itself sync back to the inbox automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "The comment item id (from list_inbox_items)"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "HIDE",
+              "UNHIDE",
+              "DELETE"
+            ],
+            "description": "HIDE, UNHIDE, or DELETE (DELETE is irreversible)"
+          }
+        },
+        "required": [
+          "itemId",
+          "action"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Moderate Inbox Comment",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "mark_inbox_conversation_read",
+      "description": "Mark one conversation read (zeroes its unreadCount). Do this after presenting a conversation's comments to the user. Internal to PostFast — nothing changes on the platform.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Conversation id (from list_inbox_conversations)"
+          }
+        },
+        "required": [
+          "conversationId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Mark Inbox Conversation Read",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "set_inbox_conversation_status",
+      "description": "Triage a conversation: set its status to OPEN, SNOOZED, or CLOSED. Internal to PostFast — nothing changes on the platform.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Conversation id (from list_inbox_conversations)"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "SNOOZED",
+              "CLOSED"
+            ],
+            "description": "New conversation status"
+          }
+        },
+        "required": [
+          "conversationId",
+          "status"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Set Inbox Conversation Status",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "assign_inbox_conversation",
+      "description": "Assign a conversation to a workspace member for follow-up, or omit assigneeUserId to unassign. The assignee must be a member of the workspace (inbox.assigneeNotMember otherwise). Internal to PostFast — nothing changes on the platform.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Conversation id (from list_inbox_conversations)"
+          },
+          "assigneeUserId": {
+            "description": "Workspace member user id to assign. Omit to unassign.",
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "conversationId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Assign Inbox Conversation",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_tiktok_sounds",
+      "description": "List trending pre-cleared Commercial Music Library tracks for a connected TikTok account. Returns up to 100 trending sounds with musicSoundId, name, artist, duration, and preview/thumbnail URLs. Pass a musicSoundId to create_posts as tiktokMusicSoundId to attach that sound to a TikTok photo, carousel or video post. genre takes raw TikTok values like 'POP', 'HIP_HOP/RAP', 'R&B/SOUL', 'K-POP' (invalid values return the full valid list in the error). The list rotates daily — fetch fresh rather than reusing old ids for display. An unknown countryCode returns an empty list. If the API returns tiktokMusic.requiresBusinessApi, the TikTok account needs a one-time reconnect.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "socialMediaId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "TikTok account id (from list_accounts)"
+          },
+          "genre": {
+            "description": "Raw TikTok genre value, e.g. 'POP', 'HIP_HOP/RAP', 'R&B/SOUL', 'K-POP'. Omit for all genres; an invalid value returns the full valid list in the error.",
+            "type": "string"
+          },
+          "countryCode": {
+            "description": "2-letter uppercase country code (default US). Unknown codes return an empty list.",
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2
+          },
+          "dateRange": {
+            "description": "Trending window (default 7DAY)",
+            "type": "string",
+            "enum": [
+              "1DAY",
+              "7DAY",
+              "30DAY",
+              "90DAY"
+            ]
+          }
+        },
+        "required": [
+          "socialMediaId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List TikTok Sounds",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "delete_posts",
+      "description": "Delete several social media posts by id in one call (up to 100; use delete_post for a single post). This removes each post from PostFast — its record, its schedule, and its stored media. It does NOT delete anything from the social platform: a post that has already published stays live there and must be removed on the platform itself. Deleting a SCHEDULED post that has not published yet does prevent it from publishing. Returns { deletedIds, notFoundIds }; notFoundIds are the ids that don't exist in this workspace, listed once each. The deletion cannot be undone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "description": "Post ids to delete (max 100)"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Delete Posts",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "postfast",
+    "version": "0.11.1"
+  },
+  "protocolVersion": null,
+  "instructions": "PostFast schedules and publishes social posts across X, Instagram, Facebook, TikTok, LinkedIn, YouTube, Threads, Pinterest, Bluesky, Telegram, and Google Business Profile.\n\nFlow: list_accounts to see what's connected → create_posts (one socialMediaId per post; batch up to 15) → attach media via upload_media (a local file, by absolute path) or get_upload_urls (signed PUT upload for raw bytes) → a post publishes when status=SCHEDULED and approvalStatus=APPROVED.\n\nThe POSTFAST_API_KEY is workspace-scoped — every tool acts in that workspace.\n\nBefore scheduling, confirm the target account's connectionStatus is CONNECTED. A DISABLED account will not publish (disconnected accounts are the #1 cause of failed posts) — saving a DRAFT is still allowed.\n\nStatus & timing: status=SCHEDULED requires scheduledAt on every post (ISO-8601, in the future, within 1 year); status=DRAFT must omit scheduledAt. approvalStatus=APPROVED publishes; PENDING_APPROVAL holds it for review. There is no instant \"publish now\" — for an immediate post, set scheduledAt a few minutes ahead of now (a time at or before the current moment is rejected).\n\nMedia: use the key returned by an upload tool, and set mediaItems[].type to match the file (IMAGE for image/* keys, VIDEO for video/* keys — a mismatch is rejected). Videos are capped at 250MB (Telegram 50MB, Bluesky 100MB). Media is REQUIRED on TikTok, YouTube (video only), Instagram, and Pinterest; X, LinkedIn, Facebook, Threads, Bluesky, Telegram, and Google Business Profile allow text-only posts (GBP accepts 1 image and no video). This requirement applies even to DRAFTS — a draft to a media-required platform without media is rejected. So if the user asks to post to a media-required platform and provides no media, ask them for an image/video (or generate and upload one) BEFORE calling create_posts; don't attempt the post without media.\n\nPer-platform limits (media counts / characters):\n- X: up to 4 images or 1 video (no mixing); 280 chars (4,000 with X Premium).\n- TikTok: 1 video OR up to 10 images; 4,000 chars.\n- Instagram: up to 10 media items, images and videos mixed; 2,200 chars, max 30 hashtags.\n- YouTube: 1 video, no images; title max 100 chars.\n- Facebook / LinkedIn: up to 10 images OR 1 video (no mixing).\n- Threads: up to 10 media items, images and videos mixed; 500 chars.\n- Pinterest: up to 5 images or 1 video; title max 100, description max 800.\n- Google Business Profile: text only, or 1 image and no video; 1,500 chars.\n- Bluesky: up to 10 images or 1 video. Telegram: up to 10 media items, at most 3 of them videos.\nNo post carries more than 10 media items.\nIf content exceeds the target platform's character limit, don't schedule it as-is — tell the user and offer to shorten or split it (X is 280 unless the account has X Premium = 4,000).\n\nPlatform-specific options go in the controls object, e.g.:\n- Pinterest: controls.pinterestBoardId is REQUIRED — it is a board's boardId from list_pinterest_boards, NOT the Pinterest account's socialMediaId.\n- Google Business Profile: controls.gbpLocationId is required — the locationId from list_gbp_locations.\n- YouTube: controls.youtubePlaylistId is the playlistId from list_youtube_playlists; youtubeIsShort defaults true; title falls back to the first 100 chars of content.\n- TikTok: controls.tiktokPrivacy is deprecated (videos use the account default, photos default to public); tiktokTitle applies to photo carousels only (max 90); firstComment (max 1,200).\n- Instagram: controls.instagramPublishType = TIMELINE | STORY | REEL.\n- Facebook: controls.facebookContentType = POST | REEL | STORY. controls.facebookTargetCountries limits who can see a FEED post by country (ISO 3166-1 alpha-2, max 25; not Reels/Stories).\n- Geotag a place (Facebook/Instagram): call search_places, then pass a returned id as controls.facebookPlaceId (Facebook feed posts only — not Reels/Stories/video) and/or controls.instagramLocationId (Instagram single media only — not carousels). One id works for both.\n- LinkedIn: attach a document via controls.linkedinAttachmentKey.\n- X: controls.xRetweetUrl reposts an existing tweet (content/media are ignored).\nNote: list_pinterest_boards / list_youtube_playlists / list_gbp_locations take the account's socialMediaId; each returned item has BOTH an internal id and the platform id (boardId / playlistId / locationId) — pass the PLATFORM id to controls, not the internal id or the account id.\n\nFailed posts carry lastError — usually a disconnected account (reconnect, then retry) or platform-rejected media.\n\ndelete_post (one post) and delete_posts (up to 100 in one call) remove posts from PostFast only — they never delete an already-published post from the social platform. Say so when a user asks to delete something that has already gone out.\n\nSocial inbox (comments on your posts — TikTok, Instagram, Facebook Pages, Threads; an account's inboxCapable flag from list_accounts says what is live today): read with list_inbox_conversations → list_inbox_items (get_inbox_unread_count for the total), reply with reply_to_inbox_item (public, under a specific comment item) or send_inbox_private_reply (Instagram only: one per comment, within 7 days). Whether and how long a reply can be comes ONLY from the conversation's server-computed canReply / maxReplyLength / windowState / disabledReason — never assume platform rules. Moderate with set_inbox_item_state (HIDE / UNHIDE / DELETE — DELETE removes the comment on the platform and cannot be undone), triage with set_inbox_conversation_status and assign_inbox_conversation, and call mark_inbox_conversation_read after presenting a thread. It is a comments inbox — never present it as DMs or messages.",
+  "durationMs": 5445,
+  "stderr": ""
+}

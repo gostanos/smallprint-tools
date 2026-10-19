@@ -1,0 +1,1254 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "honesty-mcp",
+  "version": "0.3.0",
+  "integrity": {
+    "dist": "sha512-/alAskRzzsrB8dHgwo/IhnUWBZHdDohqqbAyZRbCNa6M+bhmmDZ4Lg+gMJhVi9ZFhHPc/FRm3B3uAN9bwM4qKA==",
+    "installed": "sha512-/alAskRzzsrB8dHgwo/IhnUWBZHdDohqqbAyZRbCNa6M+bhmmDZ4Lg+gMJhVi9ZFhHPc/FRm3B3uAN9bwM4qKA=="
+  },
+  "bin": "node_modules/honesty-mcp/./dist/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "HONESTY_MCP_ENABLE_CODE_EXEC",
+    "HONESTY_MCP_WORKER_TIMEOUT_MS"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-18T13:07:50.382Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "check_grounding",
+      "description": "Checks citation markers and lexical support in AI-generated text. Splits `text` into checked units and classifies each one against `evidence`: 'grounded' (cites a marker accepted by the default lexical support matcher), 'placeholder' (an honest '[TK]'/'[citation needed]' gap), 'ungrounded' (an uncited unit without a placeholder), or 'invalid' (cites a marker id that is missing from `evidence`, or whose evidence is rejected by the default support matcher; this outranks every other status). 'invalid' means the unit needs human review. It does not establish that a citation was fabricated, and it covers both a missing id and a matcher rejection. Each unit carries `reasons` (per cited id: supported, not-supported, no-content-words, invalid-evidence or unknown-id), and `nonClaims` lists scaffolding lines (rules, table separators, bare fences) that were set aside. This is a mechanical check, not a truth checker. The default support matcher counts overlapping words. It rejects some faithful paraphrases (evidence '65% of the audio is English' against the claim 'about two thirds of the audio is English'), and it accepts a wrong figure or a negated claim when most other words overlap ('trained on 68,000 hours' passes against evidence of 680,000 hours; 'does not support real-time transcription' passes against evidence that it does). It cannot verify that the evidence itself is true. Use this before shipping any AI-written report, summary, or answer that cites sources, to find citations that need a person to look: send every 'invalid' unit to review, and treat 'ungrounded' units as claims that should probably cite something but currently don't. A 'grounded' unit is not confirmed true. For higher-stakes content, use grounding-kit directly with a custom `supports()` function (embedding-similarity or NLI-based) instead of the default matcher.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000000,
+            "description": "The AI-generated text to check (up to 2,000,000 characters). Citation markers use the kit's default convention `[[cite:id]]` (e.g. \"The bridge opened in 1932 [[cite:source-a]].\"). This tool uses the default marker/placeholder patterns; if your generator emits a different citation syntax (e.g. \"[1]\"), rewrite markers to `[[cite:1]]` before calling, or use grounding-kit directly with a custom markerPattern."
+          },
+          "evidence": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Map of citation marker id -> the evidence text/span it claims to support. This is the closed world: a marker cited in `text` whose id is NOT a key here is flagged invalid, and a marker whose evidence text doesn't plausibly support the sentence is also flagged invalid. Pass {} if there is no evidence at all (every citation will then be invalid, and uncited claims will be 'ungrounded')."
+          }
+        },
+        "required": [
+          "text",
+          "evidence"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "corroborate_evidence",
+      "description": "Grades the supplied evidence for a claim and reports two things: the evidence direction ('supports', 'contradicts', 'mixed' or 'none') and a verdict for how strong the evidence is in that direction. Read the direction first: a 'confirmed' verdict with direction 'contradicts' means the supplied evidence strongly contradicts the claim. The grade uses distinct normalized source identities and caller-assigned signal kinds. Sources are counted by independent origin, not by string: spellings of one page (host letter case, percent-escape case, a trailing host dot, an empty query, #fragment, default port) are one source, and so are pages of one site or repository, hosts that share a registered domain, and a copy next to its upstream. The result's `groups` says which signals were merged and why. Declare `origin` or `derivedFrom` on a signal when you know better, or pass `inferOrigins: false` to count by page only. Independence is not verified. 'confirmed' requires 2+ distinct sources in the same direction (supporting OR contradicting) AND at least one non-textual signal in that direction. Disagreement among sources surfaces as 'mixed' rather than being averaged away; a null result is 'not-found' only under adequate coverage, otherwise 'inconclusive' (a thin sample can't prove a negative); and thin coverage caps the verdict below 'confirmed' no matter how clean the signals look. Use this whenever several pieces of evidence were gathered for a claim (by you, another tool, or a research/verification pass) and you need an honest, non-inflated verdict instead of eyeballing how many checks 'passed'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "signals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The distinct source artifact this signal was read from (a document id, URL, file path, table, API response, sampled record). Distinct normalized source identities are counted, never signal count -- two signals sharing an identity count once. The kit trims whitespace, applies NFC normalization and normalizes HTTP(S) URLs (exactly which spellings merge is in the tool description). A source made only of whitespace or invisible characters is rejected. Independence is not verified."
+                },
+                "origin": {
+                  "description": "[corroboration-kit 0.3+] Who published this, when you know it better than the URL shows: signals that declare the same origin count once, and a signal that declares one is not grouped by its URL. Omit the key when unknown; null is rejected.",
+                  "type": "string"
+                },
+                "derivedFrom": {
+                  "description": "[corroboration-kit 0.3+] Sources this one copies or summarizes. Signals that share an upstream, or one that names another signal's `source`, count once.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "textual",
+                    "structural",
+                    "behavioral",
+                    "declarative"
+                  ],
+                  "description": "Evidence type. Only non-'textual' kinds (structural/behavioral/declarative) can unlock a 'confirmed' verdict -- a purely textual match is cheap to fake by repetition."
+                },
+                "vote": {
+                  "type": "string",
+                  "enum": [
+                    "supports",
+                    "contradicts",
+                    "inconclusive"
+                  ],
+                  "description": "What this signal concluded about the claim."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "Free-form, human-readable explanation of what this signal found."
+                }
+              },
+              "required": [
+                "source",
+                "kind",
+                "vote",
+                "detail"
+              ]
+            },
+            "description": "The evidence signals gathered about the claim. May be empty."
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "strong",
+                  "partial",
+                  "thin"
+                ],
+                "description": "Coverage level, if already known."
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "sampledUnits": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "How many evidence units were actually examined."
+                  },
+                  "totalUnits": {
+                    "type": "number",
+                    "description": "Size of the full evidence pool. 0 (unknown/empty pool) is treated as thin. A negative value, or a sampledUnits greater than totalUnits, is an impossible input the kit rejects outright (surfaces as a tool error, not a coverage verdict)."
+                  },
+                  "hadStructuralReadAccess": {
+                    "type": "boolean",
+                    "description": "Whether the scan also had a structural/manifest-level view of the pool (a table of contents, a schema, an index) independent of the per-unit sample."
+                  }
+                },
+                "required": [
+                  "sampledUnits",
+                  "totalUnits",
+                  "hadStructuralReadAccess"
+                ],
+                "description": "Derive a coverage level from sample-size numbers instead of stating one directly."
+              }
+            ]
+          },
+          "inferOrigins": {
+            "description": "[corroboration-kit 0.3+] Default true: pages of one site or repository, and hosts that share a registered domain, count as one source. Pass false to count by page (spellings of one page still merge, and declared `origin` / `derivedFrom` still apply).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "signals",
+          "coverage"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "check_payout_invariance",
+      "description": "Checks whether payout-related identifiers (commission, payout, affiliate rate) appear in the source of a ranking/recommendation engine. Only `static-imports` mode is available: running your ranking function under payout-mutation scenarios (`runtime` mode) is turned off because it runs caller-supplied JavaScript. The server operator can turn it on by setting HONESTY_MCP_ENABLE_CODE_EXEC=1; that runs the code with the server's full filesystem, network and environment access, and the worker thread only bounds time. `static-imports` mode greps source files you supply for any reference to payout-related identifiers, to assert the ranking engine's code never even has payout data in scope. You send the file contents as a map of path -> content; this server does not read paths from disk, and a list of paths is rejected. Matching is whole-word and case-insensitive: the identifier `commission` is NOT matched inside `commissionRate`, `commission_rate`, `affiliateUrl` or `payoutPerClick`, so those names pass as CLEAN. Pass `matchIdentifierParts: true` to also find an identifier as one part of a longer camelCase, snake_case, SCREAMING_CASE or kebab-case name (it still does not match plurals such as `affiliates`, or a word fused into another with no separator, such as `mypayout`). It is a best-effort text/regex grep, not a real parser (it won't catch a dynamically-built import specifier or a re-export under an aliased name). A CLEAN result means no match in the text you sent, not that the engine is payout-neutral in general; re-run this in CI whenever the ranking logic changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "static-imports"
+            ],
+            "description": "Which check to run. Only `static-imports` is available."
+          },
+          "files": {
+            "description": "[static-imports mode, required, at least one file] Source files to scan for payout references, as a map of path -> content. A list of paths is an error. An empty map is a tool error, never a CLEAN result over zero files.",
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Rejected with an error: this server does not read file paths from disk. Send a map instead."
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Map of path -> file content. No filesystem access."
+              }
+            ]
+          },
+          "payoutIdentifiers": {
+            "description": "[static-imports mode, required, non-empty] Identifiers that must never appear in the ranking engine's source, e.g. \"commission\", \"payout\", \"affiliateRate\". Each is matched as a whole word (`commission` does not match `commissionRate`; see `matchIdentifierParts`). An identifier that is blank (only whitespace or invisible characters) is a tool error.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stripComments": {
+            "description": "[static-imports mode] Strip comments before matching, so a mention in a comment doesn't count. Default true.",
+            "type": "boolean"
+          },
+          "caseInsensitiveMatch": {
+            "description": "[static-imports mode] Case-insensitive identifier matching. Default true.",
+            "type": "boolean"
+          },
+          "matchIdentifierParts": {
+            "description": "[static-imports mode, payout-invariance-kit 0.3+] Default false (whole-word matching, so `commission` does not match `commissionRate`). When true, an identifier is also found as one part of a longer camelCase, snake_case, SCREAMING_CASE or kebab-case name (`affiliate` finds `affiliateUrl` and `AFFILIATE_URL`), but not plurals or words fused with no separator.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "score_trust_identified",
+      "description": "Scores one entity (or one dimension of one entity -- quality, reliability, communication, ...) from signals contributed by KNOWN, identified sources: reviewer accounts, raters, inspectors, verified buyers. Weighs each signal by tier x source x proof-strength x reputation x recency decay, sums to an effective (credibility-weighted) sample size, and shrinks the result toward a domain baseline ('prior') by a configurable dial -- thin evidence stays close to the prior, deep evidence overrides it. Signals whose combined weight is 0 contribute nothing; when no signal carries weight, confidence is 'insufficient' and the score equals the prior. Evidence dated more than one day after `now` is scored as undated (its recency uses `missingDateAgeDays`). Every signal's `tier`, `source` and `proof` must be a key of the matching weight table, or the call is an error that names the missing key. The built-in example configuration accepts tier new | standard | verified | expert, source imported | referred | direct, and proof none | self_attested | verified | documented; override them with `config.tierWeights`, `config.sourceWeights` and `config.proofWeights`. Inputs that push a derived value past a finite number (for example an enormous dial or weight) are a tool error. Use this for trust/reputation scores backed by attributable evidence. For unattributed/scraped signals with no identity behind them, use assess_anonymous_authenticity instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "signals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Identifier for this signal, for reference in the output."
+                },
+                "tier": {
+                  "type": "string",
+                  "description": "Key into config.tierWeights -- the contributor's standing/tier. The library's illustrative example uses 'new'|'standard'|'verified'|'expert'; supply your own vocabulary via `config.tierWeights`."
+                },
+                "source": {
+                  "type": "string",
+                  "description": "Key into config.sourceWeights -- how the signal reached the system."
+                },
+                "proof": {
+                  "type": "string",
+                  "description": "Key into config.proofWeights -- strength of evidence the event happened."
+                },
+                "reputation": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Contributor reputation 0-100, or null if unknown (treated as neutral)."
+                },
+                "occurredAt": {
+                  "description": "ISO date the underlying event happened, or null if unknown.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "value": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "The 0-100 score this signal reports."
+                }
+              },
+              "required": [
+                "id",
+                "tier",
+                "source",
+                "proof",
+                "reputation",
+                "occurredAt",
+                "value"
+              ]
+            },
+            "description": "The identified signals to score from. May be empty (yields the prior, with insufficient confidence)."
+          },
+          "config": {
+            "description": "Partial override merged over the library's illustrative EXAMPLE_IDENTIFIED_CONFIG (tiers new/standard/verified/expert). Real callers should supply their own tier/source/proof vocabulary for their domain -- omit to use the example config as-is.",
+            "type": "object",
+            "properties": {
+              "tierWeights": {
+                "description": "Overrides for tier -> weight multiplier.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "sourceWeights": {
+                "description": "Overrides for source -> weight multiplier.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "proofWeights": {
+                "description": "Overrides for proof -> weight multiplier.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "reputation": {
+                "type": "object",
+                "properties": {
+                  "floor": {
+                    "type": "number",
+                    "description": "Multiplier applied at reputation 0."
+                  },
+                  "ceil": {
+                    "type": "number",
+                    "description": "Multiplier applied at reputation 100."
+                  },
+                  "neutral": {
+                    "type": "number",
+                    "description": "Multiplier applied when reputation is unknown."
+                  }
+                },
+                "required": [
+                  "floor",
+                  "ceil",
+                  "neutral"
+                ]
+              },
+              "recency": {
+                "type": "object",
+                "properties": {
+                  "halfLifeDays": {
+                    "type": "number",
+                    "description": "Days for the recency multiplier to halve."
+                  },
+                  "missingDateAgeDays": {
+                    "type": "number",
+                    "description": "Assumed age (days) for signals with no occurredAt."
+                  }
+                },
+                "required": [
+                  "halfLifeDays",
+                  "missingDateAgeDays"
+                ]
+              },
+              "confidence": {
+                "type": "object",
+                "properties": {
+                  "high": {
+                    "type": "number",
+                    "description": "Effective sample size at/above which confidence is 'high'."
+                  },
+                  "moderate": {
+                    "type": "number",
+                    "description": "Effective sample size at/above which confidence is 'moderate'."
+                  }
+                },
+                "required": [
+                  "high",
+                  "moderate"
+                ]
+              }
+            }
+          },
+          "now": {
+            "type": "string",
+            "description": "ISO 'now' timestamp recency decay is computed against. Pass a fixed value for determinism."
+          },
+          "prior": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "The domain/category baseline the score shrinks toward when evidence is thin."
+          },
+          "dial": {
+            "description": "Shrinkage strength: a named preset, or a raw phantom-prior-signal count. Defaults to 'balanced'.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "as_is",
+                  "balanced",
+                  "strict"
+                ]
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "required": [
+          "signals",
+          "now",
+          "prior"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "assess_anonymous_authenticity",
+      "description": "Scores how organic a corpus of UNATTRIBUTED, scraped sentiment signals (crawled mentions, imported reviews with no verifiable identity, aggregator feeds) looks, weighing a positive composite of consensus/diversity/volume/recency against a heuristic penalty for two specific patterns: evidence concentrated in a single source type, and unusually uniform sentiment (near-maximal with near-zero variance). Neither pattern establishes fabrication, and source types are counted without verifying that they are independent. It cannot show that sentiment is fabricated or that any reviewer is fake, and varied sentiment spread across several sources isn't caught by these two checks. The score is not a sentiment ranking: the composite rewards positive consensus, so a strongly negative corpus scores lower than the same corpus with the sign flipped (with the example configuration, 20 signals at -0.9 across four source types score 46; at +0.9, 68), and an honest negative corpus can rank below a fake-looking positive one. Source labels are compared trimmed and case-folded ('Forum' and ' forum' are one type), and a source type counts as one only when its credibility x confidence is high enough (`config.fullCountWeight`), so the counted source types can be fewer than the labels. Treat a low score as 'looks statistically unusual in a specific way worth a human look', not as a finding. Signals with zero confidence, zero source weight or fully decayed recency carry no weight; a source type that is not a key of `config.sourceWeights` has credibility 0; when no signal carries weight, confidence is 'insufficient' and trustScore is null (no score is reported). Use this for reviews/mentions/buzz with no identity behind them. For signals from known, identified contributors, use score_trust_identified instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "signals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Identifier for this signal, for reference in the output."
+                },
+                "source": {
+                  "type": "string",
+                  "description": "Key into config.sourceWeights -- the source type. The library's illustrative example uses 'forum'|'community'|'marketplace'|'aggregator'|'blog'|'social'; supply your own via `config.sourceWeights`. A source type that is not in sourceWeights has credibility 0, so that signal carries no weight."
+                },
+                "sentiment": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 1,
+                  "description": "Net sentiment, -1 to 1."
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Extraction/observation confidence, 0 to 1."
+                },
+                "publishedAt": {
+                  "description": "ISO date the material was published, or null/omitted if unknown.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "source",
+                "sentiment",
+                "confidence"
+              ]
+            },
+            "description": "The unattributed signals to assess. May be empty."
+          },
+          "config": {
+            "description": "Partial override merged over the library's illustrative EXAMPLE_ANONYMOUS_CONFIG -- omit to use the example config as-is.",
+            "type": "object",
+            "properties": {
+              "sourceWeights": {
+                "description": "Overrides for source -> credibility weight, 0..1ish.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "weights": {
+                "description": "Relative weighting of the four positive components.",
+                "type": "object",
+                "properties": {
+                  "consensus": {
+                    "type": "number"
+                  },
+                  "diversity": {
+                    "type": "number"
+                  },
+                  "volume": {
+                    "type": "number"
+                  },
+                  "recency": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "consensus",
+                  "diversity",
+                  "volume",
+                  "recency"
+                ]
+              },
+              "astroturfWeight": {
+                "description": "How much the pattern penalty (the kit's `astroturf` rules) is subtracted from the positive composite.",
+                "type": "number"
+              },
+              "recency": {
+                "type": "object",
+                "properties": {
+                  "halfLifeDays": {
+                    "type": "number"
+                  },
+                  "missingDateAgeDays": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "halfLifeDays",
+                  "missingDateAgeDays"
+                ]
+              },
+              "volumeSaturation": {
+                "description": "Source count at which the log-scaled volume term saturates to full credit.",
+                "type": "number"
+              },
+              "fullCountWeight": {
+                "description": "[trust-core 0.3+] Credibility x confidence a source type needs to count as one full source type (default 0.425); a lighter one counts in proportion. On the same scale as sourceWeights x confidence.",
+                "type": "number"
+              },
+              "astroturf": {
+                "type": "object",
+                "properties": {
+                  "concentrationSourceCeiling": {
+                    "type": "number",
+                    "description": "Source count at/under which single-source concentration is penalized."
+                  },
+                  "concentrationPenalty": {
+                    "type": "number"
+                  },
+                  "uniformMeanThreshold": {
+                    "type": "number",
+                    "description": "Mean sentiment above this is a candidate for the uniformity penalty."
+                  },
+                  "uniformVarianceThreshold": {
+                    "type": "number",
+                    "description": "Sentiment variance below this is a candidate for the uniformity penalty."
+                  },
+                  "uniformPenalty": {
+                    "type": "number"
+                  },
+                  "minSignalsForUniformCheck": {
+                    "type": "number",
+                    "description": "Minimum signal count before the pattern checks apply at all."
+                  }
+                },
+                "required": [
+                  "concentrationSourceCeiling",
+                  "concentrationPenalty",
+                  "uniformMeanThreshold",
+                  "uniformVarianceThreshold",
+                  "uniformPenalty",
+                  "minSignalsForUniformCheck"
+                ]
+              },
+              "confidence": {
+                "type": "object",
+                "properties": {
+                  "high": {
+                    "type": "number"
+                  },
+                  "moderate": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "high",
+                  "moderate"
+                ]
+              }
+            }
+          },
+          "now": {
+            "type": "string",
+            "description": "ISO 'now' timestamp recency decay is computed against. Pass a fixed value for determinism."
+          }
+        },
+        "required": [
+          "signals",
+          "now"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "check_provenance_claims",
+      "description": "Scans reader-facing claims for certainty-implying language (\"(verified)\", \"independently verified\", \"guaranteed\", \"fact-checked\", \"100% accurate\", ...) that isn't backed by an appropriate provenance tier, plus tiers that require a sourceRef but don't have one, and claims carrying an unrecognized tier. Run it on any copy, marketing page, or AI-drafted content that makes factual-sounding claims before it ships. The default phrase list is a short starter list (11 phrases), not a taxonomy -- it will miss phrases it doesn't know about: compliance attestations ('SOC 2 certified', 'HIPAA-ready'), superlatives ('best-in-class') and 'clinically proven' all pass; extend `certaintyPhrases` for your domain. Phrases match as word prefixes (from the start of a word, with no end boundary), so a custom phrase 'proven' also reports 'provenance' (but not 'unproven'): list the exact words you mean and review each hit. The check does not read context: a limits statement such as 'Concurrent renames are outside this guarantee' is still reported for 'guarantee'. A negation word ('not', 'without', ...) suppresses a match only inside the same clause (a comma, semicolon, period, colon, !, ?, em or en dash, or line break ends it; a plain hyphen does not), after the last 'and'/'but', and within `negationWindow` characters. It is a window, not a parser, so it can still suppress an overclaim the negation does not govern. An empty result means no wording offenses were found under the configured rules; it does not verify the claims.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "claims": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable identifier for the claim (slug, DB id, DOM id)."
+                },
+                "text": {
+                  "type": "string",
+                  "description": "The claim text exactly as it would be shown to a reader."
+                },
+                "tier": {
+                  "type": "string",
+                  "enum": [
+                    "verified",
+                    "modeled",
+                    "editorial"
+                  ],
+                  "description": "'verified' = checked directly against the source's own published material. 'modeled' = an estimate derived from public signal, explicitly not a measurement or guarantee. 'editorial' = stated judgment/opinion."
+                },
+                "sourceRef": {
+                  "description": "Pointer to what backs the claim (URL, doc citation, record id).",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "text",
+                "tier"
+              ]
+            },
+            "description": "The claims to check."
+          },
+          "certaintyPhrases": {
+            "description": "Override the certainty-phrase vocabulary. Defaults to a generic starter list ('(verified)', 'independently verified', 'proprietary dataset', 'guaranteed', 'fact-checked', '100% accurate', ...).",
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A bare phrase to scan for."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "phrase": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "description": "Why this phrase asserts certainty, surfaced in offense messages.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "phrase"
+                  ]
+                }
+              ]
+            }
+          },
+          "certaintyRequiresTier": {
+            "description": "Tiers strong enough to back certainty language. Default ['verified'].",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "verified",
+                "modeled",
+                "editorial"
+              ]
+            }
+          },
+          "requireSourceRefForTiers": {
+            "description": "Tiers that must carry a visibly non-empty sourceRef (not only whitespace or invisible characters). Default ['verified'].",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "verified",
+                "modeled",
+                "editorial"
+              ]
+            }
+          },
+          "caseSensitive": {
+            "description": "Case-sensitive phrase matching. Default false.",
+            "type": "boolean"
+          },
+          "negationWindow": {
+            "description": "Maximum characters before a phrase match to scan for a negation word ('not', 'without', ...), cut off at the start of the clause. Default 40.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "claims"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "check_claims_registry",
+      "description": "Keeps public-facing product claims honest over time by checking each one against its own claimed evidence -- the SOC2-control-evidence pattern applied to marketing/product copy instead of compliance controls. Buckets every claim into 'current' (evidence present, review within policy), 'stale' (evidence present but `verifiedAt` is more than `maxAgeDays` x 24 hours before `now`, compared in exact milliseconds, or unparseable; `ageDays` is whole days rounded down and for display only, so a claim can show 90d and still be stale at `maxAgeDays: 90`), or 'unverified' (no evidenceRef, or a placeholder that shows no evidence: exactly TODO, TBD, N/A, none, '-' or 'see above', ignoring case -- this always wins over staleness, since a fresh date next to an empty or placeholder reference proves nothing). Use this as a periodic 'Monday-morning' review or a CI gate on a claims registry, to catch marketing copy that drifted out of sync with what the product actually does after a refactor. Note: this only checks that a reference EXISTS and is fresh, not that the thing it points to still supports the claim's text; no tool in this server verifies that (check_grounding checks citation structure in a document, not whether evidence supports a claim). Claim ids that show nothing (empty, whitespace or invisible characters only) are a tool error. The text summary escapes control and bidi characters as \\uXXXX; the JSON report keeps the raw strings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "claims": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable identifier for this claim, unique within your registry."
+                },
+                "text": {
+                  "type": "string",
+                  "description": "The actual public-facing sentence, verbatim -- what a user or visitor reads."
+                },
+                "evidenceRef": {
+                  "type": "string",
+                  "description": "A reference to whatever proves this claim true -- a file path, URL, test name, doc id. A value that shows nothing (empty, whitespace or invisible characters only) counts as missing evidence."
+                },
+                "verifiedAt": {
+                  "type": "string",
+                  "description": "When this claim's evidence was last confirmed to still hold: 'YYYY-MM-DD' (UTC midnight) or a timestamp with an explicit zone. A zoneless timestamp or impossible date is unparseable and makes the claim 'stale'."
+                },
+                "verifiedBy": {
+                  "description": "Who or what last verified this claim (a name, 'automated-test', an agent id).",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "text",
+                "evidenceRef",
+                "verifiedAt"
+              ]
+            },
+            "description": "The claims to evaluate."
+          },
+          "maxAgeDays": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Staleness policy: evidence older than this many days is flagged stale. 0 is valid (every claim must have been verified today or it's stale) -- the kit requires a finite number >= 0."
+          },
+          "now": {
+            "description": "The moment to evaluate against: 'YYYY-MM-DD' (UTC midnight) or a timestamp with an explicit zone ('2026-02-01T09:30:00Z', '+hh:mm'). A zoneless timestamp is a tool error, not local time. Defaults to the current time.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claims",
+          "maxAgeDays"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "append_audit_entry",
+      "description": "Appends one entry to an append-only, hash-chained audit log and returns the new (longer) chain. Each entry's hash binds its payload, index, createdAt, a fixed format tag (formatVersion, currently \"audit-chain-kit/v1\"), and the previous entry's hash together, so any later tampering with an earlier entry -- or an entry produced by an incompatible version of audit-chain-kit -- breaks the chain in a way verify_audit_chain will detect. Use this wherever you need a tamper-evident record of events (agent actions, approvals, state transitions) that a skeptical third party can later verify independently. This function does not persist anything itself -- store the returned chain (or just the new entry) in whatever your app already uses.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "formatVersion": {
+                  "type": "string",
+                  "description": "Format-and-domain tag hashed into this entry; audit-chain-kit's current tag is \"audit-chain-kit/v1\". verify_audit_chain rejects an entry whose formatVersion is missing or does not match exactly."
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Position of this entry in the chain, starting at 0."
+                },
+                "payload": {
+                  "description": "Caller data for this entry."
+                },
+                "prevHash": {
+                  "type": "string",
+                  "description": "The previous entry's entryHash, or 64 zeros for the first entry."
+                },
+                "createdAt": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp set at append time."
+                },
+                "entryHash": {
+                  "type": "string",
+                  "description": "SHA-256 hex digest binding this entry (and transitively every prior entry, including formatVersion) together."
+                }
+              },
+              "required": [
+                "formatVersion",
+                "index",
+                "payload",
+                "prevHash",
+                "createdAt",
+                "entryHash"
+              ]
+            },
+            "description": "The existing chain, in order, exactly as previously returned/stored. Pass [] to start a new chain."
+          },
+          "payload": {
+            "description": "Caller data for the new entry -- any JSON-serializable value."
+          }
+        },
+        "required": [
+          "chain",
+          "payload"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "verify_audit_chain",
+      "description": "Independently re-verifies a hash chain from genesis: recomputes every entry's hash and confirms each entry's prevHash matches the preceding entry's entryHash. Detects a mutated payload (stored entryHash no longer matches recomputed hash) and a severed link or spliced-out middle entry (prevHash mismatch) with no options at all. Two DIFFERENT truncation attacks need two DIFFERENT options, and neither is on by default: (1) entries deleted from the end and NOT replaced -- pass `expectedMinLength` to catch a chain that's simply shorter than it should be (a tail deletion alone leaves no broken pointer for the walk to find); this does NOT catch truncate-and-re-append (deleting tail entries and then appending new, self-consistent ones to reach the same length again -- `expectedMinLength` sees the 'right' length and passes). (2) to catch truncate-and-re-append, pass `anchor`: an `{ index, entryHash }` checkpoint you saved earlier from a source the chain's writer cannot edit (your own log, a separate append-only store). The chain is invalid unless the entry at `anchor.index` has exactly that `entryHash` -- this also catches a full rewrite from genesis, but entries after the anchor are only checked for internal consistency, not against anything external. Passing neither option means a truncate-and-re-append (or a full rewrite from genesis) can pass as 'valid'. An empty chain is 'valid' with nothing checked (newer kits report `entriesChecked: 0`). Proves the chain is internally consistent and unaltered since it was hashed (and, with `anchor`, unaltered up to the anchor point); it does NOT prove nobody with write access ever rewrote the whole chain from genesis when no anchor is supplied (tamper-evident, not tamper-proof). Use this to audit a chain you did not produce yourself before trusting it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "formatVersion": {
+                  "type": "string",
+                  "description": "Format-and-domain tag hashed into this entry; audit-chain-kit's current tag is \"audit-chain-kit/v1\". verify_audit_chain rejects an entry whose formatVersion is missing or does not match exactly."
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Position of this entry in the chain, starting at 0."
+                },
+                "payload": {
+                  "description": "Caller data for this entry."
+                },
+                "prevHash": {
+                  "type": "string",
+                  "description": "The previous entry's entryHash, or 64 zeros for the first entry."
+                },
+                "createdAt": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp set at append time."
+                },
+                "entryHash": {
+                  "type": "string",
+                  "description": "SHA-256 hex digest binding this entry (and transitively every prior entry, including formatVersion) together."
+                }
+              },
+              "required": [
+                "formatVersion",
+                "index",
+                "payload",
+                "prevHash",
+                "createdAt",
+                "entryHash"
+              ]
+            },
+            "description": "The chain to verify, exactly as stored/received."
+          },
+          "expectedMinLength": {
+            "description": "If you know how long the chain should be, pass it to catch entries deleted from the end and NOT replaced. Does NOT catch truncate-and-re-append (see `anchor`) -- a chain shortened and then extended back to this length with new entries passes this check.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "anchor": {
+            "description": "A checkpoint obtained earlier from somewhere the chain's writer cannot change (your own log, a separate append-only store) -- e.g. `{ index: chain.length - 1, entryHash: chain[chain.length - 1].entryHash }` saved right after you last trusted this chain. The chain is invalid unless it has an entry at `anchor.index` with exactly this entryHash. This is what actually catches truncate-and-re-append or a full rewrite from genesis -- `expectedMinLength` alone does not. Entries after the anchor are only checked for internal consistency, not against anything external.",
+            "type": "object",
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Position of the anchored entry."
+              },
+              "entryHash": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The anchored entry's non-blank entryHash, saved from a source the chain's writer cannot edit."
+              }
+            },
+            "required": [
+              "index",
+              "entryHash"
+            ]
+          }
+        },
+        "required": [
+          "chain"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "grade_decision",
+      "description": "Grades one recommendation-and-decision pair against a before/after observation log. Compares a pre-decision BASELINE window to a post-decision, exposure-aligned RESULT window on the same subjectId + checkKey, and returns 'holding' (the exposed post-decision window stayed under `refuteThreshold` bad observations AND its bad rate is lower than the baseline's), 'not-holding' (EITHER the exposed post-decision window hit `refuteThreshold` bad observations, OR its bad rate is not lower than the baseline's, even below that count -- 1 bad of 10 before, 1 bad of 3 exposed since is 'not-holding', and so is an exact tie such as 1 of 3 against 1 of 3), or 'refused' (the evidence didn't clear a floor -- see refusalCodes for exactly which one, never a vague 'unproven'). The rate comparison is exact -- it cross-multiplies the raw counts rather than comparing the rounded `badRate` fields or the sign of `badRateDelta`, so a `not-holding` can occur even when both windows display the same 3-place `badRate`. The refute bar is a fixed count, not a rate: 5 bad of 100 before and 2 of 500 since is 'not-holding' at the default threshold of 2, although the rate fell from 5% to 0.4%; for long windows, bound the window or raise `refuteThreshold`. Always show `badRateDelta` and the raw `baseline`/`result` counts next to the verdict, don't quote 'holding' on its own, and read `verdict` and `refusalCodes` rather than the prose sentence. The verdict grades the DECISION, not just whether advice was taken: a DISMISSED recommendation whose problem later surfaced also grades 'not-holding', because the evidence sided with the advice either way. Two things this tool refuses to let slide: (1) 'nothing has gone wrong since' only counts as a result if the baseline shows the problem existed before -- otherwise it's 'baseline_lacks_negative_signal'; (2) only observations where the advice could actually have applied (exposed === true) can create or reverse the headline verdict -- everything else is reported separately as `secondary` (whose own `wouldBeVerdict` can itself be 'refused'), labelled non-headline, and can never become the headline. Use this to close the loop on any recommender/advisor system that logs recommendations, human accept/reject calls, and later outcomes, instead of letting advice quality go unmeasured forever. For grading a whole population of engine-vs-human calls at once (rather than one decision against its own before/after window), use compute_divergence instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "object",
+            "properties": {
+              "recommendationId": {
+                "type": "string",
+                "description": "Must equal recommendation.id, or grading is refused with 'decision_recommendation_mismatch'. A recommendationId that shows nothing (empty, whitespace or invisible characters only) is a tool error."
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "adopted",
+                  "dismissed"
+                ],
+                "description": "Whether the human took the advice."
+              },
+              "decidedAt": {
+                "type": "string",
+                "minLength": 1,
+                "description": "When the human made the call: a calendar date 'YYYY-MM-DD' (read as UTC midnight) or a timestamp with seconds and an explicit zone ('2026-02-01T09:30:00Z' or '+hh:mm'), at most three fractional digits. Any other value (no zone, no seconds, an impossible date) is a tool error; nothing is guessed. Instants are compared, not text. Observations strictly before this form the baseline window; observations strictly after (and exposed) form the result window; observations timestamped exactly at this instant are counted (`atBoundaryObservations`) but grade neither window. Must be non-empty."
+              }
+            },
+            "required": [
+              "recommendationId",
+              "status",
+              "decidedAt"
+            ],
+            "description": "The human's call on the recommendation."
+          },
+          "recommendation": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable identifier for this recommendation. `decision.recommendationId` must equal this exactly, or grading is refused. An id that shows nothing (empty, whitespace or invisible characters only) is a tool error."
+              },
+              "subjectId": {
+                "type": "string",
+                "description": "What the advice is about: a project, a machine, a queue, an account. A subjectId that shows nothing (empty, whitespace or invisible characters only) is a tool error."
+              },
+              "checkKey": {
+                "type": "string",
+                "description": "The thing later observations report on -- this is what makes a recommendation gradeable at all. A checkKey that shows nothing (empty, whitespace, or zero-width/bidi control characters only) is always refused ('no_gradeable_check_key'), since no observation could ever be matched back to it."
+              },
+              "proposedAt": {
+                "type": "string",
+                "description": "When the recommendation was proposed. Recorded for your own ledger; grading does not read it. Use the same format as decidedAt/observedAt: a calendar date 'YYYY-MM-DD' (read as UTC midnight) or a timestamp with seconds and an explicit zone ('2026-02-01T09:30:00Z', '2026-02-01T10:30:00+01:00'), at most three fractional digits."
+              },
+              "basis": {
+                "description": "Where the recommendation came from. 'observed' = derived from something the system actually counted. 'model-proposed' = generated by a model reasoning over the corpus (still gradeable unless config.requireObservedBasis is set). Defaults to 'observed' when omitted.",
+                "type": "string",
+                "enum": [
+                  "observed",
+                  "model-proposed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "subjectId",
+              "checkKey",
+              "proposedAt"
+            ],
+            "description": "The advice being graded."
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subjectId": {
+                  "type": "string",
+                  "description": "Matched against recommendation.subjectId -- only observations on the same subject are considered."
+                },
+                "checkKey": {
+                  "type": "string",
+                  "description": "Matched against recommendation.checkKey -- only observations of the same check are considered."
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "good",
+                    "bad"
+                  ],
+                  "description": "Whether this dated reading found the thing fine ('good') or not ('bad')."
+                },
+                "observedAt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "When this reading was taken, in the same grammar as decidedAt: 'YYYY-MM-DD' (UTC midnight) or a timestamp with seconds and an explicit zone. Compared as an instant against decidedAt, so '2026-02-01T01:00:00+01:00' and '2026-02-01' are the same moment. An invalid value on a matching observation is a tool error."
+                },
+                "exposed": {
+                  "description": "LOAD-BEARING: whether the recommendation could actually have applied on this occasion. Only observations with exposed === true, strictly after decidedAt, can create or reverse the headline 'result' verdict. Omitted and false are both treated as not-exposed on purpose -- an unanswered exposure question is not a confirmed exposure. Ignored for observations before decidedAt (the advice was not in force yet, so there was nothing for it to be exposed to).",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "subjectId",
+                "checkKey",
+                "state",
+                "observedAt"
+              ]
+            },
+            "description": "Every observation available. This tool does the filtering by subjectId + checkKey itself, so passing the whole ledger (observations for other subjects/checks too) is fine."
+          },
+          "config": {
+            "description": "Floors and thresholds, every field optional with a library default (see advice-ledger-kit's DEFAULT_GRADE_CONFIG). Omit entirely to use the library's defaults.",
+            "type": "object",
+            "properties": {
+              "minBaselineObservations": {
+                "description": "Minimum pre-decision observations. Default 3.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "minResultObservations": {
+                "description": "Minimum post-decision observations of any exposure. Default 3.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "minExposedResultObservations": {
+                "description": "Minimum post-decision observations where the advice could apply. Default 3.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "minBaselineBadObservations": {
+                "description": "Minimum 'bad' observations in the baseline. Default 1. A baseline with no bad readings gives the advice nothing to have improved -- this is the floor a naive 'no gap since adoption' grader misses.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "proposeThreshold": {
+                "description": "How many bad observations it took to justify emitting this recommendation in the first place. Default 2.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "refuteThreshold": {
+                "description": "How many bad exposed post-decision observations it takes to overturn the decision (a fixed count, not a rate, however long the window). Defaults to proposeThreshold (symmetric). Setting this BELOW proposeThreshold throws -- refuting more cheaply than you proposed is a thumb on the scale, not conservatism.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "requireObservedBasis": {
+                "description": "When true, a 'model-proposed' recommendation is refused outright ('basis_not_gradeable'). Default false.",
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "required": [
+          "decision",
+          "recommendation",
+          "observations"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "compute_divergence",
+      "description": "Computes how often two independent judges (e.g. an automated engine and a human override) rated the same object differently, and -- where a later outcome exists to settle it -- reports engineRight and humanRight as two SEPARATE counts, never combined into one blended accuracy number (a system can be right most of the time overall and still wrong every single time a human bothers to overrule it, and that second fact is the one worth acting on). Divergence needs BOTH a count floor (minDivergentCount) and a rate floor (minDivergentRate) before it's 'reportable' -- either alone lets noise through. Calibration (who was right) carries its own separate floor (minResolvedDivergent) and its own status, so a population can legitimately have reportable divergence and refused calibration at the same time: plenty of disagreements, not enough of them settled by a later outcome yet. Supply `group` on each pair (a custom config.groupBySource is off unless the server operator sets HONESTY_MCP_ENABLE_CODE_EXEC=1) to also get a sorted per-group breakdown alongside the overall report. Use this whenever a system has both an automated judgment and a human override/correction recorded for the same objects, to find out whether overruling the system is actually earning its keep. For grading one recommendation's own before/after outcome window instead of a whole population of engine-vs-human calls, use grade_decision.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pairs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "engineJudgment": {
+                  "type": "string",
+                  "description": "What the system said. Compared to humanJudgment by exact equality -- use one canonical spelling per judgment. An empty string counts as 'didn't speak' for comparability purposes, same as omitting it."
+                },
+                "humanJudgment": {
+                  "type": "string",
+                  "description": "What the human said. Same equality and 'didn't speak' treatment as engineJudgment."
+                },
+                "laterOutcome": {
+                  "description": "What actually turned out to be the case, when that is known yet. Compared by exact equality against engineJudgment/humanJudgment to settle who was right on a divergent pair. Omit if not yet known.",
+                  "type": "string"
+                },
+                "group": {
+                  "description": "Optional bucket, used by the default groupBy to produce the per-group breakdown. Ignored if config.groupBySource is supplied.",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Optional identifier, carried through into `examples` on a divergence report.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "engineJudgment",
+                "humanJudgment"
+              ]
+            },
+            "description": "Every occasion both judges could have spoken on. Pairs missing one judgment are still counted, just not comparable."
+          },
+          "config": {
+            "description": "Floors, thresholds, and optional custom grouping, every field optional with a library default (see advice-ledger-kit's DEFAULT_DIVERGENCE_CONFIG). Omit entirely to use the library's defaults.",
+            "type": "object",
+            "properties": {
+              "minComparablePairs": {
+                "description": "Minimum pairs where both judges spoke. Default 10.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "minDivergentCount": {
+                "description": "Minimum disagreements. Default 3.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "minDivergentRate": {
+                "description": "Minimum disagreement share of comparable pairs, 0 to 1. Default 0.05. Both this AND minDivergentCount must clear before divergence is 'reportable' -- either floor alone lets pure noise through (a 100% rate on 3 of 3 occasions, or a real rate buried in a huge sample).",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "minResolvedDivergent": {
+                "description": "Minimum disagreements that also have a later outcome, before naming who was right. Default 3.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "exampleLimit": {
+                "description": "How many divergent pairs to carry through as examples. Default 10.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "pairs"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "scaffold_agent_receipts",
+      "description": "agent-receipt-kit is a RUNTIME LIBRARY your own agent-orchestration code imports and calls at two specific moments (issue a WorkPacket before an agent runs, verify its AgentClaim after) -- it is not something this MCP server can 'check' on demand the way it checks a document's citations, because the packet only exists inside your application's own runtime. Call this tool to get the pattern explained, an install step, a copy-pasteable starter snippet for wiring issuePacket/verifyReceipt into your own agent loop, and (optionally) a live worked example run against the real kit -- one accepted claim, one rejected claim -- so you can see actual output before wiring it in. Use this when you're building or reviewing anything that lets an AI agent report back what it did (a coding agent, a browser-automation agent, a data-processing agent) and you don't yet trust that report by construction.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeWorkedExample": {
+            "default": true,
+            "description": "Also run a live accepted/rejected example against the real issuePacket/verifyReceipt, not just show a snippet.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "scaffold_cost_governor",
+      "description": "cost-governor-kit is a RUNTIME LIBRARY your app installs and calls at the moment it's about to make an AI API call -- it is not something this MCP server can 'check' on demand the way it checks a document's citations. Its advisory check-then-commit piece (withReserveConfirm) needs a live UsageLedger backed by YOUR database and an async callback making the real call, neither of which exist as content to hand this tool. Call this to get all three pieces explained (estimated pre-call spend check, cache-aware pricing math, advisory successful-call usage counting), an install step, a copy-pasteable starter snippet, and (optionally) a live worked example: real checkPreCallCeiling calls (one allowed, one blocked), a real withReserveConfirm run against an in-memory demo ledger (one call under the limit, one over, one whose commit fails after a successful call), and a real estimateCostUsd comparison of the default 0.1x cache-read rate against a caller-supplied cacheReadPerMillion override. Use this when you're building or reviewing anything that calls a paid AI API and want a pre-call spend estimate plus usage counting that skips a call that threw -- NOT a strict concurrent limit and not proof a timed-out call was never billed by the provider (see concurrency_and_recovery in the output, and use withCapacityReservation instead if you need a real reservation).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeWorkedExample": {
+            "default": true,
+            "description": "Also run live examples against the real checkPreCallCeiling/withReserveConfirm, not just show a snippet.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "honesty-mcp",
+    "version": "0.3.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Code execution is off. check_mutation_invariance is not available, check_payout_invariance offers static-imports mode only, and compute_divergence does not accept config.groupBySource, because those paths run caller-supplied JavaScript. The server operator can turn them on by setting HONESTY_MCP_ENABLE_CODE_EXEC=1 in the server's environment. Turning it on runs that code with this process's filesystem, network and environment access; the worker thread only bounds time and is not a sandbox.",
+  "durationMs": 6318,
+  "stderr": "honesty-mcp v0.3.0 running on stdio\n"
+}
