@@ -1,0 +1,729 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@hiveai/mcp",
+  "version": "0.29.11",
+  "integrity": {
+    "dist": "sha512-5D8iECXp1Jy0xX3exhCbGZ95UiSuyqvobShO/DrhyDFJX+x+qsQzurAar3RufvOrudPosan/oH9WSunWIpkguQ==",
+    "installed": "sha512-5D8iECXp1Jy0xX3exhCbGZ95UiSuyqvobShO/DrhyDFJX+x+qsQzurAar3RufvOrudPosan/oH9WSunWIpkguQ=="
+  },
+  "bin": "node_modules/@hiveai/mcp/./dist/index.js",
+  "main": "./dist/server.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-19T14:11:07.828Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "mem_save",
+      "description": "Save a piece of knowledge as a persistent memory that survives across AI sessions.\n\nUSE THIS WHEN you discover something worth remembering for future sessions:\n  - A project convention (how things are done here)\n  - An architectural decision and its rationale\n  - A gotcha or non-obvious behavior that surprised you\n  - A domain term and what it means in this codebase\n\nDO NOT USE for failed approaches → use mem_tried instead (better structure).\nDO NOT USE for code discoveries during exploration → use mem_observe instead.\n\nPARAMETERS:\n  type     — convention | decision | gotcha | architecture | glossary | attempt\n  slug     — short kebab-case id (e.g. 'flyway-no-modify-existing')\n  body     — Markdown content with the full knowledge\n  scope    — team (shared with all devs) | personal (private) | module (component-scoped)\n  paths    — anchor to source files for staleness detection (STRONGLY recommended)\n  topic    — stable key for upsert: if a memory with same topic+scope exists, update it in-place\n\nRETURNS: { id, scope, file_path, action: 'created'|'updated', warning?, invalid_paths? }\nWARNING: if paths point to non-existent files, they will be immediately stale after haive sync.\nDEDUP: identical body content within the same scope is rejected — use mem_update to modify.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "convention",
+              "decision",
+              "gotcha",
+              "architecture",
+              "glossary",
+              "skill",
+              "attempt",
+              "session_recap"
+            ],
+            "description": "Kind of memory being saved. Use 'skill' for reusable procedures/playbooks agents should follow for recurring tasks (feedforward harness guide). Use 'attempt' for failed approaches (auto-validated). Use 'session_recap' via mem_session_end instead."
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short human-readable identifier — becomes part of the filename"
+          },
+          "body": {
+            "type": "string",
+            "description": "Markdown body of the memory"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "module"
+            ],
+            "description": "Visibility scope: personal | team | module. When omitted, falls back to defaultScope in haive.config.json (default: personal)."
+          },
+          "module": {
+            "type": "string",
+            "description": "Module name (required when scope=module)"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Tags for filtering"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Domain (e.g. transactions, billing)"
+          },
+          "author": {
+            "type": "string",
+            "description": "Author handle or email"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Anchor paths (file paths this memory references)"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Anchor symbols (function/class names this memory references)"
+          },
+          "commit": {
+            "type": "string",
+            "description": "Anchor commit SHA (for staleness detection later)"
+          },
+          "topic": {
+            "type": "string",
+            "description": "Stable key for this memory. If a memory with the same topic already exists in this scope, it is updated in-place (revision_count++). Use for knowledge that evolves over time."
+          },
+          "activation": {
+            "type": "object",
+            "properties": {
+              "keywords": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "globs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "always": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "additionalProperties": false,
+            "description": "Only for type='skill'. Progressive-disclosure triggers: the skill is surfaced ONLY when a keyword matches the task or a glob matches the edited files (or always=true). Omit to keep the skill always-eligible."
+          }
+        },
+        "required": [
+          "type",
+          "slug",
+          "body"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mem_tried",
+      "description": "Record a FAILED approach so future agents don't repeat the same mistake.\n\nUSE THIS IMMEDIATELY when you try something and it doesn't work. This is the\nmost valuable type of negative knowledge — it saves hours of debugging for\nfuture agents working on the same codebase.\n\nAuto-validated (no approval cycle). Surfaced FIRST in future get_briefing calls\nso it's impossible to miss.\n\nPARAMETERS:\n  what       — short title of what you tried (e.g. 'importing X with ESM dynamic import')\n  why_failed — the exact error or reason it failed\n  instead    — what to do instead (the correct approach)\n  scope      — team (default) | personal\n  paths      — source files where the issue lives\n\nRETURNS: { id, file_path, action: 'created' }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "what": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Brief description of the approach that was tried"
+          },
+          "why_failed": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Why it failed or why it should NOT be used"
+          },
+          "instead": {
+            "type": "string",
+            "description": "What to use or do instead (recommended alternative)"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "module"
+            ],
+            "default": "personal",
+            "description": "Visibility scope"
+          },
+          "module": {
+            "type": "string",
+            "description": "Module name (required when scope=module)"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Tags for filtering"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Anchor file paths this applies to"
+          },
+          "author": {
+            "type": "string",
+            "description": "Author handle or email"
+          }
+        },
+        "required": [
+          "what",
+          "why_failed"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "propose_sensor",
+      "description": "Propose a discriminating sensor for a gotcha/attempt — YOU write the pattern (you understand the\ncode), hAIve validates it before trusting it to block. This is how a captured lesson becomes a\nRELIABLE block instead of an advisory note.\n\nUSE THIS right after mem_tried / mem_save on a gotcha whose mistake is detectable in code, to\nupgrade the auto-suggested (warn) sensor into a precise, promotable one.\n\nWrite a pattern that matches the FAULTY usage, and — crucially — an `absent` regex for the\nCORRECT-usage marker so it fires on the bug only, not every call (e.g. pattern=the API call,\nabsent=the required option).\n\nVALIDATION (a `block` proposal is accepted ONLY if): the pattern is not brittle, stays SILENT on\nthe current (correct) anchored code, and FIRES on the bad example. A rejected proposal is NOT\nwritten — the returned `reason`/`guidance` tells you how to revise; then call propose_sensor again.\n\nPARAMETERS:\n  memory_id  — the gotcha/attempt to protect\n  pattern    — regex matching the faulty usage\n  absent     — regex for the correct-usage marker (makes it discriminate) — strongly recommended\n  bad_example— a snippet that SHOULD match (else examples are read from the lesson)\n  severity   — 'block' (default) | 'warn'\n\nRETURNS: { accepted, reason?, guidance?, self_check, file_path? }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Id of the gotcha/attempt memory this sensor protects."
+          },
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Regex matching the FAULTY usage (the risky call/token), e.g. 'stripe\\.paymentIntents\\.create'."
+          },
+          "absent": {
+            "type": "string",
+            "description": "Regex for the CORRECT-usage marker (e.g. 'idempotencyKey'). When it appears in the window around a match, the catch is suppressed — this is what makes the sensor discriminate the faulty call from the correct one. STRONGLY recommended for 'X without Y' lessons."
+          },
+          "bad_example": {
+            "type": "string",
+            "description": "A code snippet that SHOULD match — proves the sensor catches the mistake. If omitted, examples are read from the lesson body."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "block"
+            ],
+            "default": "block",
+            "description": "block = hard-fail the gate (accepted ONLY if it passes self-validation). warn = advisory."
+          },
+          "message": {
+            "type": "string",
+            "description": "LLM-facing fix message shown when it fires. Defaults to one derived from the lesson."
+          },
+          "flags": {
+            "type": "string",
+            "description": "Optional regex flags (e.g. 'i' for case-insensitive)."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Override scope paths. Defaults to the memory's anchor paths."
+          }
+        },
+        "required": [
+          "memory_id",
+          "pattern"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mem_session_end",
+      "description": "Save an end-of-session recap so the NEXT session starts with fresh context.\n\nCALL THIS before closing any significant working session. In autopilot mode,\nthe MCP server saves a minimal recap automatically on exit — but calling this\nmanually produces a richer, more useful recap.\n\nHOW IT WORKS: uses topic-upsert — one recap per scope is kept and updated\nin-place (revision_count increments). get_briefing surfaces the latest recap\nat the very top of the next session's briefing, before project context.\n\nPARAMETERS:\n  goal         — what you were trying to accomplish (1–2 sentences)\n  accomplished — what was actually done (bullet list recommended)\n  discoveries  — bugs, surprises, missing knowledge found during this session\n  files_touched — key files read or modified (used as anchor for staleness)\n  next_steps   — what should happen in the next session or for a teammate\n  scope        — personal (default) | team\n\nRETURNS: { id, scope, action: 'created'|'updated', revision_count }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What you were trying to accomplish this session (1–2 sentences)"
+          },
+          "accomplished": {
+            "type": "string",
+            "description": "What was actually done — bullet list recommended"
+          },
+          "discoveries": {
+            "type": "string",
+            "default": "",
+            "description": "Any bugs, inconsistencies, surprises, or missing knowledge found during this session. Empty if nothing surprising was found."
+          },
+          "files_touched": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Key files that were read or modified — used as anchor paths"
+          },
+          "next_steps": {
+            "type": "string",
+            "default": "",
+            "description": "What should happen next (for the next session or a teammate)"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "module"
+            ],
+            "default": "personal",
+            "description": "Visibility: personal = private to you, team = shared with the team"
+          },
+          "module": {
+            "type": "string",
+            "description": "Module name (required when scope=module)"
+          }
+        },
+        "required": [
+          "goal",
+          "accomplished"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_briefing",
+      "description": "⭐ DEFAULT-FIRST for coding agents on any repo where `haive init` ran: call this BEFORE\nchanging source or project config for the current goal (unless the developer explicitly opts out).\nOne-shot onboarding: everything relevant in a single call under a token budget.\n\nPROGRESSIVE DISCLOSURE — after this, drill down only if needed:\n  mem_relevant_to / mem_search (compact lists) → mem_get (full body + anchors).\n\nRETURNS (in order of priority):\n  0. action_required — ⚠️ HANDLE THIS FIRST if non-empty (see protocol below)\n  1. last_session   — recap of the previous session (goal, what was done, next steps)\n  2. project_context — .ai/project-context.md (auto-generated from code-map if template)\n  3. module_contexts — relevant .ai/modules/<name>/context.md based on files being edited\n  4. memories        — ranked team memories relevant to your task\n  5. symbol_locations — file:line:kind for any requested symbols (no grep needed)\n  6. setup_warnings  — actionable warnings if setup is incomplete\n  7. decay_warnings  — memories not read in >90 days (consider reviewing)\n\n⚠️ ACTION_REQUIRED PROTOCOL — MANDATORY:\n  If action_required[] is non-empty, STOP and for each item:\n  1. Show the developer the exact developer_message field verbatim\n  2. Wait for explicit human confirmation ('yes', 'go ahead', 'oui', etc.)\n  3. Only then proceed with any code changes\n  NEVER act autonomously on cross-repo breaking changes, dep bumps, or contract diffs.\n\nKEY PARAMETERS:\n  task    — what you are about to do (1–2 sentences) — ALWAYS provide this\n  files   — files you are about to edit — surfaces anchored memories\n  symbols — symbol names to look up in the code-map (e.g. ['PaymentService'])\n  format  — 'full' (default) | 'compact' (1-line) | 'actions' (bullet-first excerpts)\n  budget_preset — 'quick' | 'balanced' | 'deep' — scales max_tokens/memories/module contexts\n\nEXAMPLE USAGE:\n  get_briefing({ task: 'add a Stripe payment integration', files: ['src/payments/'], symbols: ['PaymentService'] })\n\nCONFIDENCE LEVELS in memories:\n  authoritative — validated + read 10+ times (highest trust)\n  trusted       — validated or proposed + read 3+ times\n  low           — proposed, few reads (take with caution)\n  unverified    — draft (unverified: true flag set)\n\nReplaces 4–5 separate tool calls. Prefer this first; use mem_search / mem_get only for follow-up.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "What you are about to do, in 1–2 sentences. Used to rank relevant memories semantically."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Project-relative file paths the agent is currently looking at or about to edit"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 8000,
+            "description": "Approximate token budget for the entire briefing. Each section is allocated a share and truncated to fit."
+          },
+          "max_memories": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 8,
+            "description": "Cap on memories surfaced regardless of token budget"
+          },
+          "include_project_context": {
+            "type": "boolean",
+            "default": true
+          },
+          "dedupe_project_context": {
+            "type": "boolean",
+            "description": "Token saver (default ON): skip re-emitting the project-context body if an identical copy was already sent within the last few minutes this session (the agent still has it). Set false to always include it."
+          },
+          "include_module_contexts": {
+            "type": "boolean",
+            "default": true
+          },
+          "semantic": {
+            "type": "boolean",
+            "default": true,
+            "description": "Use semantic ranking when a task is provided (requires `haive embeddings index`)."
+          },
+          "include_stale": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include stale memories (excluded by default — they may be outdated)"
+          },
+          "track": {
+            "type": "boolean",
+            "default": true,
+            "description": "Increment read_count on returned memories"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "full",
+              "compact",
+              "actions"
+            ],
+            "default": "full",
+            "description": "Output format: 'full' returns memory bodies (honors token budget via truncation); 'compact' returns a 1-line summary per memory (call mem_get for detail); 'actions' squeezes bodies to actionable bullet lines — fewer tokens vs full."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Symbol names to look up in the code-map (e.g. ['PaymentService', 'TenantFilter']). Returns the file(s) exporting each symbol so agents don't need to grep. Requires `haive index code` to have been run."
+          },
+          "min_semantic_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0,
+            "description": "Drop semantic-only memory hits whose cosine score is below this threshold. Useful to avoid weakly-related noise when the task is short or the corpus is broad. Has no effect on memories matched via anchor/module/literal — those are always kept. Try 0.25–0.4 for stricter matching."
+          },
+          "budget_preset": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "balanced",
+              "deep"
+            ],
+            "description": "Shortcut token budget: 'quick' minimizes tokens/skip module CONTEXT slices; 'balanced' mirrors historical defaults; 'deep' uses a larger briefing. When set, overrides max_tokens, max_memories, and include_module_contexts."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mem_search",
+      "description": "Search memories by keyword or semantic similarity.\n\nUSE WHEN you need to find a specific memory and don't know its id.\nFor session onboarding, use get_briefing instead (richer, ranked, budgeted).\n\nSEARCH MODES:\n  Literal (default): AND search across id, tags, and body — all tokens must match.\n  Falls back to OR automatically if no AND results (partial match).\n  Lexical rank (lexical_rank: true, semantic: false): Okapi-BM25-style scoring on the\n  filtered corpus — good for phrase-like queries without embeddings.\n  Semantic (semantic: true): embedding-based similarity — finds related memories\n  even with different wording. Requires haive embeddings index to be built.\n\nPARAMETERS:\n  query    — search terms or natural language question\n  scope    — filter by personal | team | module\n  type     — filter by convention | decision | gotcha | architecture | glossary\n  semantic — true for embedding-based search (requires @hiveai/embeddings)\n  lexical_rank — BM25-style ranking (ignored when semantic is true)\n  limit    — max results (default 10)\n\nRETURNS: array of { id, type, scope, status, confidence, body, match_quality }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Substring matched against id, tags, and body"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "module"
+            ],
+            "description": "Restrict results to a single scope"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "convention",
+              "decision",
+              "gotcha",
+              "architecture",
+              "glossary",
+              "attempt",
+              "session_recap"
+            ],
+            "description": "Restrict results to a memory type. session_recap is excluded by default — use type='session_recap' to include them."
+          },
+          "include_session_recap": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include session_recap memories in search results (excluded by default — they surface in get_briefing as last_session)."
+          },
+          "module": {
+            "type": "string",
+            "description": "Restrict results to a module"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "proposed",
+              "validated",
+              "deprecated",
+              "stale",
+              "rejected"
+            ],
+            "description": "Filter by a single status. Omit to return all statuses."
+          },
+          "exclude_rejected": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, exclude memories with status=rejected from results."
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100,
+            "default": 20,
+            "description": "Max results"
+          },
+          "semantic": {
+            "type": "boolean",
+            "default": false,
+            "description": "Use semantic similarity from the embeddings index (requires `haive embeddings index`)."
+          },
+          "lexical_rank": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true (and semantic is false), rank the filtered corpus with Okapi-BM25-style lexical scoring instead of literal AND/OR. Helps phrase-like queries without embeddings."
+          },
+          "min_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0,
+            "description": "Minimum cosine similarity (semantic mode only)"
+          },
+          "track": {
+            "type": "boolean",
+            "default": true,
+            "description": "Increment read_count on returned memories (used for passive validation)"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mem_get",
+      "description": "Fetch a single memory by its full id with all details.\n\nUSE WHEN get_briefing / mem_relevant_to / mem_search returned a compact hit and you need\nthe full body, or when you know the exact id of a memory.\n\nPARAMETERS:\n  id — full memory id (e.g. '2026-04-28-gotcha-flyway-strict-no-ddl')\n\nRETURNS: { id, type, scope, status, confidence, body, anchor, tags, usage }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Memory id to fetch"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "code_map",
+      "description": "Look up where symbols (classes, functions, interfaces) are defined in the codebase.\n\nUSE INSTEAD OF grepping when you need to find where something lives.\nRequires haive index code to have been run (done automatically in autopilot mode).\n\nTIP: include symbols in get_briefing directly for auto-lookup at session start.\n\nPARAMETERS:\n  symbol   — name or partial name to search (e.g. 'PaymentService')\n  file     — filter by file path substring\n  max_files — cap on results (default 40)\n\nRETURNS: { available: bool, files: [{ path, exports: [{ name, kind, line, description }] }] }\nIf available: false → run haive index code first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Filter to files whose path contains this substring"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Filter to files exporting a symbol whose name contains this substring"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Filter to files under any of these path prefixes (e.g. ['packages/mcp/src/tools/', 'src/auth/']). OR-joined with `file` substring; useful to get a focused view of one module."
+          },
+          "max_files": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "default": 40,
+            "description": "Cap on returned files (hard limit, applied after token budget)"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Approximate token budget for the response. When the matching set exceeds it, files are ranked by export density (exports per LOC) and the highest-signal ones are kept first. Omit to disable budgeting (legacy behavior)."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mem_verify",
+      "description": "Check whether memory anchor paths and symbols still exist in the current code.\n\nUSE WHEN you want to know if a specific memory is still valid after a refactor,\nor to check all memories for staleness (haive sync does this automatically).\n\nPARAMETERS:\n  id     — check a single memory (omit to check all)\n  update — write 'stale' or 'validated' status back to disk\n\nRETURNS: { results: [{ id, status: 'fresh'|'stale'|'anchorless', reason? }] }\nStale means the anchored file/symbol no longer exists at that path.\nAnchorless means the memory has no paths/symbols — staleness is undetectable.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "If set, verify only this memory id"
+          },
+          "update": {
+            "type": "boolean",
+            "default": false,
+            "description": "Write the resulting status back to disk (status=stale or validated)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "mem_relevant_to",
+      "description": "One-shot ranked memories for a task — use instead of get_briefing when\nproject context is already loaded and you only want the relevant memory layer.\n\nSecond step in progressive disclosure (after get_briefing): narrow here, then mem_get for full text.\n\nReuses the same ranking pipeline (anchor / module / literal / semantic) but\nskips project_context, modules, action_required, etc.\n\nPARAMETERS:\n  task    — 1–2 sentences describing what you are about to do (required)\n  files   — files you'll edit (surfaces anchored memories)\n  limit   — cap on returned memories (default 8)\n  min_semantic_score — drop weak semantic hits below this cosine (default 0.25)\n  format — 'full' | 'compact' | 'actions' (inherits get_briefing memory framing)\n\nRETURNS: { task, search_mode, memories: [...], hints?: [...], empty?: true }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What you are about to do, in 1–2 sentences. Used to rank relevant memories."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Optional: files you are about to edit — surfaces anchored memories."
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 30,
+            "default": 8,
+            "description": "Cap on returned memories."
+          },
+          "min_semantic_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.25,
+            "description": "Drop weakly-related semantic hits below this cosine threshold."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "full",
+              "compact",
+              "actions"
+            ],
+            "default": "full",
+            "description": "'compact' = id + 1-line summary; 'full' = complete bodies; 'actions' = bullet-first excerpts."
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "code_search",
+      "description": "Semantic search over the codebase — finds exported symbols (functions, classes,\ninterfaces) related to a natural-language query. Replaces blind grep when you\ndon't know the exact symbol name.\n\nRequires `haive index code-search` to have been run (builds embeddings for every\nexported symbol from the code-map). Falls back to a notice when index is missing.\n\nPARAMETERS:\n  query     — natural language (e.g. 'function that hashes passwords', 'JWT signing')\n  k         — number of top hits (default 5)\n  min_score — minimum cosine similarity (default 0.2; try 0.3+ for stricter)\n\nRETURNS: { available: bool, hits: [{ file, name, kind, line, description?, score }] }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Natural-language description of what you are looking for in the codebase (e.g. 'function that hashes passwords', 'JWT signing logic', 'route registration')."
+          },
+          "k": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50,
+            "default": 5,
+            "description": "Number of top hits to return."
+          },
+          "min_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.2,
+            "description": "Minimum cosine similarity. Hits below this threshold are dropped to avoid noise. Try 0.3+ for stricter matching."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "pre_commit_check",
+      "description": "One-shot 'should I block this commit?' check. Combines three signals:\n[Diff-scan layer: the COMBINED check (sensors + anti-patterns + stale). `haive enforce check` is the gate that runs this at commit time.]\n\n  1. anti_patterns_check — known gotchas/attempts that match the diff\n  2. mem_for_files       — conventions/decisions anchored to touched files\n  3. mem_verify          — memories whose anchors are stale (knowledge may be wrong)\n\nUSE FROM A GIT HOOK or before finalizing a non-trivial change.\n\nPARAMETERS:\n  diff       — raw unified diff text (e.g. `git diff --cached`)\n  paths      — affected file paths (project-relative)\n  block_on   — 'any' | 'high-confidence' (default) | 'never'\n  semantic   — use embeddings in anti_patterns_check (default true)\n\nRETURNS: { should_block, summary, warnings, relevant_memories, stale_anchors }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "diff": {
+            "type": "string",
+            "description": "Raw unified diff text to scan. If omitted, only `paths` is used. When called from a pre-commit hook, pipe the output of `git diff --cached`."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Project-relative paths affected by the change. At least one of `diff` or `paths` should be provided."
+          },
+          "block_on": {
+            "type": "string",
+            "enum": [
+              "any",
+              "high-confidence",
+              "never"
+            ],
+            "default": "high-confidence",
+            "description": "When to set should_block=true: 'any' = any warning blocks; 'high-confidence' = only warnings from authoritative/trusted memories block; 'never' = report only, never block."
+          },
+          "semantic": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable semantic search in anti_patterns_check (requires embeddings index)."
+          },
+          "anchored_blocks": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, ALSO block a high-confidence anti-pattern (attempt/gotcha) that is anchored to a touched file AND corroborated by the diff (literal token overlap, or semantic >= 0.45) — not just very strong semantic matches. Powers the 'anchored' enforcement gate. Config/docs-only commits are still downgraded. Default false preserves the soft, semantic-only blocking behavior."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "haive",
+    "version": "0.29.11"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 16313,
+  "stderr": "[haive-mcp] starting server v0.29.11 (project root: /pkg)\n"
+}

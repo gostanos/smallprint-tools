@@ -1,0 +1,308 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@hovatar/platlas-mcp",
+  "version": "0.1.0",
+  "integrity": {
+    "dist": "sha512-05z7qKIhWJp5/DCVu4sWfHN2ajbWYOqQpd/+bOxT588c6wlCAu9QxXy2+hANSyxYcMPblV9dNUctf4lEbr5rlA==",
+    "installed": "sha512-05z7qKIhWJp5/DCVu4sWfHN2ajbWYOqQpd/+bOxT588c6wlCAu9QxXy2+hANSyxYcMPblV9dNUctf4lEbr5rlA=="
+  },
+  "bin": "node_modules/@hovatar/platlas-mcp/src/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-19T14:14:57.445Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "platlas_variant_phewas",
+      "description": "pheWAS for ONE variant: every phenotype associated with a single GRCh38 variant, across 1167 phenotypes and 5 ancestry groups (AFR, AMR, EAS, EUR, and ALL = the trans-ancestry MR-MEGA meta-analysis, which is NOT the union of the others). Use this for \"what traits is this variant associated with\", \"how pleiotropic is it\", \"what is its strongest signal\", \"was it tested for X\". For 2-500 variants use platlas_screen_variants. For one variant's ancestry breakdown use platlas_compare_ancestries.\n\nVARIANT FORMAT is the only accepted input: GRCh38 chr:pos:ref:alt, e.g. 16:53767042:T:C. Autosomes 1-22 only; X, Y and MT are in no PLATLAS release. A leading \"chr\" and lowercase alleles are normalised for you. Allele ORDER is part of the key: 16:53767042:T:C exists and 16:53767042:C:T does not. PLATLAS has NO rsID lookup, NO gene-symbol lookup, NO positional-range or prefix search, and NO nearest-gene annotation. If the user gives you an rsID or a gene name, say you cannot resolve it. Do not guess coordinates.\n\nscope=\"significant\" (default): genome-wide-significant associations only, p <= 4.98884e-8 (the effective cut for p<5e-8, because stored -log10 P are rounded to 3 decimals upstream).\nscope=\"tested\": adds an evidence census over the release, separating SIGNIFICANT, SUB-THRESHOLD (exact stats retained), and NO RECORD. Use it to answer \"was it tested for X and did it come back null\".\n\nCRITICAL: PLATLAS retains summary statistics only where p < 1e-4. There is no sub-threshold baseline. A phenotype missing from a scope=\"significant\" result was not necessarily tested and null - it may simply not have been retained. Never report an empty or short result as evidence of no association; escalate to scope=\"tested\" and report the census.\n\nResults are one row per phenotype (strongest ancestry group), ranked by -log10 P. The underlying data carries one row per (phenotype, ancestry), so the cell count exceeds the phenotype count.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "variant_id": {
+            "type": "string",
+            "description": "GRCh38 chr:pos:ref:alt, autosomes 1-22 only. Example 16:53767042:T:C. Indels use full allele strings, e.g. 18:60183694:GTCT:G. Allele order matters."
+          },
+          "scope": {
+            "default": "significant",
+            "description": "'significant' = p <= 4.98884e-8 only. 'tested' = adds an evidence census including sub-threshold records retained upstream.",
+            "type": "string",
+            "enum": [
+              "significant",
+              "tested"
+            ]
+          },
+          "populations": {
+            "description": "Restrict to these ancestry groups. ALL is the trans-ancestry MR-MEGA meta-analysis, not a union. SAS is listed in the phenotype catalog for 412 phenotypes but is in no release and is not accepted.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "AFR",
+                "ALL",
+                "AMR",
+                "EAS",
+                "EUR"
+              ]
+            }
+          },
+          "categories": {
+            "description": "Restrict to these PheWAS disease categories, e.g. [\"Circulatory System\"]. Case-insensitive exact match on the category label.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "phenotype_ids": {
+            "description": "Restrict to specific phenotype ids, e.g. [\"QTL_BMI\",\"Phe_250_2\"]. Resolve ids with platlas_find_traits; do not invent them.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "default": 40,
+            "description": "Maximum phenotype rows printed. Whole-result totals are reported regardless, and truncation is always stated.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "limit_subthreshold": {
+            "default": 15,
+            "description": "scope='tested' only. Maximum rows printed in the SUB-THRESHOLD table.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "variant_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "platlas_screen_variants",
+      "description": "Triage a candidate list. Takes 1-500 GRCh38 variants and returns one summary line each - how many genome-wide-significant cells, how many distinct phenotypes, which ancestry groups, and the single strongest hit - so a credible set, a lead-SNP list, or a set of coding variants can be ranked in one call. Then drill into one variant with platlas_variant_phewas.\n\nThis tool separates three outcomes that all look like \"nothing\" if you read only an association table: (1) NOT_IN_RELEASE - the identifier is not carried by PLATLAS at all; (2) IN_RELEASE_NO_SIG_HIT - the variant IS carried but no phenotype reaches p <= 4.98884e-8; (3) HAS_SIGNIFICANT. Outcome (2) is NOT evidence of no effect: PLATLAS retains summary statistics only where p < 1e-4.\n\nVariants must be GRCh38 chr:pos:ref:alt on autosomes 1-22. No rsIDs, no gene names, no ranges, no prefixes. Allele order is part of the key. Hard cap 500 per call: the upstream API silently discards anything past the 500th, so this tool refuses an oversized list rather than returning a partial answer that looks complete. If any element is malformed, nothing is queried at all.\n\nCounts here are dominated by ancestry coverage, not by biology: of 1167 phenotypes, EUR carries 1154, ALL 558, AFR 328, EAS 93, AMR 61.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "variant_ids": {
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "GRCh38 chr:pos:ref:alt, autosomes 1-22. Maximum 500. Duplicates are collapsed and the collapse is reported."
+          },
+          "populations": {
+            "description": "Restrict counting to these ancestry groups. Filtering to AMR (61 phenotypes) or EAS (93) will make most variants look negative for reasons of study design.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "AFR",
+                "ALL",
+                "AMR",
+                "EAS",
+                "EUR"
+              ]
+            }
+          },
+          "hits_per_variant": {
+            "default": 3,
+            "description": "Top associations printed per variant beneath the summary table. Reduced automatically if the response would exceed the token budget, and the reduction is stated.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "max_rows": {
+            "default": 250,
+            "description": "Maximum summary lines printed. The CENSUS reports all variants regardless.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "verify_absent": {
+            "default": true,
+            "description": "For variants with no significant hit, additionally check whether the identifier exists in the release, so NOT_IN_RELEASE and IN_RELEASE_NO_SIG_HIT are separated. One extra lookup per hitless variant, capped at 50.",
+            "type": "boolean"
+          },
+          "sort_by": {
+            "default": "strength",
+            "description": "strength = by top neglog10p. pleiotropy = by distinct phenotype count. input_order = preserve the order given, for a list that is already ranked.",
+            "type": "string",
+            "enum": [
+              "strength",
+              "pleiotropy",
+              "input_order"
+            ]
+          }
+        },
+        "required": [
+          "variant_ids"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "platlas_compare_ancestries",
+      "description": "Ancestry breakdown for ONE variant, optionally for chosen phenotypes: for every phenotype x ancestry cell it separates FOUR states that a plain association table collapses into one — SIGNIFICANT (p <= 4.98884e-8), SUB-THRESHOLD (statistics retained, p < 1e-4, not significant), NOT RETAINED (the phenotype WAS released in that ancestry, but no statistics for this variant survived the p < 1e-4 filter), and NOT RELEASED (the phenotype was never run in that ancestry group at all).\n\nUse this whenever the question is about ancestry: transferability, replication, \"is this effect European-specific\", \"does it hold in African ancestry\". Do NOT try to answer that from platlas_variant_phewas output — a phenotype significant only in EUR is usually a phenotype only RELEASED in EUR.\n\nThis distinction is the single most consequential thing in PLATLAS: 609 of 1167 phenotypes are released in exactly one ancestry group (608 EUR-only), only 47 in all five, and per-group phenotype counts are EUR 1154, ALL 558, AFR 328, EAS 93, AMR 61. \"Not significant in AFR\" is usually \"AFR was never run for this trait\".\n\nALL is the trans-ancestry MR-MEGA meta-analysis, not a sixth population and not the union of the others — it is reported in its own column and never counted as replication.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "variant_id": {
+            "type": "string",
+            "description": "GRCh38 chr:pos:ref:alt, autosomes 1-22. Example 16:53767042:T:C."
+          },
+          "phenotype_ids": {
+            "description": "Phenotypes to break down. Omit to use the variant's top phenotypes by significance. Resolve ids with platlas_find_traits.",
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "default": 12,
+            "description": "When phenotype_ids is omitted, how many top phenotypes to break down.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "variant_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "platlas_trait_loci",
+      "description": "The independent genome-wide-significant loci for ONE phenotype in ONE ancestry group — the trait-first view. Answers \"what loci does LDL cholesterol have\", \"how polygenic is this trait\", \"give me the lead SNPs for type 2 diabetes in EUR\".\n\nLoci are DISTANCE-clumped at 500 kb: the strongest variant is taken, everything within 500 kb of it is removed, and the process repeats. This is NOT LD clumping — PLATLAS has no reference panel, so no r2 was computed. Two independent signals closer than 500 kb are reported as one locus, and two variants further apart are reported separately even if they are in LD. Do not describe these as \"independent signals\" without that caveat, and do not use the locus count as a causal-variant count.\n\nYou must name an ancestry group. There is no default, because the answer changes completely: 609 of 1167 phenotypes exist in exactly one group. If you ask for a group the trait was not released in, this tool says so rather than substituting another.\n\nReturns the lead variant per locus with beta, se and p. Variants are GRCh38 chr:pos:ref:alt; PLATLAS has no rsIDs and no nearest-gene annotation, so the loci are unnamed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "phenotype_id": {
+            "type": "string",
+            "description": "PLATLAS phenotype id, e.g. QTL_LDLC or Phe_250_2. Resolve names to ids with platlas_find_traits — do not invent ids."
+          },
+          "population": {
+            "type": "string",
+            "enum": [
+              "AFR",
+              "ALL",
+              "AMR",
+              "EAS",
+              "EUR"
+            ],
+            "description": "Ancestry group. Required. ALL is the trans-ancestry MR-MEGA meta-analysis, not the union of the others."
+          },
+          "limit": {
+            "default": 50,
+            "description": "Maximum loci printed, strongest first. The total locus count is always reported.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          }
+        },
+        "required": [
+          "phenotype_id",
+          "population"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "platlas_find_traits",
+      "description": "Resolve a trait NAME to a PLATLAS phenotype id, and show which ancestry groups it was released in. Every other tool takes ids, not names — use this first whenever the user names a trait in words (\"LDL cholesterol\", \"type 2 diabetes\", \"atrial fibrillation\") rather than giving an id.\n\nSearches trait descriptions, ids and categories. Two id families exist: Phe_* are phecodes derived from ICD billing codes and are hierarchical (Phe_250 diabetes mellitus is the parent of Phe_250_2 type 2 diabetes); QTL_* are quantitative traits such as QTL_BMI or QTL_LDLC. Phecode families are correlated by construction — a variant significant for six diabetes phecodes has one signal, not six.\n\nThe released_in column is authoritative and often surprising: 609 of 1167 phenotypes exist in exactly ONE ancestry group (608 EUR-only) and only 47 exist in all five. Check it before asking another tool for a group the trait was never run in. Note the phenotype catalog's own population list is unreliable — it names SAS for 412 phenotypes and SAS is in no release — so trust only what this column reports.\n\nUse list_categories=true with no query to see the 18 category labels.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Free text matched case-insensitively against trait description, phenotype id and category. Omit with list_categories=true to browse.",
+            "type": "string"
+          },
+          "population": {
+            "description": "Only return phenotypes actually released in this ancestry group.",
+            "type": "string",
+            "enum": [
+              "AFR",
+              "ALL",
+              "AMR",
+              "EAS",
+              "EUR"
+            ]
+          },
+          "category": {
+            "description": "Restrict to one PheWAS category label, e.g. \"Circulatory System\".",
+            "type": "string"
+          },
+          "limit": {
+            "default": 30,
+            "description": "Maximum rows printed. The total match count is always reported.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "list_categories": {
+            "default": false,
+            "description": "Return the category labels with phenotype counts instead of matching traits.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "platlas",
+    "version": "0.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": "PLATLAS is a pleiotropy atlas: 1167 phenotypes x ~60M GRCh38 variants across 5 ancestry groups (AFR, AMR, EAS, EUR, and ALL = a trans-ancestry MR-MEGA meta-analysis that is NOT the union of the others).\n\nThree things about this data change how answers must be worded:\n1. Summary statistics are retained ONLY where p < 1e-4. There is no sub-threshold baseline. A phenotype absent from a result was not necessarily tested and null — it may simply not have been retained. Never present absence as evidence of no association.\n2. Variants are addressable ONLY as GRCh38 chr:pos:ref:alt on autosomes 1-22. There is no rsID index, no gene-symbol index, and no nearest-gene annotation. If asked about a gene or an rsID, say PLATLAS cannot resolve it rather than guessing coordinates.\n3. 609 of 1167 phenotypes were released in exactly one ancestry group. A signal appearing in one group is usually study design, not ancestry specificity.",
+  "durationMs": 2500,
+  "stderr": "platlas-mcp 0.1.0 ready — API https://platlas.hovatar.app\n"
+}
