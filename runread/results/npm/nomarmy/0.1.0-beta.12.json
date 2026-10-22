@@ -1,0 +1,976 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "nomarmy",
+  "version": "0.1.0-beta.12",
+  "integrity": {
+    "dist": "sha512-lah6a/4axwXMwGesODTDp7qhanZWSg0C1Knh22Xpa9mXk/2ZKOai4yVkvnUIPolXh5ofitCjU1J/8fSAFN46lw==",
+    "installed": "sha512-lah6a/4axwXMwGesODTDp7qhanZWSg0C1Knh22Xpa9mXk/2ZKOai4yVkvnUIPolXh5ofitCjU1J/8fSAFN46lw=="
+  },
+  "bin": "node_modules/nomarmy/bin/nomarmy.mjs",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [
+    "mcp"
+  ],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-21T11:14:58.417Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "local_worker",
+      "description": "Run one isolated local worker and wait for it. mode=implement edits in its own worktree and the coordinator commits only on a valid done report (or a recovered job that passed independent verification); failed or incomplete worktrees are retained. mode=scout answers a question from a read-only snapshot with mandatory [path:line] citations that nomArmy verifies and expands. mode=decompose (also read-only) proposes 2+ independent subtasks for a broad objective instead of one worker turn trying to do too much; the proposal is never auto-dispatched, review it and make a separate call with the subtasks you choose. Refuses under memory pressure or over capacity; use local_worker_start + local_worker_status to avoid blocking.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000,
+            "description": "implement: the OBJECTIVE the worker must achieve, not the edit it should make. scout: the QUESTION to answer from the repository. decompose: the broad OBJECTIVE to propose a split for."
+          },
+          "criteria": {
+            "description": "implement: contract IDs from acceptance/*.yml served by this job, read at base_ref when set (else the working tree).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9]*-\\d+(?:-[A-Z0-9]+)*$"
+            }
+          },
+          "acceptance": {
+            "description": "implement: acceptance criteria the worker must satisfy. scout: points a complete answer must cover. decompose: constraints a good split must respect.",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 600
+            }
+          },
+          "verification": {
+            "description": "Verification profile NAME (e.g. quick, standard, browser). Semantic; nomArmy owns execution. Ignored by scouts.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "refactor": {
+            "description": "implement: declares a behavior-preserving change (moving or restructuring code). nomArmy then requires a passing verification profile and refuses to commit if any test file was added, changed or deleted: the existing tests passing unchanged is the evidence nothing changed. The revert check is skipped, since reverting a refactor restores working code and always passes. A job that changes behavior has to change tests, so it can't pass as a refactor.",
+            "type": "boolean"
+          },
+          "verify_regression": {
+            "description": "implement only: after the diff passes `verification` and touches production files, temporarily revert just those production files, re-run the SAME verification profile (expected to fail without the fix), then restore them. A re-run that still PASSES proves no test would catch this regression, and the outcome is downgraded to NEEDS_REVIEW regardless of the worker's report -- never silently committed as done. This is the ONLY mechanism that catches a verification profile that passes for the wrong reason (a test-selection flag that accidentally excludes the changed file's own tests reports a real, honest, green run that never touched the diff -- exit-code checking alone cannot see the difference). Defaults to true whenever `verification` is set, since that gap is exactly what nomArmy's trust boundary claims to close; pass `false` explicitly to skip the doubled wall-clock cost (can matter on repos with thousands of tests) and accept the risk instead. No effect with no `verification` profile -- there is nothing to re-run. Ignored by scouts.",
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "implement",
+            "description": "verify: run a required verification profile with no worker and no model tokens; base_ref selects the branch or commit (default current HEAD), task is a short record label, agent/model are unused and army_role is only a label. implement: edit in an isolated worktree, coordinator commits on a valid report. scout: read-only research; every finding must cite [path:start-end] and nomArmy attaches the cited lines after verifying them against the base commit. decompose: read-only; proposes 2+ independent, evidence-grounded subtasks for a broad objective instead of doing everything in one worker turn. Never auto-dispatched -- the proposal is reviewed like a scout's findings, and the coordinator makes its own separate dispatch call with whatever subtasks it chooses to use.",
+            "type": "string",
+            "enum": [
+              "scout",
+              "implement",
+              "decompose",
+              "verify"
+            ]
+          },
+          "base_ref": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "description": "Default 600; 1200 for a review scout (one with `reviews`, or an army role in the review phase), since a real security review read for the full 10 minutes and was cut off.",
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 1800
+          },
+          "reasoning": {
+            "default": "medium",
+            "description": "Thinking level passed to the worker model: off, minimal, low, medium, high, xhigh, adaptive, max or ultra (the higher ones only where the vendor offers them, e.g. xhigh on Codex models; a level the model lacks falls back once to its nearest supported level). Higher levels spend a subscription's usage limits faster. On the local model it takes effect when that model supports thinking (NOMARMY_MODEL_THINKING); on an api or subscription agent it applies per that agent's own `thinking` setting (false = off, a fixed level = always that level). Default is medium, not high, on real measured evidence: on an identical ticket, gpt-oss-20b at high took 318s with 21 tool calls and 4 failures, and at medium took 62s with 9 calls and 0 failures -- high did not produce a better answer, it thrashed. A separate open-ended task made Qwen3.6-27B time out completely at high (630s, zero output) and succeed at medium. Do not raise this to high by default reasoning that more thinking should help -- it has only ever hurt or timed out in testing so far. Reach for high only after a task has already failed once at medium and the failure looks like an under-thinking problem specifically (wrong root cause, not a formatting or scope issue).",
+            "type": "string",
+            "enum": [
+              "off",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "adaptive",
+              "max",
+              "ultra"
+            ]
+          },
+          "agent": {
+            "description": "Run on this agent from the operator's agents.yml, by name (e.g. \"codex\", \"grok\", \"local\"): the local model, a metered api key, or one person's subscription. Omit agent and army_role to use the local model. Refuses an unknown name, never falls back. Mutually exclusive with army_role. A subscription agent also requires on_behalf_of.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "model": {
+            "description": "The model to run on the job's agent (an api or subscription agent), e.g. \"gpt-6-sol\". Overrides the role's model and the agent's default. Required when the role's model is \"auto\" or the agent has no default. The `army` tool lists each agent's models. Refused on the local agent, whose model `nomarmy model` sets.",
+            "type": "string",
+            "pattern": "^\\S{1,200}$"
+          },
+          "run_id": {
+            "description": "The /feature run this job belongs to (from run_start). Admission then enforces the run's limits (jobs, api spend, hours) and refuses an agent the run has paused after a vendor usage-limit error; the finished job is recorded into the run.",
+            "type": "string",
+            "pattern": "^run-[a-z0-9-]{1,80}$"
+          },
+          "report": {
+            "description": "How much the worker may report back, capped by its agent's tier: brief (today's local-sized report), standard (the default), full (the frontier ceiling: about 2k tokens for implement, 4k for a scout). An api or subscription scout defaults to full because its findings are the point; other jobs default to standard. The report lands in your own context and is re-read every later turn. No effect on the local model, whose caps are calibrated.",
+            "type": "string",
+            "enum": [
+              "brief",
+              "standard",
+              "full"
+            ]
+          },
+          "stakes": {
+            "description": "implement: how much a mistake would cost, separate from how hard the work is. high for anything touching security or access control, personal or tenant data, data loss, money, or changes that can't be undone: a verification profile is then required, the revert check can't be turned off, and the job always comes back needing review until an independent review (a scout on another vendor with reviews: <job id>, or a judge on another vendor) has looked at it. A one-line auth change is simple and high-stakes.",
+            "type": "string",
+            "enum": [
+              "normal",
+              "high"
+            ]
+          },
+          "reviews": {
+            "description": "scout: the job id this scout independently reviews, so the review is recorded against that job (nomarmy stats shows high-stakes jobs with and without one). Use a different vendor than the job's worker. The scout gets that job's diff as .openclaw/reference/reviewed-<job id>.patch, and without base_ref it reads the tree at the job's commit, not the default branch.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,120}$"
+          },
+          "commit_subject": {
+            "description": "implement: the subject line of the commit nomArmy makes on the worker branch, e.g. \"Keep held-back tables in the list_tables cache\". Defaults to the task's first sentence; the body is the worker's NOTE, and the job id is a trailer.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "army_role": {
+            "description": "Dispatch by army role (e.g. \"sr-dev\", \"security-analyst\"): nomArmy runs it on the agent this repo assigns to that role and puts the role's description at the top of the brief. Call the `army` tool first to see this repo's roles. Mutually exclusive with agent. Add on_behalf_of in case the role's agent is a subscription; it's ignored otherwise.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "confirm_over_limit": {
+            "description": "Override a reached usage limit: the General must ask the operator before resubmitting with confirm_over_limit: true, or send the job to another agent. nomArmy never sets it itself.",
+            "type": "boolean"
+          },
+          "on_behalf_of": {
+            "description": "Required when the job's agent is a subscription: must exactly match that agent's owner in agents.yml, or nomArmy refuses the job. A self-reported attestation, not an independently verified identity check -- nomArmy has no caller-identity boundary today, so what this guarantees is explicit, auditable intent and hard refusal on mismatch or omission, not cryptographic proof of who issued the call. Ignored for a local or api agent.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 254
+          },
+          "evidence": {
+            "description": "implement only: facts YOU already resolved (e.g. via repo_evidence) that the worker should trust and not re-derive -- exact signatures, call sites, line ranges, existing behavior. Cuts exploration that would otherwise burn the worker's own context budget on something you already know. Not a substitute for a clear objective and acceptance criteria.",
+            "type": "string",
+            "maxLength": 24000
+          },
+          "reference_commits": {
+            "description": "Earlier changes this job's worker reads as patch files under .openclaw/reference/ (git history isn't available in the sandbox): a job id (that job's change against its base, committed or not) or a commit SHA. For example the accepted job whose commit conflicted, when redoing it on the current head. A file whose diff matches a secret rule is withheld, and each patch is capped at 200 KB with a TRUNCATED marker. Name the job or SHA instead of pasting the diff into the brief. Not for verify. A scout with reviews gets the reviewed job's diff this way without asking.",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,120}$"
+            }
+          },
+          "continue_from": {
+            "description": "implement only: the job id of a retained, uncommitted implement job (partial, blocked, or failed verification) whose unfinished work this job should finish. The new worktree starts from that job's base with its changes in place, so brief only the correction; the finished whole, that work included, is verified and committed together. Use this instead of fixing a worker's files yourself, which would land them unverified. Leave base_ref out.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,120}$"
+          },
+          "detach": {
+            "description": "local_worker_start only: run the job in its own process instead of this session's MCP server, so it keeps running (and records its result) after this session ends. For a General that ends between wakes: start it detached, end, and read it later with local_worker_status or nomarmy jobs --wait from any session. local_worker_stop still stops it.",
+            "type": "boolean"
+          },
+          "worker_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+$"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "local_worker_start",
+      "description": "Start one worker or scout in the background and return immediately with a job_id. Poll it with local_worker_status (optionally long-polling with wait_seconds). Same admission rules as local_worker: refuses under memory pressure or when NOMARMY_MAX_WORKERS jobs are already running.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000,
+            "description": "implement: the OBJECTIVE the worker must achieve, not the edit it should make. scout: the QUESTION to answer from the repository. decompose: the broad OBJECTIVE to propose a split for."
+          },
+          "criteria": {
+            "description": "implement: contract IDs from acceptance/*.yml served by this job, read at base_ref when set (else the working tree).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9]*-\\d+(?:-[A-Z0-9]+)*$"
+            }
+          },
+          "acceptance": {
+            "description": "implement: acceptance criteria the worker must satisfy. scout: points a complete answer must cover. decompose: constraints a good split must respect.",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 600
+            }
+          },
+          "verification": {
+            "description": "Verification profile NAME (e.g. quick, standard, browser). Semantic; nomArmy owns execution. Ignored by scouts.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "refactor": {
+            "description": "implement: declares a behavior-preserving change (moving or restructuring code). nomArmy then requires a passing verification profile and refuses to commit if any test file was added, changed or deleted: the existing tests passing unchanged is the evidence nothing changed. The revert check is skipped, since reverting a refactor restores working code and always passes. A job that changes behavior has to change tests, so it can't pass as a refactor.",
+            "type": "boolean"
+          },
+          "verify_regression": {
+            "description": "implement only: after the diff passes `verification` and touches production files, temporarily revert just those production files, re-run the SAME verification profile (expected to fail without the fix), then restore them. A re-run that still PASSES proves no test would catch this regression, and the outcome is downgraded to NEEDS_REVIEW regardless of the worker's report -- never silently committed as done. This is the ONLY mechanism that catches a verification profile that passes for the wrong reason (a test-selection flag that accidentally excludes the changed file's own tests reports a real, honest, green run that never touched the diff -- exit-code checking alone cannot see the difference). Defaults to true whenever `verification` is set, since that gap is exactly what nomArmy's trust boundary claims to close; pass `false` explicitly to skip the doubled wall-clock cost (can matter on repos with thousands of tests) and accept the risk instead. No effect with no `verification` profile -- there is nothing to re-run. Ignored by scouts.",
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "implement",
+            "description": "verify: run a required verification profile with no worker and no model tokens; base_ref selects the branch or commit (default current HEAD), task is a short record label, agent/model are unused and army_role is only a label. implement: edit in an isolated worktree, coordinator commits on a valid report. scout: read-only research; every finding must cite [path:start-end] and nomArmy attaches the cited lines after verifying them against the base commit. decompose: read-only; proposes 2+ independent, evidence-grounded subtasks for a broad objective instead of doing everything in one worker turn. Never auto-dispatched -- the proposal is reviewed like a scout's findings, and the coordinator makes its own separate dispatch call with whatever subtasks it chooses to use.",
+            "type": "string",
+            "enum": [
+              "scout",
+              "implement",
+              "decompose",
+              "verify"
+            ]
+          },
+          "base_ref": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "description": "Default 600; 1200 for a review scout (one with `reviews`, or an army role in the review phase), since a real security review read for the full 10 minutes and was cut off.",
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 1800
+          },
+          "reasoning": {
+            "default": "medium",
+            "description": "Thinking level passed to the worker model: off, minimal, low, medium, high, xhigh, adaptive, max or ultra (the higher ones only where the vendor offers them, e.g. xhigh on Codex models; a level the model lacks falls back once to its nearest supported level). Higher levels spend a subscription's usage limits faster. On the local model it takes effect when that model supports thinking (NOMARMY_MODEL_THINKING); on an api or subscription agent it applies per that agent's own `thinking` setting (false = off, a fixed level = always that level). Default is medium, not high, on real measured evidence: on an identical ticket, gpt-oss-20b at high took 318s with 21 tool calls and 4 failures, and at medium took 62s with 9 calls and 0 failures -- high did not produce a better answer, it thrashed. A separate open-ended task made Qwen3.6-27B time out completely at high (630s, zero output) and succeed at medium. Do not raise this to high by default reasoning that more thinking should help -- it has only ever hurt or timed out in testing so far. Reach for high only after a task has already failed once at medium and the failure looks like an under-thinking problem specifically (wrong root cause, not a formatting or scope issue).",
+            "type": "string",
+            "enum": [
+              "off",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "adaptive",
+              "max",
+              "ultra"
+            ]
+          },
+          "agent": {
+            "description": "Run on this agent from the operator's agents.yml, by name (e.g. \"codex\", \"grok\", \"local\"): the local model, a metered api key, or one person's subscription. Omit agent and army_role to use the local model. Refuses an unknown name, never falls back. Mutually exclusive with army_role. A subscription agent also requires on_behalf_of.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "model": {
+            "description": "The model to run on the job's agent (an api or subscription agent), e.g. \"gpt-6-sol\". Overrides the role's model and the agent's default. Required when the role's model is \"auto\" or the agent has no default. The `army` tool lists each agent's models. Refused on the local agent, whose model `nomarmy model` sets.",
+            "type": "string",
+            "pattern": "^\\S{1,200}$"
+          },
+          "run_id": {
+            "description": "The /feature run this job belongs to (from run_start). Admission then enforces the run's limits (jobs, api spend, hours) and refuses an agent the run has paused after a vendor usage-limit error; the finished job is recorded into the run.",
+            "type": "string",
+            "pattern": "^run-[a-z0-9-]{1,80}$"
+          },
+          "report": {
+            "description": "How much the worker may report back, capped by its agent's tier: brief (today's local-sized report), standard (the default), full (the frontier ceiling: about 2k tokens for implement, 4k for a scout). An api or subscription scout defaults to full because its findings are the point; other jobs default to standard. The report lands in your own context and is re-read every later turn. No effect on the local model, whose caps are calibrated.",
+            "type": "string",
+            "enum": [
+              "brief",
+              "standard",
+              "full"
+            ]
+          },
+          "stakes": {
+            "description": "implement: how much a mistake would cost, separate from how hard the work is. high for anything touching security or access control, personal or tenant data, data loss, money, or changes that can't be undone: a verification profile is then required, the revert check can't be turned off, and the job always comes back needing review until an independent review (a scout on another vendor with reviews: <job id>, or a judge on another vendor) has looked at it. A one-line auth change is simple and high-stakes.",
+            "type": "string",
+            "enum": [
+              "normal",
+              "high"
+            ]
+          },
+          "reviews": {
+            "description": "scout: the job id this scout independently reviews, so the review is recorded against that job (nomarmy stats shows high-stakes jobs with and without one). Use a different vendor than the job's worker. The scout gets that job's diff as .openclaw/reference/reviewed-<job id>.patch, and without base_ref it reads the tree at the job's commit, not the default branch.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,120}$"
+          },
+          "commit_subject": {
+            "description": "implement: the subject line of the commit nomArmy makes on the worker branch, e.g. \"Keep held-back tables in the list_tables cache\". Defaults to the task's first sentence; the body is the worker's NOTE, and the job id is a trailer.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "army_role": {
+            "description": "Dispatch by army role (e.g. \"sr-dev\", \"security-analyst\"): nomArmy runs it on the agent this repo assigns to that role and puts the role's description at the top of the brief. Call the `army` tool first to see this repo's roles. Mutually exclusive with agent. Add on_behalf_of in case the role's agent is a subscription; it's ignored otherwise.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "confirm_over_limit": {
+            "description": "Override a reached usage limit: the General must ask the operator before resubmitting with confirm_over_limit: true, or send the job to another agent. nomArmy never sets it itself.",
+            "type": "boolean"
+          },
+          "on_behalf_of": {
+            "description": "Required when the job's agent is a subscription: must exactly match that agent's owner in agents.yml, or nomArmy refuses the job. A self-reported attestation, not an independently verified identity check -- nomArmy has no caller-identity boundary today, so what this guarantees is explicit, auditable intent and hard refusal on mismatch or omission, not cryptographic proof of who issued the call. Ignored for a local or api agent.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 254
+          },
+          "evidence": {
+            "description": "implement only: facts YOU already resolved (e.g. via repo_evidence) that the worker should trust and not re-derive -- exact signatures, call sites, line ranges, existing behavior. Cuts exploration that would otherwise burn the worker's own context budget on something you already know. Not a substitute for a clear objective and acceptance criteria.",
+            "type": "string",
+            "maxLength": 24000
+          },
+          "reference_commits": {
+            "description": "Earlier changes this job's worker reads as patch files under .openclaw/reference/ (git history isn't available in the sandbox): a job id (that job's change against its base, committed or not) or a commit SHA. For example the accepted job whose commit conflicted, when redoing it on the current head. A file whose diff matches a secret rule is withheld, and each patch is capped at 200 KB with a TRUNCATED marker. Name the job or SHA instead of pasting the diff into the brief. Not for verify. A scout with reviews gets the reviewed job's diff this way without asking.",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,120}$"
+            }
+          },
+          "continue_from": {
+            "description": "implement only: the job id of a retained, uncommitted implement job (partial, blocked, or failed verification) whose unfinished work this job should finish. The new worktree starts from that job's base with its changes in place, so brief only the correction; the finished whole, that work included, is verified and committed together. Use this instead of fixing a worker's files yourself, which would land them unverified. Leave base_ref out.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,120}$"
+          },
+          "detach": {
+            "description": "local_worker_start only: run the job in its own process instead of this session's MCP server, so it keeps running (and records its result) after this session ends. For a General that ends between wakes: start it detached, end, and read it later with local_worker_status or nomarmy jobs --wait from any session. local_worker_stop still stops it.",
+            "type": "boolean"
+          },
+          "worker_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+$"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "local_worker_status",
+      "description": "Status of one job, started by this session or any other (a detached job included): phase (starting, worktree, worker, verification, commit, record, finished), elapsed time against its timeout, and the result once finished. wait_seconds long-polls up to that long for completion (max 110, to stay inside MCP client request timeouts; poll again for longer jobs). report=true returns just the worker's report (a scout's findings with their verified citations), the outcome, issues, verification and commit. full=true returns the complete execution record.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "wait_seconds": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 110
+          },
+          "full": {
+            "default": false,
+            "type": "boolean"
+          },
+          "report": {
+            "default": false,
+            "description": "Just the report and nomArmy's verdict on it, without the rest of the record. Prefer this to full.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "stats",
+      "description": "What nomArmy's own job records show for this repository (or all repositories): jobs by mode, role and model; code committed; worker and job time; tokens and API spend; claim vs evidence (how often a \"done, tests pass\" report failed independent verification, or passed with tests that couldn't catch the change); what didn't complete; reviewer outcomes; and review flags. Every number comes from nomArmy's verified records, never a worker's report. Defects you find at integration aren't in the records: add your own count. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "description": "Only jobs started since this: a date (2026-09-25) or an age (7d, 24h). Default: all.",
+            "type": "string",
+            "maxLength": 40
+          },
+          "until": {
+            "description": "Only jobs started before this date.",
+            "type": "string",
+            "maxLength": 40
+          },
+          "all_repos": {
+            "description": "Every repository this machine's nomArmy has run jobs for, not just this one.",
+            "type": "boolean"
+          },
+          "repo": {
+            "description": "Another repository, by path or folder name (\"senti\" matches rayson-senti if unambiguous).",
+            "type": "string",
+            "maxLength": 400
+          },
+          "role": {
+            "description": "Only jobs dispatched as this army role (e.g. sr-dev).",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "model": {
+            "description": "Only jobs that ran on this model (e.g. grok-4.7).",
+            "type": "string",
+            "pattern": "^\\S{1,200}$"
+          },
+          "format": {
+            "description": "text (default) is the report; json is the raw numbers.",
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ]
+          },
+          "details": {
+            "description": "The full report (volume, reviewers, flags, what didn't finish). Default is the one-screen summary: what nomArmy caught, high-stakes work needing review, the top routing tips, spend.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "local_worker_stop",
+      "description": "Stop a running job's worker, for example one burning a frontier model's usage on the wrong track. Its worker ends within about 15 seconds, without the report-recovery call a timeout gets and without running verification; its worktree is kept uncommitted, so a new job with continue_from: <job_id> (and a cheaper model if you like) can finish the work. Works for a job started by any session. Refuses a job that isn't running or is already past its worker.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$"
+          },
+          "reason": {
+            "description": "Why it's being stopped; recorded in the job's issues.",
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "local_worker_capacity",
+      "description": "What this host can take right now: context per nom and the brief/report budgets derived from it, memory pressure and whether another job would be admitted, and the jobs currently running. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "run_start",
+      "description": "Start a /feature run (or reattach to one with `resume`): one feature, end to end, with limits. It becomes this session's active run: every job you dispatch from now on joins it automatically (pass run_id only to target a different run). Admission enforces the run's limits -- jobs, api spend in dollars, and hours with at least one job running (time between jobs, such as a wait at a human gate, doesn't count) -- warning at the configured share and refusing at the cap. A vendor usage-limit error pauses that agent for the rest of the run. Limits come from the operator's army run_limits; you may lower them for this run, never raise them. Returns the run id and a log path: keep the run log (plan, decisions, progress) there so a fresh session can resume if yours hits its own usage limit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "A short name for the feature (required unless resuming).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "resume": {
+            "description": "Reattach this session to an existing, still-running run (e.g. after the previous session hit its own limit) instead of starting a new one.",
+            "type": "string",
+            "pattern": "^run-[a-z0-9-]{1,80}$"
+          },
+          "max_jobs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "max_api_usd": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "max_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "run_status",
+      "description": "A /feature run's limits, what it has used (jobs, api spend, hours), per-agent jobs/spend/tokens, warnings (80% of a limit, paused agents), and its log path. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "pattern": "^run-[a-z0-9-]{1,80}$"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "run_finish",
+      "description": "Close a /feature run as complete or stopped, with a one-paragraph summary. A closed run admits no more jobs. Nothing is merged: the run's branch still waits for the operator.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "pattern": "^run-[a-z0-9-]{1,80}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "stopped"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "summary"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "army",
+      "description": "Who you, the General, are and who you call for what in this repository: your fixed charter and the agent you're defined as, the army's workflow, then each role's description, phase (build, review, acceptance), suggested mode, and the agent it runs on, with which config layer set each value (global, project .nomarmy.yml, local .nomarmy.local.yml). Flags roles with no usable agent, and roles that share your model or subscription (not an independent review). Dispatch a role with `army_role`, or an agent directly with `agent`. Read-only, re-read on every call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "local_worker_config",
+      "description": "What this checkout's .nomarmy.yml defines -- the one file every job's sandbox image and every verification uses, whichever branch the job starts from (never the job worktree's own copy, which a worker could edit): every verification profile name and its commands/environment, and any elevated (shared/remote) services that need explicit policy approval before a job may use them. Pass a profile name to `verification`/`union_verification`/`verify_regression` only if it appears here. Read-only; never writes or proposes a config (see `nomarmy scan` for that).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "local_workers",
+      "description": "Run independent jobs (implement or scout) with bounded parallelism and wait for all of them. Every implement job receives its own branch, worktree, sandbox session, logs, validation, and coordinator-owned commit. This tool never merges any branch into the developer's branch. With auto_union: true, implement jobs that reach a valid outcome and touch non-overlapping files are additionally merged (git merge --no-ff) into ONE new integration branch -- a review artifact alongside the untouched per-job branches, still not the developer's branch, still reviewed and integrated explicitly. Jobs that overlap or did not finish validly are excluded from the union and reported individually exactly as without auto_union. For long batches prefer local_worker_start per job and poll.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobs": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 16000,
+                  "description": "implement: the OBJECTIVE the worker must achieve, not the edit it should make. scout: the QUESTION to answer from the repository. decompose: the broad OBJECTIVE to propose a split for."
+                },
+                "criteria": {
+                  "description": "implement: contract IDs from acceptance/*.yml served by this job, read at base_ref when set (else the working tree).",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9]*-\\d+(?:-[A-Z0-9]+)*$"
+                  }
+                },
+                "acceptance": {
+                  "description": "implement: acceptance criteria the worker must satisfy. scout: points a complete answer must cover. decompose: constraints a good split must respect.",
+                  "maxItems": 20,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 600
+                  }
+                },
+                "verification": {
+                  "description": "Verification profile NAME (e.g. quick, standard, browser). Semantic; nomArmy owns execution. Ignored by scouts.",
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]{1,64}$"
+                },
+                "refactor": {
+                  "description": "implement: declares a behavior-preserving change (moving or restructuring code). nomArmy then requires a passing verification profile and refuses to commit if any test file was added, changed or deleted: the existing tests passing unchanged is the evidence nothing changed. The revert check is skipped, since reverting a refactor restores working code and always passes. A job that changes behavior has to change tests, so it can't pass as a refactor.",
+                  "type": "boolean"
+                },
+                "verify_regression": {
+                  "description": "implement only: after the diff passes `verification` and touches production files, temporarily revert just those production files, re-run the SAME verification profile (expected to fail without the fix), then restore them. A re-run that still PASSES proves no test would catch this regression, and the outcome is downgraded to NEEDS_REVIEW regardless of the worker's report -- never silently committed as done. This is the ONLY mechanism that catches a verification profile that passes for the wrong reason (a test-selection flag that accidentally excludes the changed file's own tests reports a real, honest, green run that never touched the diff -- exit-code checking alone cannot see the difference). Defaults to true whenever `verification` is set, since that gap is exactly what nomArmy's trust boundary claims to close; pass `false` explicitly to skip the doubled wall-clock cost (can matter on repos with thousands of tests) and accept the risk instead. No effect with no `verification` profile -- there is nothing to re-run. Ignored by scouts.",
+                  "type": "boolean"
+                },
+                "mode": {
+                  "default": "implement",
+                  "description": "verify: run a required verification profile with no worker and no model tokens; base_ref selects the branch or commit (default current HEAD), task is a short record label, agent/model are unused and army_role is only a label. implement: edit in an isolated worktree, coordinator commits on a valid report. scout: read-only research; every finding must cite [path:start-end] and nomArmy attaches the cited lines after verifying them against the base commit. decompose: read-only; proposes 2+ independent, evidence-grounded subtasks for a broad objective instead of doing everything in one worker turn. Never auto-dispatched -- the proposal is reviewed like a scout's findings, and the coordinator makes its own separate dispatch call with whatever subtasks it chooses to use.",
+                  "type": "string",
+                  "enum": [
+                    "scout",
+                    "implement",
+                    "decompose",
+                    "verify"
+                  ]
+                },
+                "base_ref": {
+                  "type": "string"
+                },
+                "timeout_seconds": {
+                  "description": "Default 600; 1200 for a review scout (one with `reviews`, or an army role in the review phase), since a real security review read for the full 10 minutes and was cut off.",
+                  "type": "integer",
+                  "minimum": 30,
+                  "maximum": 1800
+                },
+                "reasoning": {
+                  "default": "medium",
+                  "description": "Thinking level passed to the worker model: off, minimal, low, medium, high, xhigh, adaptive, max or ultra (the higher ones only where the vendor offers them, e.g. xhigh on Codex models; a level the model lacks falls back once to its nearest supported level). Higher levels spend a subscription's usage limits faster. On the local model it takes effect when that model supports thinking (NOMARMY_MODEL_THINKING); on an api or subscription agent it applies per that agent's own `thinking` setting (false = off, a fixed level = always that level). Default is medium, not high, on real measured evidence: on an identical ticket, gpt-oss-20b at high took 318s with 21 tool calls and 4 failures, and at medium took 62s with 9 calls and 0 failures -- high did not produce a better answer, it thrashed. A separate open-ended task made Qwen3.6-27B time out completely at high (630s, zero output) and succeed at medium. Do not raise this to high by default reasoning that more thinking should help -- it has only ever hurt or timed out in testing so far. Reach for high only after a task has already failed once at medium and the failure looks like an under-thinking problem specifically (wrong root cause, not a formatting or scope issue).",
+                  "type": "string",
+                  "enum": [
+                    "off",
+                    "minimal",
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "adaptive",
+                    "max",
+                    "ultra"
+                  ]
+                },
+                "agent": {
+                  "description": "Run on this agent from the operator's agents.yml, by name (e.g. \"codex\", \"grok\", \"local\"): the local model, a metered api key, or one person's subscription. Omit agent and army_role to use the local model. Refuses an unknown name, never falls back. Mutually exclusive with army_role. A subscription agent also requires on_behalf_of.",
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]{1,64}$"
+                },
+                "model": {
+                  "description": "The model to run on the job's agent (an api or subscription agent), e.g. \"gpt-6-sol\". Overrides the role's model and the agent's default. Required when the role's model is \"auto\" or the agent has no default. The `army` tool lists each agent's models. Refused on the local agent, whose model `nomarmy model` sets.",
+                  "type": "string",
+                  "pattern": "^\\S{1,200}$"
+                },
+                "run_id": {
+                  "description": "The /feature run this job belongs to (from run_start). Admission then enforces the run's limits (jobs, api spend, hours) and refuses an agent the run has paused after a vendor usage-limit error; the finished job is recorded into the run.",
+                  "type": "string",
+                  "pattern": "^run-[a-z0-9-]{1,80}$"
+                },
+                "report": {
+                  "description": "How much the worker may report back, capped by its agent's tier: brief (today's local-sized report), standard (the default), full (the frontier ceiling: about 2k tokens for implement, 4k for a scout). An api or subscription scout defaults to full because its findings are the point; other jobs default to standard. The report lands in your own context and is re-read every later turn. No effect on the local model, whose caps are calibrated.",
+                  "type": "string",
+                  "enum": [
+                    "brief",
+                    "standard",
+                    "full"
+                  ]
+                },
+                "stakes": {
+                  "description": "implement: how much a mistake would cost, separate from how hard the work is. high for anything touching security or access control, personal or tenant data, data loss, money, or changes that can't be undone: a verification profile is then required, the revert check can't be turned off, and the job always comes back needing review until an independent review (a scout on another vendor with reviews: <job id>, or a judge on another vendor) has looked at it. A one-line auth change is simple and high-stakes.",
+                  "type": "string",
+                  "enum": [
+                    "normal",
+                    "high"
+                  ]
+                },
+                "reviews": {
+                  "description": "scout: the job id this scout independently reviews, so the review is recorded against that job (nomarmy stats shows high-stakes jobs with and without one). Use a different vendor than the job's worker. The scout gets that job's diff as .openclaw/reference/reviewed-<job id>.patch, and without base_ref it reads the tree at the job's commit, not the default branch.",
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]{1,120}$"
+                },
+                "commit_subject": {
+                  "description": "implement: the subject line of the commit nomArmy makes on the worker branch, e.g. \"Keep held-back tables in the list_tables cache\". Defaults to the task's first sentence; the body is the worker's NOTE, and the job id is a trailer.",
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "army_role": {
+                  "description": "Dispatch by army role (e.g. \"sr-dev\", \"security-analyst\"): nomArmy runs it on the agent this repo assigns to that role and puts the role's description at the top of the brief. Call the `army` tool first to see this repo's roles. Mutually exclusive with agent. Add on_behalf_of in case the role's agent is a subscription; it's ignored otherwise.",
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                },
+                "confirm_over_limit": {
+                  "description": "Override a reached usage limit: the General must ask the operator before resubmitting with confirm_over_limit: true, or send the job to another agent. nomArmy never sets it itself.",
+                  "type": "boolean"
+                },
+                "on_behalf_of": {
+                  "description": "Required when the job's agent is a subscription: must exactly match that agent's owner in agents.yml, or nomArmy refuses the job. A self-reported attestation, not an independently verified identity check -- nomArmy has no caller-identity boundary today, so what this guarantees is explicit, auditable intent and hard refusal on mismatch or omission, not cryptographic proof of who issued the call. Ignored for a local or api agent.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 254
+                },
+                "evidence": {
+                  "description": "implement only: facts YOU already resolved (e.g. via repo_evidence) that the worker should trust and not re-derive -- exact signatures, call sites, line ranges, existing behavior. Cuts exploration that would otherwise burn the worker's own context budget on something you already know. Not a substitute for a clear objective and acceptance criteria.",
+                  "type": "string",
+                  "maxLength": 24000
+                },
+                "reference_commits": {
+                  "description": "Earlier changes this job's worker reads as patch files under .openclaw/reference/ (git history isn't available in the sandbox): a job id (that job's change against its base, committed or not) or a commit SHA. For example the accepted job whose commit conflicted, when redoing it on the current head. A file whose diff matches a secret rule is withheld, and each patch is capped at 200 KB with a TRUNCATED marker. Name the job or SHA instead of pasting the diff into the brief. Not for verify. A scout with reviews gets the reviewed job's diff this way without asking.",
+                  "minItems": 1,
+                  "maxItems": 5,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._-]{1,120}$"
+                  }
+                },
+                "continue_from": {
+                  "description": "implement only: the job id of a retained, uncommitted implement job (partial, blocked, or failed verification) whose unfinished work this job should finish. The new worktree starts from that job's base with its changes in place, so brief only the correction; the finished whole, that work included, is verified and committed together. Use this instead of fixing a worker's files yourself, which would land them unverified. Leave base_ref out.",
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]{1,120}$"
+                },
+                "detach": {
+                  "description": "local_worker_start only: run the job in its own process instead of this session's MCP server, so it keeps running (and records its result) after this session ends. For a General that ends between wakes: start it detached, end, and read it later with local_worker_status or nomarmy jobs --wait from any session. local_worker_stop still stops it.",
+                  "type": "boolean"
+                },
+                "worker_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]+$"
+                }
+              },
+              "required": [
+                "task"
+              ]
+            }
+          },
+          "max_parallel": {
+            "description": "A cap on how many of this batch run at once. Omit it: local jobs then use the local ceiling and api/subscription jobs theirs (`nomarmy config max-jobs`, default 4), with each agent's own max_concurrent on top. It used to default to the local ceiling, which ran an all-remote batch one job at a time.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "auto_union": {
+            "default": false,
+            "description": "After all jobs finish, mechanically merge (git merge --no-ff) implement jobs that reached a valid outcome and touched non-overlapping files into ONE new integration branch for review -- never into the developer's branch. Overlapping or invalid-outcome jobs are excluded and still reported individually, unchanged. All jobs must share one base_ref (or omit it); it is resolved once, before any job starts, and forced onto every job so the union is provably rooted at a single base.",
+            "type": "boolean"
+          },
+          "union_verification": {
+            "description": "Verification profile NAME to run once against the union branch after merging (same semantics as each job's own `verification` field). Only meaningful with auto_union: true. Omitted: union-level verification is explicitly not_run and reported as such, never silently skipped.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "repo_evidence",
+      "description": "Deterministic repository evidence with exact [path:line] citations and no model involved. ops: grep, definitions, references, outline, files. definitions/references take a symbol in 'query' (heuristic per language family); outline takes 'path'; grep takes a regex in 'query'; files takes a glob. Runs against the project working tree in milliseconds. Prefer this over reading files for where-is / who-calls / what-declares questions, and over a scout for anything it can answer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "grep",
+              "definitions",
+              "references",
+              "outline",
+              "files"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "glob": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "max_results": {
+            "default": 100,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "ignore_case": {
+            "default": false,
+            "type": "boolean"
+          },
+          "whole_word": {
+            "default": false,
+            "type": "boolean"
+          },
+          "json": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "commit_show",
+      "description": "Read-only: what a job or a commit changed. A job id gives that job's change against the base it started from (its commit, or a retained worktree's uncommitted changes); a commit gives its message and diff against its first parent, or with `base` the diff from base to it (a branch diff). For a General without a shell: review what an earlier job committed, or decide what a redo needs. Size-capped; files over the cap are listed, not shown, and a file whose diff matches a secret rule is withheld and named. To hand a commit to a worker, pass reference_commits on its job instead of pasting the diff into the brief.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9._\\/~^@{}-]+$",
+            "description": "A job id (for example worker-20261019-134317-214b60), or a commit SHA, branch or tag in this repository."
+          },
+          "base": {
+            "description": "A commit to compare against instead of the first parent (not with a job id).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9._\\/~^@{}-]+$"
+          },
+          "paths": {
+            "description": "Only these paths.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "max_bytes": {
+            "default": 60000,
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "local_worker_jobs",
+      "description": "List recent job records for review/recovery, including jobs still running or orphaned by a server restart. Does not modify repositories. Returns a small PROJECTION per job by default (jobId, outcome, branch/commit, worktreeRetained, filesChanged, timing, issues) -- enough to decide what needs recovery or cleanup without pulling every job's full execution record (objective text, budgets, git records, ...) into context, which can exceed the tool result size past a handful of jobs. Pass full: true only for the specific job(s) you already know need deep inspection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 10,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "full": {
+            "default": false,
+            "description": "Return each job's complete, uncompacted manifest instead of the small default projection. Requesting this across many jobs at once risks exceeding the tool result size cap -- prefer the default projection first, then a targeted look (e.g. local_worker_status) at just the job(s) that need it.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "local_worker_sweep",
+      "description": "Bulk-reap job worktrees/branches that are PROVABLY EMPTY: the branch's tip is identical to the base SHA it started from (zero commits) AND the worktree has no uncommitted changes left either -- there is nothing here to inspect, recover, or lose. Never removes a worktree holding any real committed or uncommitted work, regardless of age or older_than_hours -- emptiness is what makes it safe, not age. A worktree with real work always stays a deliberate, individual local_worker_cleanup call. Use dry_run first to see what would be reaped.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "older_than_hours": {
+            "default": 0,
+            "description": "Only consider jobs finished (or, if never finished, last touched) at least this many hours ago. 0 (default) considers every job regardless of age.",
+            "type": "number",
+            "minimum": 0
+          },
+          "delete_branches": {
+            "default": true,
+            "description": "Also delete each reaped job's branch. Safe unconditionally here (never force) -- a branch identical to its base SHA is trivially git's own definition of already-merged.",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "Report what WOULD be reaped without removing anything.",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 200,
+            "description": "Maximum number of job directories to examine in one call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "local_worker_cleanup",
+      "description": "Remove a retained worker worktree and optionally its agent branch after Claude has reviewed/integrated or deliberately discarded it. Refuses to delete the current branch. A branch whose commits were cherry-picked (not merged) into the current branch -- nomArmy's own integration model -- is recognized as integrated by comparing PATCH CONTENT (git cherry), not git's own ancestry-only check, so a genuinely-integrated job's cleanup does not need force: true. Reserve force for a branch you are actually discarding unintegrated work from.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "delete_branch": {
+            "default": false,
+            "type": "boolean"
+          },
+          "force": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "nomarmy-local-worker",
+    "version": "0.1.0-beta.12"
+  },
+  "protocolVersion": null,
+  "instructions": "nomArmy runs bounded engineering jobs (noms) in isolated git worktrees and sandboxes, on a local model or on the api and subscription agents the operator configured. You are the General: you plan, brief, dispatch, review, integrate and accept. Workers never are.\n\nBefore dispatching:\n- Answer where-is / who-calls / grep questions with repo_evidence (deterministic, [path:line] on every hit). Use mode: scout only for read-only research that would otherwise pull many files into your own context.\n- Call army to see this repo's roles and which agent each runs on; dispatch by army_role when a role fits. A job on a subscription agent needs on_behalf_of set to that agent's owner.\n- Agents' usage limits show in army and local_worker_capacity; a job on an agent at its limit is held. Ask the operator before resubmitting with confirm_over_limit: true, or move the job to another agent. Never set it on your own.\n- A Claude subscription agent (claude-cli) runs its tools on this machine, outside the sandbox: use it for scout and review work. nomArmy refuses implement jobs on it unless the operator set allow_host_tools; send build work to a sandboxed agent.\n- To run tests without changing anything, use mode: verify; it costs no model usage.\n- Mark an implement job stakes: high when a mistake would be costly (security, access control, personal or tenant data, data loss, money, irreversible changes), however small it is. It then needs a verification profile, keeps the revert check, and needs an independent review before you accept it: a scout on another vendor with reviews: <job id>.\n- Brief outcomes, not edits: a task, explicit acceptance criteria, and the tests that prove it. Put facts you've already resolved in evidence.\n- At feature planning, write acceptance/<feature>.yml from durable outcome promises, not job hygiene. Assign stable criterion IDs in each job brief before parallel dispatch and pass them as criteria; jobs must not pick the next free ID. After integration, preview nomarmy acceptance fill <run-id> --dry-run, prune unrelated proposed mappings, fill for real, and commit the contract with the feature. A CONTRACT BROKEN: issue means the change is wrong or the contract must intentionally change in the same pull request.\n- Prefer local_worker_start for anything longer than a few minutes. Right after, if you can run a background command, run `nomarmy jobs --wait <job_id>` in the background so you're told the moment it finishes and can tell the operator (for several jobs, `nomarmy jobs --wait <id> <id> ...`; for a whole run, `nomarmy jobs --events --until-done --run <run-id>`); otherwise poll local_worker_status with wait_seconds. To read a finished job, use local_worker_status with report: true (the report, a scout's cited findings, the outcome, issues and commit); full: true is the whole record and rarely needed. Review scouts (reviews set, or a review-phase role) default to 20 minutes, other jobs to 10; pass timeout_seconds for more. Never use unscoped `--until-done` when other sessions may have jobs. Never run the plain `nomarmy jobs --events` stream as a background command: it only reports when it exits, so you'd never hear; it's for a monitor that reads each line. For a whole feature, use /feature (run_start keeps a run's jobs, spend and hours bounded).\n\nTrust boundary:\n- A worker's four-line report is a claim; nomArmy's verified git record and independent verification are the evidence. A job isn't complete if its report is missing or malformed, its STATUS is partial or blocked, STATUS done lacks VERIFICATION pass, or its changes aren't committed by nomArmy.\n- If a repository has no accepted trust map, suggest nomarmy trust map once; dispatch its scout brief and use nomarmy trust review for operator ratification.\n- A job with trust.level: review or human needs an independent review on another vendor before acceptance, like stakes: high.\n- Keep review from looping: have reviewers rank findings blocker, fix now or follow-up; only an evidence-backed blocker starts another fix round; at most two review rounds per change, then bring the operator the open disagreements; pass points you already decided into the next review brief so they aren't raised again.\n- A job with trust.level: human is a hard stop before integration: show every trust reason to the operator and wait for explicit approval. Never decide this gate alone. After the operator decides, record nomarmy trust ack <job> --accept|--reject --reason ...; rejection never permits integration.\n- Read the diff of anything material before integrating it (commit_show if you have no shell). nomArmy commits on the worker's branch and never merges into yours: integration, conflicts and pushes are yours. When an accepted commit no longer integrates, dispatch a redo on the current head with reference_commits: [<that commit>]; the worker gets it as a patch file. Name the SHA; don't paste diffs into briefs.\n- Jobs run inside this session's MCP server: keep the session open until they finish, or start them with local_worker_start and detach: true so they keep running after it ends. A review scout (reviews: <job id>) gets that job's diff as a patch file and reads the job's commit by default.\n- A job on the wrong track can be stopped with local_worker_stop; it keeps its worktree. To finish a job that came back partial, blocked, failing verification or stopped, dispatch the correction with continue_from: <that job id> (a cheaper model is fine). The new job starts with its unfinished work in place and verifies the whole. Don't fix and commit a worker's files yourself: that lands them unverified. If you must, commit them on a branch, run mode: verify on it before building on it, and say so in your report.\n- Failed and incomplete worktrees are kept for review; clean up with local_worker_cleanup or local_worker_sweep once you've decided.\n\nNever delegate deployments, production access, cloud or SSH credentials, secrets, Terraform state or kubectl contexts to a worker.",
+  "durationMs": 10245,
+  "stderr": ""
+}
