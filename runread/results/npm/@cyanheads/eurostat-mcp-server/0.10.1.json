@@ -1,0 +1,378 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@cyanheads/eurostat-mcp-server",
+  "version": "0.10.1",
+  "integrity": {
+    "dist": "sha512-348hzdw5XHtRSl07ExVLHWpffDyqFPMInhZ2YG9LTfbE++YJTtkTNtyRyKG+jXkbWkJ/GwAGnDsDF54YA7krTQ==",
+    "installed": "sha512-348hzdw5XHtRSl07ExVLHWpffDyqFPMInhZ2YG9LTfbE++YJTtkTNtyRyKG+jXkbWkJ/GwAGnDsDF54YA7krTQ=="
+  },
+  "bin": "node_modules/@cyanheads/eurostat-mcp-server/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-23T12:11:09.491Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "eurostat_search_datasets",
+      "description": "Search the Eurostat catalogue by keyword. Returns matching datasets with codes, descriptions, period coverage, and theme breadcrumbs. Use this to discover dataset codes before calling eurostat_get_dataset_info, then eurostat_query_dataset for a slice of a dataset or eurostat_download_dataset for the whole of one. Results are limited to datasets and predefined tables — folders are excluded. The catalogue joins two sources: the dissemination table of contents, and the Comext host's dataflow list, which adds the DS-* collections — detailed trade by CN8, HS, SITC, BEC and CPA, and PRODCOM — filed under \"International trade in goods - detailed data (Comext)\" and \"Statistics on the production of manufactured goods (PRODCOM)\". Comext entries report a last-update date but no period coverage or observation count. A collection on neither list, such as the legacy PRODCOM DS-056120, is not disseminated and cannot be reached through this server.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Search terms — at least one non-whitespace token is required. Split on whitespace into tokens; every token must match (AND), case-insensitively, somewhere across the dataset label, theme breadcrumb, or code. Spacing beside punctuation in the catalogue is ignored, so \"Rev.2\" also finds \"Rev. 2\" and \"2015=100\" finds \"2015 = 100\"; a token keeps its own punctuation, as in \"R&D\", \"non-EU\", or \"DS-045409\". Word order does not matter, so \"business demography NUTS 3\" or \"regional economic accounts\" resolve without naming a label verbatim. When nothing matches, the error names each word whose removal alone would find matches."
+          },
+          "limit": {
+            "default": 20,
+            "description": "Page size — maximum datasets returned per page. Default 20; positive integers above 100 are clamped to 100 with a notice. To retrieve matches beyond one page, pass the returned nextCursor back as cursor; the page size is fixed by this first call and limit is ignored on cursor calls.",
+            "type": "number",
+            "minimum": 1,
+            "multipleOf": 1
+          },
+          "cursor": {
+            "description": "Opaque pagination cursor from a previous call's nextCursor. Omit for the first page; pass it back — with the same query — to fetch the next page of matches over a stable order. A cursor is bound to the query that produced it and to the catalogue snapshot in effect at that time, so reusing one with a different query, or after the catalogue refreshes, is rejected rather than silently paging a different result set.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "eurostat_browse_themes",
+      "description": "Navigate the Eurostat theme tree. Without theme_code returns the top-level theme folders (Economy, Population, Transport, etc.) — the practical starting points. With a theme_code returns its immediate children: subtheme folders and datasets in that branch. Use this for structured discovery when you know the domain but not the dataset code, or to drill down from a broad topic to a specific dataset. Pair with eurostat_search_datasets for keyword-based discovery. The tree is the dissemination table of contents plus the Comext host's DS-* collections: detailed trade under ext_go_detail (inside ext_go, \"International trade in goods\") and PRODCOM under prom (inside icts, \"Industry, trade and services\"). A collection on neither, such as the legacy PRODCOM DS-056120, is not disseminated and appears nowhere in the tree.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "theme_code": {
+            "description": "Folder code to expand (e.g., \"economy\", \"reg\"). Omit to list the top-level theme folders.",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "eurostat_get_dataset_info",
+      "description": "Fetch metadata for a Eurostat dataset: dimensions with valid values, time range, observation count, and last-update date. Call this before eurostat_query_dataset or eurostat_download_dataset to discover what dimension codes are valid (unit, na_item, geo, etc.); eurostat_download_dataset builds its positional filter key from this dimension list, so a filter naming a dimension absent here is rejected outright. Returns up to 10 sample values per dimension for orientation; use eurostat_get_dimension_values to list the full set for large dimensions. A DS-* code (detailed trade and PRODCOM, in any case) is read from the Comext dissemination host, which reports no period coverage or observation count, so timeRange and obsCount come back unreported; the first call on a large Comext collection downloads its full structure (23 MB for DS-045409) and takes longer, and repeat calls within the hour reuse it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dataset_code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dataset code (e.g., \"nama_10_gdp\", or \"DS-045409\" for a Comext collection). Use eurostat_search_datasets or eurostat_browse_themes to find codes."
+          }
+        },
+        "required": [
+          "dataset_code"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "eurostat_get_dimension_values",
+      "description": "List the valid values for a specific dimension in a Eurostat dataset (e.g., all unit codes for nama_10_gdp, all geo codes for a regional dataset). Use this when eurostat_get_dataset_info returns more values than the 10-item sample, or to confirm exact codes before querying. For the \"geo\" dimension, use geo_level to filter by NUTS hierarchy (country, nuts1, nuts2, nuts3). An invalid code matches nothing: eurostat_query_dataset names it in unmatchedValues, or in its no_results error when the query matched nothing at all, and Eurostat rejects it as a fault on eurostat_download_dataset; use this tool to verify codes first. To find one code in a long list, such as the 37,069 CN8 product codes of DS-045409, pass filter: words its code or label contains. A long list comes back a page at a time, each response held to 64,000 bytes; a page with more after it carries nextCursor — pass it back as cursor for the next page. Pass canvas_id to also stage the whole list, whatever its length, as a two-column code/label table on that dataframe canvas: search it with SQL, or join it to a eurostat_download_dataset table, whose columns carry dimension codes only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dataset_code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dataset code (e.g., \"nama_10_gdp\", or \"DS-045409\" for a Comext collection)."
+          },
+          "dimension": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dimension code to retrieve values for (e.g., \"unit\", \"na_item\", \"geo\"). Use eurostat_get_dataset_info to see available dimensions."
+          },
+          "geo_level": {
+            "description": "NUTS hierarchy level filter — applies only when dimension is \"geo\"; passing it with any other dimension is rejected. Options: \"aggregate\" (EU/EA codes), \"country\" (2-letter codes, default), \"nuts1\" (3-char), \"nuts2\" (4-char), \"nuts3\" (5-char).",
+            "type": "string",
+            "enum": [
+              "aggregate",
+              "country",
+              "nuts1",
+              "nuts2",
+              "nuts3"
+            ]
+          },
+          "filter": {
+            "description": "Words to find, up to 500 characters: keeps only values whose code and label, joined by a space, contain every whitespace-separated word as a substring — in any order, ignoring case and accents (\"palma frankfurt\" finds DE_EDDF_ES_LEPA, \"zurich\" finds Zürich). Punctuation is part of a word, and spellings are not transliterated (\"münchen\" does not find MUENCHEN). Runs over the whole list at the effective geo_level before paging and keeps Eurostat's order, with no ranking; matchCount counts the matches.",
+            "type": "string",
+            "maxLength": 500
+          },
+          "limit": {
+            "description": "Most values per page. No default and no maximum: without it a page holds as many whole values as fit 64,000 bytes, and with it the page ends at whichever comes first. Fixed by the first call: on a call with cursor, the cursor carries that first limit and this field is ignored.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "cursor": {
+            "description": "Opaque nextCursor from the previous page; omit for the first page. It resumes after that page's last code and is bound to dataset_code, dimension, geo_level and filter, so send those unchanged. Cannot be combined with canvas_id on a deployment with a dataframe canvas.",
+            "type": "string"
+          },
+          "canvas_id": {
+            "description": "Also stage the values on this dataframe canvas as a table with two columns, code and label, holding every value the dimension lists at the geo_level requested (country when it is omitted), whatever filter and limit are. Pass the canvasId a eurostat_download_dataset or eurostat_query_dataset response returned, then search the staged table with SQL or join it to a download on the dimension column (e.g., d.geo = g.code). Only on a call without cursor; omit to return the values inline only: this tool never starts a canvas. Ignored on deployments without a dataframe canvas.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10}$"
+          }
+        },
+        "required": [
+          "dataset_code",
+          "dimension"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "eurostat_query_dataset",
+      "description": "Fetch statistical data from a Eurostat dataset with dimension filters. Returns a deterministic inline prefix of decoded observations with dimension codes and labels, numeric values, an OBS_FLAG status (e.g., \"p\" = provisional, \"e\" = estimated) and a separate CONF_STATUS confidentiality marker (e.g., \"C\" = confidential, which is usually why a value is null). preview_limit controls only that prefix; filters and period controls reduce the matched result itself. Call eurostat_get_dataset_info first to discover valid dimension codes and values. Apply filters to keep the result set manageable — large unfiltered queries may trigger an async response error. Use filters.geo for specific country/region codes, or geo_level for NUTS hierarchy filtering (mutually exclusive). Use last_n_periods for the N most recent periods without knowing the end date. Matches above 5,000 observations are staged whole when this deployment runs a dataframe canvas: call eurostat_dataframe_describe first, then eurostat_dataframe_query. Matches at or below 5,000 are never staged. When the target is a whole dataset rather than a slice, eurostat_download_dataset reads the SDMX bulk endpoint instead and is the cheaper route.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dataset_code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dataset code (e.g., \"nama_10_gdp\"). Required. A DS-* code — Comext detailed trade or PRODCOM, in any case — is served by the Comext host: filter freq on its trade flows, which mix annual and monthly series, and note that product, reporter and partner carry aggregates (TOTAL, EU27_2020) that double-count when summed with their members."
+          },
+          "filters": {
+            "default": {},
+            "description": "Dimension filters as a map of dimension code → array of valid values. Example: {\"unit\": [\"CP_MEUR\"], \"na_item\": [\"B1GQ\"], \"geo\": [\"DE\", \"FR\"]}. An empty array is treated as no filter for that dimension and is dropped from the request, and so is a blank or whitespace-only value ([\"\"] is no filter, [\"\", \"DE\"] is [\"DE\"]). Dimension codes match in any case (\"GEO\" is geo). Keys are dimensions only: one naming a request control (lang, format, geoLevel, sinceTimePeriod, untilTimePeriod, lastTimePeriod, in any case) is rejected as invalid_dimension — use the lang, geo_level, since_period, until_period and last_n_periods inputs. Do not include \"geo\" here if using geo_level, nor \"time\"/\"time_period\" if using since_period, until_period or last_n_periods. A value that matches nothing contributes no rows rather than an error; the response names it in unmatchedValues, or in the no_results error when nothing matched at all. eurostat_get_dimension_values lists the valid values.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "geo_level": {
+            "description": "Filter by NUTS hierarchy level. Mutually exclusive with a \"geo\" key in filters. Options: \"aggregate\" (EU/EA totals), \"country\" (41 member/candidate states), \"nuts1\" (127 major regions), \"nuts2\" (309 basic regions), \"nuts3\" (1,343 small regions).",
+            "type": "string",
+            "enum": [
+              "aggregate",
+              "country",
+              "nuts1",
+              "nuts2",
+              "nuts3"
+            ]
+          },
+          "since_period": {
+            "description": "Start of the time range, inclusive. Accepted forms: YYYY, YYYY-MM, YYYY-MM-DD, YYYY-Qn (1–4), YYYY-Sn (1–2), YYYY-Tn (1–3), YYYY-Mnn (01–12), YYYY-Wnn (a week the year has, up to 53) or YYYY-Dnnn (a day the year has, up to 366) (e.g., \"2020\", \"2023-Q1\", \"2024-01\"). Extra leading zeros after the letter are dropped (\"2020-Q01\" is sent as \"2020-Q1\"), a day of the year is sent as three digits (\"2026-D1\" as \"2026-D001\"), and YYYY-A1 is sent as YYYY. A period of another frequency is mapped onto the dataset's own, so \"2020-01\" works on annual data. A malformed or non-existent period (e.g., \"2020-13\") is rejected as invalid_period. Mutually exclusive with last_n_periods.",
+            "type": "string"
+          },
+          "until_period": {
+            "description": "End of the time range, inclusive (e.g., \"2024\"), in the same forms as since_period. Omit for data through the latest available period. The range must hold at least one day: a since_period that starts after until_period ends is rejected as invalid_period, while pairs of different frequencies are fine (\"2020-06\" to \"2020\"). Mutually exclusive with last_n_periods.",
+            "type": "string"
+          },
+          "last_n_periods": {
+            "description": "Return only the N most recent periods. N counts back from the dataset's latest period, not from the latest period published for this slice, so a slice that lags the rest of the dataset can come back empty — raise N, or use until_period ending at a period the slice has published. Mutually exclusive with since_period and until_period.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "preview_limit": {
+            "default": 50,
+            "description": "How many matched observations to return inline, from the deterministic start of the JSON-stat cell order. Default 50; positive integers above 500 are clamped to 500 with a notice. This changes only the inline prefix: it does not reduce obsCount, missingObsCount, timeRange, the upstream response, or the rows staged when the match exceeds 5,000. Use filters or period controls to reduce the match itself.",
+            "type": "number",
+            "minimum": 1,
+            "multipleOf": 1
+          },
+          "lang": {
+            "default": "EN",
+            "description": "Language for labels in the response. Default is \"EN\". Options: \"EN\", \"FR\", \"DE\".",
+            "type": "string",
+            "enum": [
+              "EN",
+              "FR",
+              "DE"
+            ]
+          },
+          "canvas_id": {
+            "description": "Reuse an existing dataframe canvas, so a result staged by this call lands beside earlier ones and can be joined against them. Pass the canvasId a previous eurostat_query_dataset or eurostat_download_dataset response returned; omit to start a fresh canvas. Ignored on deployments without a dataframe canvas and when the match is at or below 5,000 observations.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10}$"
+          }
+        },
+        "required": [
+          "dataset_code"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "eurostat_download_dataset",
+      "description": "Download a Eurostat dataset in bulk through the SDMX 2.1 TSV endpoint and stage every observation as a SQL table on the dataframe canvas — the route to a whole dataset, where eurostat_query_dataset is the route to a slice of one. The TSV wire format is roughly half the bytes of the JSON-stat body eurostat_query_dataset reads, so it reaches datasets that would otherwise time out, and it is expanded here into one row per observation. Filters take the same dimension-code map eurostat_query_dataset uses and are applied server-side by Eurostat; call eurostat_get_dataset_info first for the dimension codes and eurostat_get_dimension_values for their values. Narrow with since_period/until_period rather than asking for the most recent N periods — the TSV layout keeps a column for every period whichever is requested, so a period range is what actually shrinks the response. Transfers are bounded by a decoded-byte budget enforced while streaming: complete observations within the allowed prefix are retained with budgetExceeded set; a budget too small for a usable observation fails as byte_budget_exceeded with narrowing guidance. Only preview_limit rows come back inline. When a table is staged, call eurostat_dataframe_describe first to confirm its columns, then eurostat_dataframe_query; without a canvas, rows past the preview are not retained.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dataset_code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dataset code (e.g., \"nama_10_gdp\"). Required. A DS-* code — Comext detailed trade or PRODCOM, in any case — is served by the Comext host, which refuses an unfiltered download of its large collections as extraction_too_big: filter it, including freq on the trade flows, which mix annual and monthly series."
+          },
+          "filters": {
+            "default": {},
+            "description": "Dimension filters as a map of dimension code → array of accepted values, applied by Eurostat before the body is sent. Example: {\"unit\": [\"CP_MEUR\"], \"na_item\": [\"B1G\"], \"geo\": [\"DE\", \"FR\"]}. Omit a dimension or pass an empty array to accept every value for it; a blank or whitespace-only value is likewise unset and dropped ([\"\"] accepts every value, [\"\", \"DE\"] is [\"DE\"]). Dimension codes match in any case (\"GEO\" is geo). Do not put \"time\" here — use since_period/until_period. Naming a dimension the dataset does not have is rejected with the dataset's dimension list rather than silently ignored.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "since_period": {
+            "description": "Start of the period range, inclusive, sent as startPeriod. Accepted forms: YYYY, YYYY-MM, YYYY-MM-DD, YYYY-Qn (1–4), YYYY-Sn (1–2), YYYY-Tn (1–3), YYYY-Mnn (01–12), YYYY-Wnn (a week the year has, up to 53) or YYYY-Dnnn (a day the year has, up to 366) (e.g., \"2020\", \"2023-Q1\", \"2024-01\"). Extra leading zeros after the letter are dropped (\"2020-W001\" is sent as \"2020-W01\"), a day of the year is sent as three digits (\"2026-D1\" as \"2026-D001\"), YYYY-A1 is sent as YYYY, and a period of another frequency is mapped onto the dataset's own. A malformed or non-existent period (e.g., \"2020-13\") is rejected as invalid_period. The most effective way to shrink a bulk response: it removes period columns from the TSV rather than blanking their cells.",
+            "type": "string"
+          },
+          "until_period": {
+            "description": "End of the period range, inclusive (e.g., \"2024\"), sent as endPeriod, in the same forms as since_period. Omit for data through the latest available period. The range must hold at least one day: a since_period that starts after until_period ends is rejected as invalid_period, while pairs of different frequencies are fine (\"2020-06\" to \"2020\").",
+            "type": "string"
+          },
+          "preview_limit": {
+            "default": 50,
+            "description": "How many observations to echo inline, from the start of the download. Default 50; positive integers above 500 are clamped to 500 with a notice. The full download is on the canvas table when one was staged; this is orientation, not the result set.",
+            "type": "number",
+            "minimum": 1,
+            "multipleOf": 1
+          },
+          "canvas_id": {
+            "description": "Reuse an existing dataframe canvas so this download lands beside earlier results and can be joined against them. Pass the canvasId a previous eurostat_download_dataset or eurostat_query_dataset response returned; omit to start a fresh canvas. Ignored on deployments without a dataframe canvas. A download that carries no observations fails as no_results and leaves the canvas untouched.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10}$"
+          }
+        },
+        "required": [
+          "dataset_code"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "eurostat_dataframe_describe",
+      "description": "List the tables staged on a Eurostat dataframe canvas, with their row counts and column names and types. Call this before eurostat_dataframe_query to learn the table and column names to write SQL against. The canvas_id comes from a eurostat_query_dataset or eurostat_download_dataset response that reported a staged table. Three tools stage tables, and they write different columns, so read the columns reported here rather than assuming. The two observation stagers keep every column flat: eurostat_query_dataset gives each dimension a code column named after the dimension (e.g. \"geo\") plus a label companion (e.g. \"geo_label\"); eurostat_download_dataset gives code columns only — the bulk endpoint carries no labels — plus a \"time\" column. Both write the same five measure columns — obs_value, obs_flag, obs_flag_label, conf_status, conf_status_label — carrying the same codes for the same observation, so their tables join on dimension codes and time and compare like with like. A table staged from a DS-* dataset (Comext detailed trade, PRODCOM) adds obs_value_text, holding a value Eurostat published as text, such as a PRODCOM quantity unit. eurostat_get_dimension_values, given a canvas_id, stages one dimension's value list as two columns, code and label, which labels a download's code column through a join (e.g. d.geo = g.code).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "canvas_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10}$",
+            "description": "Canvas identifier returned as canvasId by eurostat_query_dataset, eurostat_download_dataset, or eurostat_get_dimension_values. Identifies the workspace holding the staged tables."
+          }
+        },
+        "required": [
+          "canvas_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "eurostat_dataframe_query",
+      "description": "Run a read-only SQL SELECT against tables staged on a Eurostat dataframe canvas — the way to reach observations past the 5,000-row inline cap of eurostat_query_dataset and past the inline preview of a eurostat_download_dataset bulk download, and to aggregate, group, or join across staged tables without re-fetching from Eurostat. Call eurostat_dataframe_describe first for the table and column names, which differ between the tools that stage them. Only a single SELECT statement runs: statement chaining, non-SELECT verbs, and functions that read files or external data are rejected. Columns are flat — every dimension is a code column named after the dimension, the measure is obs_value, the observation flag is obs_flag / obs_flag_label and the confidentiality marker is conf_status / conf_status_label; a \"_label\" companion per dimension exists only on tables eurostat_query_dataset staged. Both observation stagers write the same five measure columns with the same codes, so join their tables on dimension codes and time and compare obs_flag or conf_status across them directly; a DS-* table also carries obs_value_text, a value published as text (e.g. a PRODCOM unit \"KG\"). A value list eurostat_get_dimension_values staged has two columns, code and label: join it to the code column of a download (e.g. JOIN df_x g ON d.geo = g.code) to label that table. Returns complete rows within the canvas row limit and 64,000 bytes per serialized response surface, retaining at least one complete row even if oversized. Nested cells render as JSON. A cut sets truncated and adds a notice: page the same deterministic SELECT over unchanged tables with a total ORDER BY and LIMIT/OFFSET, advancing by actual rowCount; restart an unordered first page sorted at offset zero. Tied keys need tie-breakers; volatile SQL and changing or expired tables cannot provide stable paging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "canvas_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10}$",
+            "description": "Canvas identifier returned as canvasId by eurostat_query_dataset, eurostat_download_dataset, or eurostat_get_dimension_values. Identifies the workspace holding the staged tables."
+          },
+          "sql": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A single read-only SELECT statement. Reference tables by the names eurostat_dataframe_describe reports. Example: SELECT geo, geo_label, AVG(obs_value) AS mean FROM df_a1b2c3d4 WHERE time >= '2020' GROUP BY geo, geo_label ORDER BY mean DESC."
+          }
+        },
+        "required": [
+          "canvas_id",
+          "sql"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "eurostat-mcp-server",
+    "version": "0.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Eurostat MCP server — EU statistical data across the Eurostat catalogue.\nWorkflow: eurostat_search_datasets or eurostat_browse_themes to find a dataset code → eurostat_get_dataset_info to see dimensions → eurostat_get_dimension_values to list valid filter values → eurostat_query_dataset to fetch observations.\nApply dimension filters to keep queries small: an unfiltered query on a large dataset is slow and can return an async response error instead of data.\nThe catalogue covers two hosts. Most datasets come from the Eurostat dissemination table of contents; the DS-* codes — detailed trade by CN8, HS, SITC, BEC and CPA, and PRODCOM — come from the Comext host, and every tool routes a DS-* code there by its prefix. Comext collections are large: filter every request (freq included, since the trade flows mix annual and monthly series), and expect eurostat_get_dimension_values to page a long list such as the 37,069 CN8 product codes — pass filter with words of the code or label to find one value, or follow nextCursor. A collection on neither host, such as the legacy DS-056120, is not disseminated.\nTwo paths past eurostat_query_dataset's 5,000-observation inline cap. For a slice of a dataset, keep using eurostat_query_dataset: when the match is larger than the cap and this deployment runs a dataframe canvas, the whole match is also staged as a SQL table named in the response. For a whole dataset, use eurostat_download_dataset, which reads the SDMX bulk endpoint instead — about half the bytes — and stages every observation the same way, bounded by a byte budget it reports back. Read either staged table with eurostat_dataframe_query (eurostat_dataframe_describe lists the table and column names); the two stage different column sets, since the bulk endpoint carries dimension codes with no labels. To label a download's codes, pass its canvasId to eurostat_get_dimension_values as canvas_id: the dimension's values are staged beside it as a code/label table to join on.\nStaged tables expire with their canvas. eurostat_dataframe_drop removes one sooner, leaving the canvas and its other tables in place; it is opt-in, listed only where the deployment also sets EUROSTAT_DATAFRAME_DROP_ENABLED=true.\nThe dataframe tools are not listed when the canvas is off. There, narrowing the filters is what brings a capped match into reach, and eurostat_download_dataset retains only its inline preview.",
+  "durationMs": 17102,
+  "stderr": "{\"level\":30,\"time\":1792757486190,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"loggerInit\",\"requestId\":\"OI6X7-ZDB8N\",\"timestamp\":\"2026-10-23T12:11:26.189Z\",\"msg\":\"Logger initialized. MCP level: debug.\"}\n{\"level\":40,\"time\":1792757486191,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"loggerInit\",\"requestId\":\"T7J20-B6KOQ\",\"timestamp\":\"2026-10-23T12:11:26.191Z\",\"droppedLogFiles\":[{\"code\":\"ENOENT\",\"name\":\"combined.log\",\"path\":\"/pkg/logs/combined.log\"},{\"code\":\"ENOENT\",\"name\":\"error.log\",\"path\":\"/pkg/logs/error.log\"},{\"code\":\"ENOENT\",\"name\":\"interactions.log\",\"path\":\"/pkg/logs/interactions.log\"}],\"msg\":\"File logging disabled for 3 sink(s): /pkg/logs/combined.log (ENOENT), /pkg/logs/error.log (ENOENT), /pkg/logs/interactions.log (ENOENT). Point LOGS_DIR at a writable directory to restore them.\"}\n{\"level\":30,\"time\":1792757486191,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"createStorageProvider\",\"requestId\":\"AWYFG-4LIOM\",\"timestamp\":\"2026-10-23T12:11:26.174Z\",\"msg\":\"Creating storage provider of type: in-memory\"}\n{\"level\":30,\"time\":1792757486191,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"createCanvasService\",\"requestId\":\"XMB5V-S2542\",\"timestamp\":\"2026-10-23T12:11:26.175Z\",\"msg\":\"Creating DuckDB canvas provider\"}\n{\"level\":30,\"time\":1792757486191,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"msg\":\"DataCanvas initialized with provider: duckdb\"}\n{\"level\":30,\"time\":1792757486192,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"ServerInit\",\"requestId\":\"CH73E-GE3EO\",\"timestamp\":\"2026-10-23T12:11:26.192Z\",\"tools\":[\"eurostat_search_datasets\",\"eurostat_browse_themes\",\"eurostat_get_dataset_info\",\"eurostat_get_dimension_values\",\"eurostat_query_dataset\",\"eurostat_download_dataset\",\"eurostat_dataframe_describe\",\"eurostat_dataframe_query\"],\"disabledTools\":[\"eurostat_dataframe_drop\"],\"resources\":[\"eurostat-dataset-info\"],\"prompts\":[],\"msg\":\"Core services constructed — 8 tool(s) (+1 disabled: eurostat_dataframe_drop), 1 resource(s), 0 prompt(s). Storage: in-memory.\"}\n{\"level\":30,\"time\":1792757486192,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"ServerStartup\",\"requestId\":\"UKGC1-RZWEY\",\"timestamp\":\"2026-10-23T12:11:26.192Z\",\"applicationName\":\"eurostat-mcp-server\",\"applicationVersion\":\"0.0.0\",\"nodeEnvironment\":\"development\",\"msg\":\"Starting eurostat-mcp-server (v0.0.0)...\"}\n{\"level\":30,\"time\":1792757486193,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"TransportManager.start\",\"requestId\":\"XTZQ8-WKUZK\",\"timestamp\":\"2026-10-23T12:11:26.193Z\",\"transport\":\"stdio\",\"msg\":\"Starting transport: stdio\"}\n{\"level\":30,\"time\":1792757486193,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"connectStdioTransport\",\"requestId\":\"XTZQ8-WKUZK\",\"timestamp\":\"2026-10-23T12:11:26.193Z\",\"transport\":\"stdio\",\"transportType\":\"Stdio\",\"msg\":\"Attempting to connect stdio transport...\"}\n{\"level\":30,\"time\":1792757486194,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"connectStdioTransport\",\"requestId\":\"XTZQ8-WKUZK\",\"timestamp\":\"2026-10-23T12:11:26.193Z\",\"transport\":\"stdio\",\"transportType\":\"Stdio\",\"msg\":\"MCP Server connected and listening via stdio transport.\"}\n{\"level\":30,\"time\":1792757486194,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"ServerStartup\",\"requestId\":\"UKGC1-RZWEY\",\"timestamp\":\"2026-10-23T12:11:26.192Z\",\"applicationName\":\"eurostat-mcp-server\",\"applicationVersion\":\"0.0.0\",\"nodeEnvironment\":\"development\",\"msg\":\"eurostat-mcp-server is now running and ready.\"}\n{\"level\":20,\"time\":1792757486197,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"createMcpServerInstance\",\"requestId\":\"IHRXS-QT8OI\",\"timestamp\":\"2026-10-23T12:11:26.197Z\",\"msg\":\"Initializing MCP server instance\"}\n{\"level\":20,\"time\":1792757486198,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"createMcpServerInstance\",\"requestId\":\"IHRXS-QT8OI\",\"timestamp\":\"2026-10-23T12:11:26.197Z\",\"msg\":\"Registering all MCP capabilities via registries...\"}\n{\"level\":20,\"time\":1792757486198,\"env\":\"development\",\"version\":\"0.0.0\",\"pid\":1,\"operation\":\"ToolRegistry.registerAll\",\"requestId\":\"M4OHJ-G"
+}
