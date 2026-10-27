@@ -1,0 +1,451 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@boringsql/dryrun",
+  "version": "0.20.0",
+  "integrity": {
+    "dist": "sha512-kWMake9mRfwk29uVs4VNc0UHypgs12v7xdnZQEGE97XycbtZ9MLl3zlwJMLEoL5KotPfCkpBXN0cWNIG6DyiBg==",
+    "installed": "sha512-kWMake9mRfwk29uVs4VNc0UHypgs12v7xdnZQEGE97XycbtZ9MLl3zlwJMLEoL5KotPfCkpBXN0cWNIG6DyiBg=="
+  },
+  "bin": "node_modules/@boringsql/dryrun/bin/dryrun.js",
+  "main": null,
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [
+    "mcp"
+  ],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-26T12:09:20.878Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "advise",
+      "description": "One-shot review of a single query: validation and index suggestions from the snapshot, plus plan-shape advice and plan warnings when you pass plan_json -- a plan the user pasted or CI captured. Needs no database connection and executes nothing; without plan_json there is simply no plan to read. It returns corrected_sql when every unknown name has one obvious candidate; it never rewrites the query for performance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "include_index_suggestions": {
+            "default": true,
+            "description": "Include index suggestions (default true).",
+            "type": "boolean"
+          },
+          "plan_json": {
+            "description": "An EXPLAIN plan you already have, pasted by the user or captured in CI: the [{\"Plan\": ...}] array EXPLAIN (FORMAT JSON) returns, or the unwrapped {\"Plan\": ...} object. A JSON string of either is accepted too, since clients re-encode structured arguments. Read as given; advise never re-runs it.",
+            "type": [
+              "object",
+              "array",
+              "string"
+            ]
+          },
+          "sql": {
+            "description": "SQL query.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "check_migration",
+      "description": "Before any ALTER TABLE, CREATE INDEX, DROP, or other DDL reaches a database: the lock level each statement takes, whether it rewrites the table, and rollback_ddl where one applies. Tables created earlier in the same input are recognized as empty, so statements against them are not flagged for scans or rewrites they cannot cause. Where the safe form is mechanical it returns safer_sql -- the rewrite as statements to run in order, each on its own rather than wrapped in one transaction. When at least one statement is unsafe and every unsafe statement has one, migration_sql bundles the whole input as one runnable file -- unsafe statements replaced by safer_sql, safe ones passed through unchanged; it is absent otherwise, since a file that still holds an unsafe statement (including a statement type this tool cannot analyze) would be worse than no file at all. ddl may be a pasted migration file: goose (-- +goose Up/Down), dbmate (-- migrate:up/down) and tern (---- create above / drop below ----) markers are recognized, and direction (default up) picks the half to analyze; migration_sql is re-wrapped to stay runnable by that runner. Needs no database connection and applies nothing. It does not estimate wall-clock duration, and not every unsafe statement has a rewrite: a column type change or a backfill needs a batch size and a deploy order this tool cannot decide for you.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ddl": {
+            "description": "DDL statement, or a whole goose/dbmate/tern migration file.",
+            "type": "string"
+          },
+          "direction": {
+            "default": "up",
+            "description": "Which half of a migration file to check: 'up' (default) or 'down'. Plain SQL has no down section, so direction='down' errors there.",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ddl"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "describe_table",
+      "description": "Before writing SQL against a table you have not read in this session, before a JOIN, or before a DELETE that might cascade: one table in full -- its columns and types, constraints, indexes, and planner stats. Needs no database connection; answers from the snapshot, and points at detect when the table has findings. detail=relations gives the incoming and outgoing foreign keys, each with a JOIN clause you can paste and the ON DELETE / ON UPDATE action it carries (declared constraints only, one hop, so a table reached by a cascade may cascade further). detail=stats adds vacuum: dead tuples, trigger points, effective autovacuum knobs and last vacuum/analyze times, for any table over 10k rows whether or not detect flagged it. Ask for the ddl field to get the CREATE TABLE that would rebuild it, with whatever the snapshot cannot reproduce listed beside it. Structure as of the last capture: no row data, and nothing a later migration changed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "columns": {
+            "description": "Only these columns, by exact name. The way to read four columns of a wide table.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "detail": {
+            "default": "summary",
+            "description": "Detail level: 'summary' (default), 'full' (raw stats), 'stats' (profiles, stats and vacuum only), 'relations' (foreign keys on both sides, no columns).",
+            "enum": [
+              "summary",
+              "full",
+              "stats",
+              "relations"
+            ],
+            "type": "string"
+          },
+          "fields": {
+            "description": "Whitelist of sections: columns, indexes, constraints, stats, partition_info, column_profiles, comment, policies, triggers, reloptions, rls_enabled, ddl, vacuum, relations. Ask for ddl to get the CREATE TABLE.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max columns, indexes, constraints, partition children and relations per direction (default 50, 0 for all). Key, unique and indexed columns are kept past it, as are relations that cascade or clear on delete.",
+            "type": "number"
+          },
+          "schema": {
+            "description": "Schema name. Without it a bare name resolves in public, or in the one schema that holds it.",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table name, bare or schema-qualified.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "detect",
+      "description": "When a query got slow, before a tuning change, when autovacuum or dead tuples come up, or when asked what is wrong with this database: stale statistics, unused indexes, bloated indexes and tables, per-table scan anomalies, and vacuum health. kind=vacuum_health reports autovacuum_disabled, default_knobs_large_table, high_dead_tuple_ratio, vacuum_threshold_too_high, freeze_age_high and mxid_age_high, each with the dead-tuple counts and last (auto)vacuum and analyze times behind it. Every kind reports offenders only: a table with nothing wrong does not appear, here or in kind=all. For a table with no finding, describe_table detail=stats carries its raw counters and last vacuum/analyze times. Needs no database connection: findings are as fresh as the last capture, and quiet where it carries no node statistics. It reports only -- no VACUUM, no ANALYZE, no settings changed. Caveats for a finding arrive with it in _meta.hint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "default": "all",
+            "description": "Which detection to run (default: all).",
+            "enum": [
+              "stale_stats",
+              "unused_indexes",
+              "anomalies",
+              "bloated_indexes",
+              "bloated_tables",
+              "vacuum_health",
+              "all"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max entries per category (default 50, 0=all).",
+            "type": "number"
+          },
+          "schema": {
+            "description": "Schema filter; omit for all schemas.",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table filter, bare or schema-qualified.",
+            "type": "string"
+          },
+          "threshold": {
+            "default": 4,
+            "description": "Bloat ratio threshold; applies to kind=bloated_indexes, kind=bloated_tables and kind=all.",
+            "type": "number"
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "find_objects",
+      "description": "First call against an unfamiliar database, and the way to find where a name lives. With no query it inventories what exists and how big it is in production -- row estimates and table size (the heap: indexes and TOAST are not counted), partition children folded into their parent -- which the repo cannot tell you; kind= inventories views, functions or enums instead. With a query it searches names, table and column comments, index and view definitions, and enum labels, so a value like 'cancelled' finds the enum that carries it, not just an object named after it. Every hit is tagged with the field it matched (matched_on) and exact name matches rank first. Needs no database connection. Case-insensitive substring only -- no regex, no fuzzy matching, and never row data. Function bodies are not in the snapshot, so a name that appears only inside one is not findable here. One line per object: describe_table is what reads a table in full.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "Restrict to one kind. Default: tables when there is no query, every kind when there is one.",
+            "enum": [
+              "table",
+              "column",
+              "index",
+              "view",
+              "materialized_view",
+              "function",
+              "enum"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max results (default 50, 0 for all). Truncation sets _meta.next to re-run uncapped.",
+            "type": "number"
+          },
+          "offset": {
+            "default": 0,
+            "description": "Skip N results.",
+            "type": "number"
+          },
+          "query": {
+            "description": "Case-insensitive substring. Omit to inventory rather than search.",
+            "type": "string"
+          },
+          "schema": {
+            "description": "Schema filter; omit for all schemas.",
+            "type": "string"
+          },
+          "sort": {
+            "description": "Order: 'name', or 'rows'/'size' biggest first (objects that have no table sort last). Default is name without a query, match quality with one.",
+            "enum": [
+              "name",
+              "rows",
+              "size"
+            ],
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "lint_schema",
+      "description": "When reviewing a schema as a whole -- a design review, an inherited database, or the state a migration left behind: naming and convention violations plus an audit of missing keys, unindexed foreign keys, and unsafe defaults. Needs no database connection. Defaults to verbosity='summary', which returns per-rule counts only: pass verbosity='full' for the findings and their ddl_fix (not every finding has one). Whole-schema, not per-query (validate_query, advise); it applies nothing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "description": "Whitelist of sections: conventions, audit. Overrides 'scope' when set.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "schema": {
+            "description": "Schema filter; omit for all schemas.",
+            "type": "string"
+          },
+          "scope": {
+            "default": "all",
+            "description": "Scope: 'conventions', 'audit', or 'all' (default).",
+            "enum": [
+              "conventions",
+              "audit",
+              "all"
+            ],
+            "type": "string"
+          },
+          "table": {
+            "description": "Table filter, bare or schema-qualified.",
+            "type": "string"
+          },
+          "verbosity": {
+            "default": "summary",
+            "description": "Verbosity: 'summary' (counts and rule names) or 'full' (findings, examples, ddl_fix).",
+            "enum": [
+              "summary",
+              "full"
+            ],
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_top_queries",
+      "description": "When asked what this database spends its time on: captured pg_stat_statements query shapes ranked by exec time, calls, or mean. Needs no database connection; reads the local history (dryrun snapshot capture --streams query, or init's best-effort capture) and is empty when no capture carries query stats. Each entry is tagged with its reporting node and never averaged across nodes: a primary and a replica are different workloads. A node label that rotates between servers reports only the server that answered its newest capture; _meta.hint says so when the captures show it. SQL is qshape-normalized and parameterized, never the literal text or parameter values a user ran. Counters are cumulative since the last reset, not a recent-activity rate. It reports the newest capture per node and differences nothing, so it says what the corpus has cost since that reset, never what it cost this week; snapshot_diff kind=query is what differences them, and _meta.history, when present, says what the local store holds. An empty result carrying unknown: true means no capture holds query stats at all, which is not the same as a database whose statements are all cheap. Before comparing or differencing any two numbers, read _meta.hint -- it carries the caveats that decide whether they are comparable at all.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 50,
+            "description": "Max results (default 50, 0 for all).",
+            "type": "number"
+          },
+          "min_calls": {
+            "default": 2,
+            "description": "Skip entries with fewer calls than this (default 2) to filter one-shot noise.",
+            "type": "number"
+          },
+          "node": {
+            "description": "Filter to one node label. Omit to see all nodes' queries together (each entry still tagged with its own node).",
+            "type": "string"
+          },
+          "offset": {
+            "default": 0,
+            "description": "Skip N results.",
+            "type": "number"
+          },
+          "sort": {
+            "default": "total_time",
+            "description": "Sort by: 'total_time' (default, total_exec_time_ms), 'calls', or 'mean_time' (mean_exec_time_ms).",
+            "enum": [
+              "total_time",
+              "calls",
+              "mean_time"
+            ],
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "snapshot_diff",
+      "description": "When something changed and you need to know what: the schema DDL delta between two snapshots, plus planner sizing, activity, and query-shape drift correlated to the same capture window. Query deltas are per shape over that window, so their mean is comparable across captures -- unlike pg_stat_statements' own since-reset mean. Needs no database connection, but does need two snapshots in the local history. Snapshot-to-snapshot only, never against the live database (check_drift); it reports what moved, not why. Totals are a delta over the interval between the two anchors, not a rate: capture cadence is irregular, so deltas over unequal intervals do not compare. Each per-node query delta reports that interval as `window` in nanoseconds (window_minutes is a different number: how far a planner or activity capture may sit from an anchor to be correlated to it); planner and activity deltas carry no interval, so use the anchors' taken_at for those. If you divide by it: only when incomparable is empty and window is above zero, and never for an entry whose status is reset or truncated -- their delta is a cumulative counter rather than the window's work, which is why this tool leaves them out of its own totals and counts them in not_subtractable. Read caveats. A query delta's caveat_codes qualify its numbers rather than refute them: short_window (under 30 minutes), weekend (most of the window on the project's weekend days: Sat/Sun UTC unless [calendar] in dryrun.toml says otherwise) and one_off_heavy (an entry with at most 3 calls carrying at least 30% of the window's time, tagged per entry in view=full); summary.query_caveat_codes carries them in the default view. plan_shifts (both views) flags queryids whose blocks per call stepped up against the median of the three windows before this one while rows per call did not, the signature of a plan flip; it is a list of suspects ranked by excess blocks, read its `suppressed` reason and `no_baseline` count before treating an empty list as no flips, and note that a pgx/prepared workload can trip it per connection with no global flip. An activity or query delta with incomparable set was refused (one label covered two servers) and carries no rows; it is not a quiet node. _meta.history, when present, says what the local store holds per stream and over what span.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "description": "Base snapshot: 'latest~N' or a content-hash prefix. Default 'latest~1'. latest~N counts captures, not changes: a node captured while unchanged stores an identical snapshot, so an empty delta can mean nothing moved between two real captures.",
+            "type": "string"
+          },
+          "kind": {
+            "default": "schema",
+            "description": "Timeline the refs name and the headline delta; the other kinds are correlated by capture time. Use 'planner' when the schema is stable but stats/sizing moved, 'query' for pg_stat_statements drift (per shape, per node).",
+            "enum": [
+              "schema",
+              "planner",
+              "activity",
+              "query"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max objects (and raw rows in full view); 0 for all. Truncation sets _meta.next to re-run uncapped.",
+            "type": "number"
+          },
+          "node": {
+            "description": "Activity node label, when activity has multiple nodes.",
+            "type": "string"
+          },
+          "schema": {
+            "description": "Narrow to one schema.",
+            "type": "string"
+          },
+          "table": {
+            "description": "Narrow to one table. Bare names only: unlike detect and lint_schema this filter runs against the snapshots being compared, not the loaded one.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Target snapshot: 'latest' or a content-hash prefix. Default 'latest'.",
+            "type": "string"
+          },
+          "view": {
+            "default": "summary",
+            "description": "'summary' (ranked objects + counts) or 'full' (adds the raw per-row deltas).",
+            "enum": [
+              "summary",
+              "full"
+            ],
+            "type": "string"
+          },
+          "window_minutes": {
+            "default": 30,
+            "description": "Correlation window for matching planner/activity captures to each anchor (default 30).",
+            "type": "number"
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "validate_query",
+      "description": "Before proposing or running any SQL: checks it against the snapshot and reports unknown tables, unknown columns on qualified references (t.col), and anti-patterns. When every unknown name has exactly one candidate it also returns corrected_sql -- the same query with those names replaced, re-validated -- so a misspelling comes back as a patch rather than prose. Needs no database connection and never executes the query. Names and shape only: not cost, not plan, not whether any rows match (advise, explain_query).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sql": {
+            "description": "SQL query.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "dryrun",
+    "version": "v0.20.0"
+  },
+  "protocolVersion": null,
+  "instructions": "dryrun v0.20.0, PostgreSQL schema advisor. No schema loaded yet.\n\nEach tool response includes _meta.hint (prose) and may include _meta.next: an array of {tool, args} entries that are pre-validated follow-up calls — copy the args verbatim instead of inferring them from the hint. _meta.schema_captured_at, _meta.planner_captured_at and _meta.activity_captured_at say when each part of the snapshot was taken -- DDL, planner stats and per-node counters are captured by separate commands, so they age at different rates. They describe the snapshot, not a live read. Activity is the oldest node, named in _meta.activity_oldest_node. _meta.stats_pending_reschema: true marks a re-schema window: the newest schema hash has no stats capture yet, so the planner/activity timestamps shown are the prior schema's. A snapshot taken while this server runs (`dryrun snapshot capture`, `snapshot pull`) is picked up on the next tool call; nothing needs reloading.",
+  "durationMs": 5027,
+  "stderr": "dryrun: no history database — starting in uninitialized mode\ndryrun: run 'dryrun init' or 'dryrun snapshot capture'; the snapshot is picked up on the next tool call\ntime=2026-10-26T12:09:25.725Z level=INFO msg=\"offline mode: explain_query, check_drift, columnar_report not available\"\ndryrun: starting MCP server on stdio\n"
+}
