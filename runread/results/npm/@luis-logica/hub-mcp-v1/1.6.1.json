@@ -1,0 +1,1512 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@luis-logica/hub-mcp-v1",
+  "version": "1.6.1",
+  "integrity": {
+    "dist": "sha512-wQ6VXs3PdLzSTHKfL588PAZA4D3U2AFErufBNJ+Xbb9cD6PqXE9s3v/s3jAX1oNg9MxJXzfz/UD2g655L3ExMQ==",
+    "installed": "sha512-wQ6VXs3PdLzSTHKfL588PAZA4D3U2AFErufBNJ+Xbb9cD6PqXE9s3v/s3jAX1oNg9MxJXzfz/UD2g655L3ExMQ=="
+  },
+  "bin": "node_modules/@luis-logica/hub-mcp-v1/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.3.6",
+    "sdk": "1.27.1",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-27T12:51:43.213Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "search-devices",
+      "description": "Busca dispositivos GPS y sus vehículos asociados. Es el punto de entrada principal\npara identificar unidades y obtener su `imei`, `id` y `vehicleId`.\n\nCampos buscables (todos opcionales, se combinan con AND):\n- imei, idf, statusId (ej: INSTALLED), accountId, vehicleId\n- vehicle.nick (alias), vehicle.registrationPlates (placas), vehicle.brand (marca),\n  vehicle.model (modelo), vehicle.year, vehicle.fuelType (1=Diésel, 2=Gasolina, 3=Etanol),\n  vehicle.operativeStatus (1=Activo, 2=Inactivo, 3=En reparación, 4=Fuera de servicio, 5=Siniestro),\n  vehicle.groups.id (UUID de grupo)\n- solutions.solutionType (TRACKING | FUEL), solutions.active\n\nCada campo acepta un valor exacto o un operador RestQL:\n$eq, $not, $gt, $gte, $lt, $lte, $bt, $in, $nin, $contains, $starts, $ends, $or.\n\nEjemplos:\n- Por IMEI exacto: { \"imei\": \"123456789012345\" }\n- Nick que contiene texto: { \"vehicle\": { \"nick\": { \"$contains\": \"Camión\" } } }\n- Activos con solución FUEL: { \"vehicle\": { \"operativeStatus\": 1 }, \"solutions\": { \"solutionType\": \"FUEL\", \"active\": true } }\n- Varios estados: { \"statusId\": { \"$in\": [\"INSTALLED\", \"ACTIVE\"] } }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de búsqueda. Cada campo acepta un valor exacto o un operador RestQL ($contains, $in, $gt, etc.). Si se omite, devuelve todos los dispositivos con vehículo asociado."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-groups",
+      "description": "Busca y lista los grupos de vehículos de la cuenta. Los grupos permiten organizar la flota en subconjuntos (ej: por región, tipo de operación, etc.).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Filtros opcionales para la búsqueda de grupos",
+            "type": "object",
+            "properties": {
+              "name": {
+                "description": "Nombre del grupo (coincidencia exacta)",
+                "type": "string"
+              },
+              "accountId": {
+                "description": "UUID de la cuenta",
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            }
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-vehicles",
+      "description": "Busca vehículos de la flota: la unidad FÍSICA (placas, marca, modelo, tanques), no el\ndispositivo GPS. Es el punto de entrada para inventario de flota, para resolver un `nick`\no placa a su `id`/`accountId`, y para filtrar por grupo, cuenta, combustible o estado operativo.\n\nCuándo usar este tool vs otros:\n- Usa `search-vehicles` cuando partes del vehículo (placa, marca, alias) o buscas unidades\n  aunque no tengan dispositivo GPS asignado.\n- Usa `search-devices` cuando partes del dispositivo GPS (IMEI) y necesitas su telemetría/solución.\n- Usa `get-vehicle` si ya tienes el `id` y quieres solo esa unidad.\n- Usa `count-vehicles` / `count-vehicles-grouped` para cantidades o composición, sin traer la lista.\n\nQué devuelve (por vehículo, tal cual lo entrega HUB):\n- Datos base: id, vin, registrationPlates, nick, brand, model, color, year, vehicleTypeId,\n  fuelType, operativeStatus, accountId, createdById, createdAt/updatedAt/deletedAt.\n- `maxFuelCapacity`: capacidad total en litros (suma calculada de los tanques).\n- `tanks[]`: cada tanque con position, dimensiones (length/width/height/dimensions),\n  volúmenes (volume_label_full/95, volume_calc_full/95) y `sensorId`. Ese `sensorId`\n  enlaza con el sensor de un accesorio (ver `search-accessories`): así relacionas el tanque\n  físico con el sensor que mide su nivel.\n- `description[]`: traducciones de la descripción por idioma (suele venir vacío).\n\nCampos buscables (todos opcionales, se combinan con AND):\n- id, vin, registrationPlates (placas), nick (alias), brand (marca), model (modelo),\n  color, year, accountId, vehicleTypeId, createdById\n- fuelType (1=Diésel, 2=Gasolina, 3=Etanol)\n- operativeStatus (1=Activo, 2=Inactivo, 3=En reparación, 4=Fuera de servicio, 5=Siniestro)\n- devices.imei, devices.id (dispositivo GPS asociado)\n- tanks.position, tanks.volume_label_full, tanks.volume_calc_full, tanks.sensorId\n- groups.id (UUID de grupo), vehicleType.performance, account.name\n\nCada campo acepta un valor exacto o un operador RestQL:\n$eq, $not, $gt, $gte, $lt, $lte, $bt, $in, $nin, $contains, $starts, $ends, $or.\n\nEjemplos:\n- Por placas exactas: { \"registrationPlates\": \"ABC-123\" }\n- Por alias: { \"nick\": \"C-102-G\" }\n- Marca que contiene texto: { \"brand\": { \"$contains\": \"Volvo\" } }\n- Activos a diésel: { \"operativeStatus\": 1, \"fuelType\": 1 }\n- De un grupo: { \"groups\": { \"id\": \"<uuid-grupo>\" } }\n\nNota: el campo `brand`/`model` tiene datos capturados a mano en producción (variantes,\nespacios, errores de dedo). Para el conjunto real de valores usa `list-vehicle-distinct-values`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de búsqueda. Cada campo acepta un valor exacto o un operador RestQL ($contains, $in, $gt, etc.). Si se omite, devuelve todos los vehículos de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-vehicles-csv",
+      "description": "Variante de `search-vehicles` que devuelve los vehículos como CSV de texto plano en lugar de JSON — más barato en tokens para flotas grandes. Mismos filtros RestQL. No incluye `tanks[]` (usa `get-vehicle`).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-vehicles). Si se omite, incluye todos los vehículos de la cuenta."
+          },
+          "limit": {
+            "description": "Máximo de filas a devolver (primeras N). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20000
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-vehicle",
+      "description": "Obtiene UN solo vehículo por su `id` (UUID), con el mismo detalle que `search-vehicles`:\ndatos base, `maxFuelCapacity`, `tanks[]` (con `sensorId` para enlazar con su sensor) y\n`description[]`.\n\nCuándo usarlo: cuando YA conoces el `id` del vehículo (por ejemplo de `search-vehicles`,\no el `vehicleId` que devuelve `search-devices`) y solo quieres esa unidad. Es más barato\nque `search-vehicles` porque no filtra ni recorre la flota. Si no tienes el id, usa\n`search-vehicles`. Devuelve un único objeto (no un arreglo).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del vehículo a consultar."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-vehicles",
+      "description": "Cuenta cuántos vehículos cumplen un filtro, SIN traer la lista completa. Devuelve un\nobjeto `{ count: <número> }`.\n\nCuándo usarlo: para responder preguntas de cantidad ('¿cuántos vehículos activos hay?',\n'¿cuántos de la marca X?') de forma barata en tokens, cuando NO necesitas el detalle de\ncada unidad. Acepta exactamente los mismos filtros RestQL que `search-vehicles`.\nSi necesitas el desglose por categoría (cuántos por marca, estado, etc.) usa\n`count-vehicles-grouped`; si necesitas los datos de cada vehículo usa `search-vehicles`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-vehicles). Si se omite, cuenta todos los vehículos de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list-vehicle-distinct-values",
+      "description": "Lista los valores ÚNICOS de marca (`brand`) o modelo (`model`) que existen en la flota de\nla cuenta, ordenados alfabéticamente. Devuelve un arreglo de strings.\n\nCuándo usarlo: para descubrir qué marcas/modelos hay antes de filtrar (poblar un selector,\nnormalizar la entrada del usuario, o proponerle opciones válidas). Cuando `column` es\n`model`, pasa `brand` para acotar los modelos de una sola marca.\n\nImportante: estos valores se capturan a mano en HUB, así que el resultado real suele incluir\nduplicados 'sucios' (p. ej. 'FREIGHTLINER', ' FREIGHTLINER', 'FREIGLINER', 'FREIGTLINER').\nNo asumas que la lista está limpia: úsala para orientarte y, al filtrar en `search-vehicles`,\nconsidera `$contains` en lugar de igualdad exacta.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "column": {
+            "type": "string",
+            "enum": [
+              "brand",
+              "model"
+            ],
+            "description": "Columna a listar: 'brand' (marca) o 'model' (modelo)."
+          },
+          "brand": {
+            "description": "Marca por la que filtrar los modelos. Solo aplica cuando column='model'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "column"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-vehicles-grouped",
+      "description": "Cuenta vehículos AGRUPADOS por una propiedad. Devuelve un arreglo con una fila por valor\ndistinto: `[{ <propiedad>: <valor>, count: <número> }, ...]`, ordenado por count\ndescendente.\nEjemplo real agrupando por `fuelType`: [{ fuelType: 1, count: 8542 }, { fuelType: 2, count: 33 }].\n\nCuándo usarlo: para reportes de composición de flota en una sola llamada ('¿cómo se reparte\nla flota por estado operativo / combustible / marca?'), sin traer la lista ni contar una por una.\nPropiedades permitidas: brand, model, year, fuelType, operativeStatus, vehicleTypeId, accountId,\ncolor. Pasa `limit` si la propiedad puede tener muchos valores distintos.\nRecuerda decodificar los enums en la respuesta (fuelType 1=Diésel/2=Gasolina/3=Etanol;\noperativeStatus 1=Activo…5=Siniestro). Agrupar por `accountId` requiere el permiso\n`account_read` en el token.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "property": {
+            "type": "string",
+            "enum": [
+              "brand",
+              "model",
+              "year",
+              "fuelType",
+              "operativeStatus",
+              "vehicleTypeId",
+              "accountId",
+              "color"
+            ],
+            "description": "Propiedad del vehículo por la que agrupar (ej: 'brand', 'operativeStatus', 'fuelType')."
+          },
+          "limit": {
+            "description": "Máximo de filas a devolver (las de mayor count). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "property"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-accessories",
+      "description": "Busca accesorios de hardware: principalmente SENSORES (de combustible o temperatura) y otros\ncomponentes auxiliares que se instalan en los dispositivos GPS. Es el punto de entrada para\nel inventario de sensores y para relacionar un sensor con el vehículo/tanque que mide.\n\nCuándo usar este tool vs otros:\n- Usa `search-accessories` para inventario de sensores/piezas o para partir del serial/estado.\n- Usa `get-accessory` si ya tienes el `id` del accesorio.\n- Usa `count-accessories` / `count-accessories-grouped` para cantidades o composición del inventario.\n\nQué devuelve (por accesorio, tal cual lo entrega HUB):\n- Datos base: id, serial, providerInvoice (factura del proveedor), sourceDocument,\n  categoryId (p. ej. 'ULTRASONIC', 'FLOATER'), statusId, accountId,\n  createdAt/updatedAt/deletedAt.\n- `statusId`: INVENTORY (en almacén, sin instalar), INSTALLED (montado en un dispositivo),\n  DEREGISTRATION (dado de baja).\n- `deviceId`: dispositivo GPS donde está instalado (null si está en inventario).\n- `sensorId` + `sensor`: el sensor físico. `sensor.type` (1=Combustible, 2=Temperatura),\n  `sensor.technology` (1=Electrónico, 2=Ultrasónico, 3=Hall, 4=Resistivo, 5=Capacitivo,\n  6=Hidrostático), `sensor.reference` (p. ej. 'tank1' → indica QUÉ tanque mide), `sensor.size`.\n- Relación clave: `sensorId` coincide con el `tanks[].sensorId` de un vehículo (ver\n  `search-vehicles`/`get-vehicle`). Así unes el sensor con el tanque y el vehículo que monitorea.\n\nCampos buscables (todos opcionales, se combinan con AND):\n- id, serial, providerInvoice, sourceDocument\n- categoryId, statusId (INVENTORY | INSTALLED | DEREGISTRATION)\n- deviceId (dispositivo donde está instalado), accountId, sensorId\n- sensor.id, sensor.technology (1..6, ver arriba), sensor.size, account.name\n\nCada campo acepta un valor exacto o un operador RestQL:\n$eq, $not, $gt, $gte, $lt, $lte, $bt, $in, $nin, $contains, $starts, $ends, $or.\n\nEjemplos:\n- Por serial exacto: { \"serial\": \"8242474\" }\n- Instalados: { \"statusId\": \"INSTALLED\" }\n- En inventario: { \"statusId\": \"INVENTORY\" }\n- De un dispositivo: { \"deviceId\": \"<uuid-dispositivo>\" }\n- Serial que contiene texto: { \"serial\": { \"$contains\": \"824\" } }\n\nRequiere el permiso `common_accessory_read` en el token (si falta, HUB responde 403).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de búsqueda. Cada campo acepta un valor exacto o un operador RestQL ($contains, $in, $gt, etc.). Si se omite, devuelve todos los accesorios de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-accessories-csv",
+      "description": "Variante de `search-accessories` que devuelve los accesorios como CSV de texto plano en lugar de JSON — más barato en tokens para inventarios grandes. Mismos filtros RestQL. Aplana el sensor anidado. Requiere scope `common_accessory_read`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-accessories). Si se omite, incluye todos los accesorios de la cuenta."
+          },
+          "limit": {
+            "description": "Máximo de filas a devolver (primeras N). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20000
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-accessory",
+      "description": "Obtiene UN solo accesorio por su `id`, con el mismo detalle que `search-accessories`:\ndatos base, `statusId`, `deviceId`, y el `sensor` anidado (type, technology, reference, size).\n\nCuándo usarlo: cuando YA conoces el `id` del accesorio (p. ej. de `search-accessories`) y\nsolo quieres esa pieza. Es más barato que buscar. Si no tienes el id, usa `search-accessories`.\nDevuelve un único objeto (no un arreglo). Requiere el permiso `common_accessory_read`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Id del accesorio a consultar."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-accessories",
+      "description": "Cuenta cuántos accesorios cumplen un filtro, SIN traer la lista completa. Devuelve un\nobjeto `{ count: <número> }`.\n\nCuándo usarlo: para preguntas de cantidad ('¿cuántos sensores instalados hay?', '¿cuántos\nen inventario?') de forma barata en tokens, cuando NO necesitas el detalle de cada pieza.\nAcepta exactamente los mismos filtros RestQL que `search-accessories`. Para el desglose por\ncategoría usa `count-accessories-grouped`; para los datos de cada accesorio usa\n`search-accessories`. Requiere el permiso `common_accessory_read`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-accessories). Si se omite, cuenta todos los accesorios de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-accessories-grouped",
+      "description": "Cuenta accesorios AGRUPADOS por una propiedad. Devuelve un arreglo con una fila por valor\ndistinto: `[{ <propiedad>: <valor>, count: <número> }, ...]`, ordenado por count\ndescendente.\nEjemplo agrupando por `statusId`: [{ statusId: 'INSTALLED', count: 7370 },\n{ statusId: 'INVENTORY', count: 7991 }].\n\nCuándo usarlo: para reportes de inventario en una sola llamada ('¿cuántos accesorios por\nestado / por categoría?'), sin traer la lista. Propiedades permitidas: statusId, categoryId,\ndeviceId, accountId, sensorId, serial, providerInvoice, sourceDocument. Para propiedades de\nalta cardinalidad (deviceId, sensorId, serial) pasa `limit`. Agrupar por `accountId` requiere\nel permiso `account_read`; el resto requiere `common_accessory_read`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "property": {
+            "type": "string",
+            "enum": [
+              "statusId",
+              "categoryId",
+              "deviceId",
+              "accountId",
+              "sensorId",
+              "serial",
+              "providerInvoice",
+              "sourceDocument"
+            ],
+            "description": "Propiedad del accesorio por la que agrupar (ej: 'statusId', 'categoryId')."
+          },
+          "limit": {
+            "description": "Máximo de filas a devolver (las de mayor count). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "property"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-device-registry",
+      "description": "Busca dispositivos GPS por su REGISTRO ADMINISTRATIVO de hardware: estado (inventario /\ninstalado / baja), tipo de dispositivo, firmware, SIM (cellchip) y modo de reporte.\n\nDiferencia clave con `search-devices` (¡importante para elegir bien!):\n- `search-devices` (endpoint `common/`) devuelve una vista AGREGADA de la unidad:\n  device + vehículo + soluciones + accesorios, orientada a operación y telemetría.\n- `search-device-registry` (endpoint `common/device`) devuelve el registro del dispositivo\n  en sí, con campos administrativos que la vista agregada NO tiene: `idf`, `statusId`,\n  `reportType`/`reportValue`, `cellchipId`, `sourceDocument`, `firmwareId`.\n  Úsalo para inventario de hardware, altas/bajas, SIMs y ciclo de vida del equipo.\n  Si buscas la unidad operativa (con su vehículo y combustible), usa `search-devices`.\n\nQué devuelve (por dispositivo, tal cual lo entrega HUB):\n- id, imei, idf, statusId (INVENTORY | INSTALLED | DEREGISTRATION), accountId,\n  cellchipId, vehicleId, firmwareId, deviceTypeId, sourceDocument, timestamps.\n- reportType (1=Por tiempo, 2=Por distancia, 3=Por odómetro) + reportValue (intervalo).\n- Asociaciones cuando se incluyen: vehicle, cellchip, deviceType, solutions.\n- `vehicleId` null o statusId=INVENTORY indican un dispositivo sin instalar.\n\nCampos buscables (todos opcionales, se combinan con AND):\n- id, imei, idf, statusId, accountId, vehicleId, cellchipId, deviceTypeId, sourceDocument\n- reportType, reportValue, deviceType.model, account.name\n- vehicle.nick, vehicle.registrationPlates, vehicle.brand, vehicle.model, vehicle.operativeStatus, ...\n- solutions.solutionType (TRACKING | FUEL), solutions.active\n\nCada campo acepta un valor exacto o un operador RestQL:\n$eq, $not, $gt, $gte, $lt, $lte, $bt, $in, $nin, $contains, $starts, $ends, $or.\n\nEjemplos:\n- Por IMEI exacto: { \"imei\": \"123456789012345\" }\n- En inventario (sin instalar): { \"statusId\": \"INVENTORY\" }\n- Instalados que reportan por distancia: { \"statusId\": \"INSTALLED\", \"reportType\": 2 }\n- De un tipo de dispositivo: { \"deviceTypeId\": 5 }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de búsqueda. Cada campo acepta un valor exacto o un operador RestQL ($contains, $in, $gt, etc.). Si se omite, devuelve todos los dispositivos de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-device-registry-csv",
+      "description": "Variante de `search-device-registry` que devuelve los dispositivos como CSV de texto plano en lugar de JSON — más barato en tokens para parques grandes. Mismos filtros RestQL. Es el REGISTRO de hardware, no la vista agregada de `search-devices`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-device-registry). Si se omite, incluye todos los dispositivos de la cuenta."
+          },
+          "limit": {
+            "description": "Máximo de filas a devolver (primeras N). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20000
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-device",
+      "description": "Obtiene UN solo dispositivo (registro de hardware) por su `id` (UUID), con el mismo\ndetalle que `search-device-registry`: estado, tipo de reporte, cellchip, deviceType y\nvehículo asociado.\n\nCuándo usarlo: cuando YA conoces el `id` del dispositivo (p. ej. de `search-devices` →\n`id`, o de `search-device-registry`) y solo quieres ese equipo. Es más barato que buscar.\nOjo: el parámetro es el `id` (UUID), NO el IMEI; para buscar por IMEI usa\n`search-device-registry` con `{ imei }`. Devuelve un único objeto.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del dispositivo a consultar (no el IMEI)."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-devices",
+      "description": "Cuenta cuántos dispositivos cumplen un filtro, SIN traer la lista completa. Devuelve un\nobjeto `{ count: <número> }`.\n\nCuándo usarlo: para preguntas de cantidad ('¿cuántos dispositivos instalados hay?',\n'¿cuántos en inventario?') de forma barata en tokens. Acepta exactamente los mismos filtros\nRestQL que `search-device-registry`. Para el desglose por categoría usa\n`count-devices-grouped`; para los datos de cada dispositivo usa `search-device-registry`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-device-registry). Si se omite, cuenta todos los dispositivos de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-devices-grouped",
+      "description": "Cuenta dispositivos AGRUPADOS por una propiedad. Devuelve un arreglo con una fila por\nvalor distinto: `[{ <propiedad>: <valor>, count: <número> }, ...]`, ordenado por count\ndescendente.\n\nCuándo usarlo: para reportes de composición del parque de dispositivos en una sola llamada\n('¿cómo se reparten por estado / tipo / modo de reporte?'), sin traer la lista.\nPropiedades permitidas: statusId, deviceTypeId, reportType, accountId, vehicleId, cellchipId,\nfirmwareId, sourceDocument, idf. Para propiedades de alta cardinalidad (vehicleId, cellchipId)\npasa `limit` para no traer miles de filas.\nRecuerda decodificar enums en la respuesta (reportType 1=Tiempo/2=Distancia/3=Odómetro).\nAgrupar por `accountId` requiere el permiso `account_read` en el token.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "property": {
+            "type": "string",
+            "enum": [
+              "statusId",
+              "deviceTypeId",
+              "reportType",
+              "accountId",
+              "vehicleId",
+              "cellchipId",
+              "firmwareId",
+              "sourceDocument",
+              "idf"
+            ],
+            "description": "Propiedad del dispositivo por la que agrupar (ej: 'statusId', 'deviceTypeId', 'reportType')."
+          },
+          "limit": {
+            "description": "Máximo de filas a devolver (las de mayor count). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "property"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-solutions",
+      "description": "Lista las SOLUCIONES definidas en HUB (endpoint `common/solutions`). Una solución es una\ncapacidad que un dispositivo o una cuenta puede tener habilitada; es el catálogo del que\nsalen los `solutionType` que ves en `search-devices` / `search-device-registry`.\n\nQué devuelve (por solución, tal cual la entrega HUB):\n- id, solutionType (FUEL | TEMPERATURE | TRACKING | WEBSERVICE | ALERTS | RESTRANSLATOR),\n  version, active, description (traducciones), timestamps.\n- Asociaciones (devices, accounts, templates) solo si se incluyen; por defecto NO vienen.\n\nCuándo usarlo: para saber qué soluciones existen y su versión/estado. Es un catálogo\npequeño (una fila por tipo/versión), así que no necesita CSV. Para el detalle de una sola\nsolución con su `id` usa `get-solution`; para contar usa `count-solutions`.\n\nCampos buscables (todos opcionales, se combinan con AND): id, name, version, active.\nNota: el backend expone `name` como filtro aunque el tipo real viaja en `solutionType`.\nCada campo acepta un valor exacto o un operador RestQL:\n$eq, $not, $gt, $gte, $lt, $lte, $bt, $in, $nin, $contains, $starts, $ends, $or.\n\nEjemplos:\n- Solo activas: { \"active\": true }\n- Por versión: { \"version\": \"2\" }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de búsqueda. Cada campo acepta un valor exacto o un operador RestQL ($contains, $in, etc.). Si se omite, devuelve todas las soluciones."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-solution",
+      "description": "Obtiene UNA sola solución por su `id` (UUID), con el mismo detalle que\n`search-solutions`: solutionType, version, active y descripción.\n\nCuándo usarlo: cuando YA conoces el `id` de la solución y solo quieres esa. Para\ndescubrir soluciones o filtrarlas usa `search-solutions`. Devuelve un único objeto.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la solución a consultar."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-solutions",
+      "description": "Cuenta cuántas soluciones cumplen un filtro, SIN traer la lista. Devuelve\n`{ count: <número> }`. Acepta los mismos filtros RestQL que `search-solutions`.\nComo el catálogo de soluciones es pequeño, normalmente basta con `search-solutions`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-solutions). Si se omite, cuenta todas las soluciones."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-cellchips",
+      "description": "Busca SIMs / líneas celulares (cellchips) del inventario (endpoint `common/cellchip`).\nEs la SIM que va instalada en un dispositivo GPS y le da conectividad.\n\nQué devuelve (por SIM, tal cual la entrega HUB):\n- id, line (número/MSISDN), serial, iccid, imsi, plan, voice (bool), data (bool),\n  accountId, providerId (proveedor celular), timestamps.\n- Asociaciones (account, cellProvider, device) solo si se incluyen; por defecto NO vienen.\n\nRelación con dispositivos: el `cellchipId` de `search-device-registry` / `search-devices`\napunta al `id` de una SIM de aquí. Úsalo para saber qué línea/plan/proveedor usa un equipo.\n\nCampos buscables (todos opcionales, se combinan con AND):\n- id, line, serial, iccid, imsi, plan, voice, data, accountId, providerId.\nCada campo acepta un valor exacto o un operador RestQL:\n$eq, $not, $gt, $gte, $lt, $lte, $bt, $in, $nin, $contains, $starts, $ends, $or.\n\nEjemplos:\n- Por línea exacta: { \"line\": \"5215512345678\" }\n- Con datos habilitados: { \"data\": true }\n- De un proveedor: { \"providerId\": \"...\" }\n\nOJO tokens: el inventario de SIMs puede tener miles de registros. Antes de listar, corre\n`count-cellchips` con el mismo filtro; si supera ~50, usa `search-cellchips-csv` en vez de\neste tool JSON.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de búsqueda. Cada campo acepta un valor exacto o un operador RestQL ($contains, $in, etc.). Si se omite, devuelve todas las SIMs de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-cellchips-csv",
+      "description": "Variante de `search-cellchips` que devuelve las SIMs como CSV de texto plano en lugar de JSON — más barato en tokens para inventarios grandes. Mismos filtros RestQL. Requiere scope `common_cellchip_read`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-cellchips). Si se omite, incluye todas las SIMs de la cuenta."
+          },
+          "limit": {
+            "description": "Máximo de filas a devolver (primeras N). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20000
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-cellchip",
+      "description": "Obtiene UNA sola SIM/cellchip por su `id` (UUID), con el mismo detalle que\n`search-cellchips`: line, serial, iccid, imsi, plan, voice, data, accountId, providerId.\n\nCuándo usarlo: cuando YA conoces el `id` de la SIM (p. ej. del `cellchipId` de un\ndispositivo) y solo quieres esa. El parámetro es el `id` (UUID), NO el número de línea;\npara buscar por línea usa `search-cellchips` con `{ line }`. Devuelve un único objeto.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la SIM/cellchip a consultar (no el número de línea)."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-cellchips",
+      "description": "Cuenta cuántas SIMs/cellchips cumplen un filtro, SIN traer la lista completa. Devuelve\n`{ count: <número> }`.\n\nCuándo usarlo: para preguntas de cantidad ('¿cuántas SIMs con datos hay?') de forma barata,\ny como paso previo a listar: si el conteo supera ~50, usa `search-cellchips-csv` en vez de\n`search-cellchips` (JSON). Acepta los mismos filtros RestQL que `search-cellchips`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-cellchips). Si se omite, cuenta todas las SIMs de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-characterizations",
+      "description": "Busca caracterizaciones de sensores (endpoint `common/characterization`). Una\ncaracterización es la CURVA de calibración que traduce la lectura eléctrica del\nsensor (volts) al volumen/altura de combustible; es la base para convertir la\nseñal cruda del tanque en litros.\n\nQué devuelve (por caracterización, tal cual la entrega HUB):\n- id, name, type (1=Personalizada, 2=Normalizada), voltMin, voltMax, timestamps.\n- voltMin/voltMax: rango de voltaje que el SENSOR es capaz de leer al recorrer la\n  varilla de extremo a extremo (límite eléctrico del sensor), NO los extremos de la\n  curva de calibración.\n- Los puntos de la curva (`details`: pares size↔volts) NO vienen en el listado;\n  para verlos usa `get-characterization` (por id), que sí los incluye.\n\nRelación con sensores: una curva puede estar asociada a uno o varios sensores\n(los del recurso `common/accessory`); el detalle de esa relación se consulta por\nel propio HUB en /:id/sensors (no expuesto aquí).\n\nCampos buscables (todos opcionales, se combinan con AND):\n- id, name, type, volmin, volmax.\n  (Nota: el backend filtra por `volmin`/`volmax` en minúsculas, aunque la respuesta\n  trae `voltMin`/`voltMax`.)\nCada campo acepta un valor exacto o un operador RestQL:\n$eq, $not, $gt, $gte, $lt, $lte, $bt, $in, $nin, $contains, $starts, $ends, $or.\n\nEjemplos:\n- Por nombre: { \"name\": { \"$contains\": \"ABC123\" } }\n- Solo normalizadas: { \"type\": 2 }\n\nOJO tokens: puede haber miles de caracterizaciones (suele haber una por serial de\nsensor). Antes de listar, corre `count-characterizations` con el mismo filtro; si\nsupera ~50, usa `search-characterizations-csv` en vez de este tool JSON.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de búsqueda. Cada campo acepta un valor exacto o un operador RestQL ($contains, $in, etc.). Si se omite, devuelve todas las caracterizaciones de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-characterizations-csv",
+      "description": "Variante de `search-characterizations` que devuelve las caracterizaciones como CSV de texto plano en lugar de JSON — más barato en tokens para catálogos grandes. Mismos filtros RestQL. No incluye los puntos de la curva (`details`); usa `get-characterization` por id. Requiere scope `common_characterization_read`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-characterizations). Si se omite, incluye todas las caracterizaciones de la cuenta."
+          },
+          "limit": {
+            "description": "Máximo de filas a devolver (primeras N). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20000
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-characterization",
+      "description": "Obtiene UNA sola caracterización por su `id` (UUID), INCLUYENDO los `details`\n(los puntos de la curva: pares size↔volts). Es la forma de ver la curva completa.\n\nCuándo usarlo: cuando YA conoces el `id` de la caracterización (p. ej. de\n`search-characterizations`) y quieres la curva de calibración con todos sus puntos.\nPara descubrir o filtrar caracterizaciones usa `search-characterizations`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la caracterización a consultar."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-characterizations",
+      "description": "Cuenta cuántas caracterizaciones cumplen un filtro, SIN traer la lista completa.\nDevuelve `{ count: <número> }`.\n\nCuándo usarlo: para preguntas de cantidad y como paso previo a listar: si el conteo\nsupera ~50, usa `search-characterizations-csv` en vez de `search-characterizations`\n(JSON). Acepta los mismos filtros RestQL que `search-characterizations`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-characterizations). Si se omite, cuenta todas las caracterizaciones de la cuenta."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-device-types",
+      "description": "Lista los TIPOS DE DISPOSITIVO definidos en HUB (endpoint `common/device/type`): el\ncatálogo de modelos de hardware GPS (marca + modelo + protocolo + generación GSM). Es\nel catálogo del que sale `deviceTypeId` en el registro de dispositivos\n(`search-device-registry` / `count-devices`).\n\nQué devuelve (por tipo, tal cual lo entrega HUB):\n- id (NUMÉRICO), brand (marca), model (modelo), communicationProtocol, gsmVersion,\n  optionsString (opciones JSON como texto: wialonId, port, …) y timestamps.\n\nEs un catálogo pequeño (~76 tipos), pero si una búsqueda abierta puede superar 50\nfilas prefiere `search-device-types-csv` (o cuenta antes con `count-device-types`).\nPara el detalle de un solo tipo usa `get-device-type` con su `id`.\n\nCampos buscables (todos opcionales, se combinan con AND): id, brand, model,\ncommunicationProtocol, gsmVersion.\n\nCada campo acepta un valor exacto o un operador RestQL: $eq, $not, $gt, $gte, $lt, $lte, $bt, $in, $nin, $contains, $starts, $ends, $or. OJO: $ne y $like NO están soportados por este endpoint (devuelven 500).\n\nEnums: communicationProtocol → 1=TCP, 2=UDP, 3=AMQP, 4=MQTT, 5=HTTP (el catálogo actual solo usa TCP); gsmVersion → 1=2G, 2=3G, 3=4G, 4=5G, 5=SigFox, 6=IoT.\n\nPara responder \"¿cuántos dispositivos del modelo X tenemos?\": busca aquí el tipo (p. ej. query { \"brand\": \"Geotab\" }), toma su `id` y cuenta con `count-devices` ({ \"query\": { \"deviceTypeId\": <id> } }). O usa `get-device-type-summary`, que hace las dos cosas en una sola llamada.\n\nEjemplos:\n- Por marca: { \"brand\": \"Geotab\" }\n- Contiene texto: { \"model\": { \"$contains\": \"GL3\" } }\n- Solo 4G: { \"gsmVersion\": 3 }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de búsqueda. Cada campo acepta un valor exacto o un operador RestQL ($contains, $in, etc.). Si se omite, devuelve todos los tipos de dispositivo."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-device-types-csv",
+      "description": "Variante de `search-device-types` que devuelve los tipos de dispositivo como CSV\nde texto plano en lugar de JSON — más barato en tokens si el resultado es grande.\nMismos filtros RestQL. A diferencia del JSON, aplanado: incluye columnas `protocol`\ny `gsm` con etiquetas legibles (TCP, 4G…) y `wialonId`/`port` extraídos de las\nopciones del tipo.\n\nEnums: communicationProtocol → 1=TCP, 2=UDP, 3=AMQP, 4=MQTT, 5=HTTP (el catálogo actual solo usa TCP); gsmVersion → 1=2G, 2=3G, 3=4G, 4=5G, 5=SigFox, 6=IoT.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-device-types). Si se omite, incluye todos los tipos de dispositivo."
+          },
+          "limit": {
+            "description": "Máximo de filas a devolver (primeras N). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20000
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-device-type",
+      "description": "Obtiene UN solo tipo de dispositivo por su `id` (NUMÉRICO, no UUID), con el mismo\ndetalle que `search-device-types`: brand, model, communicationProtocol, gsmVersion\ny opciones.\n\nCuándo usarlo: cuando YA conoces el id del tipo (p. ej. un `deviceTypeId` que viste\nen `search-device-registry`) y solo quieres ese. Para descubrir tipos o filtrarlos\nusa `search-device-types`. Devuelve un único objeto.\n\nEnums: communicationProtocol → 1=TCP, 2=UDP, 3=AMQP, 4=MQTT, 5=HTTP (el catálogo actual solo usa TCP); gsmVersion → 1=2G, 2=3G, 3=4G, 4=5G, 5=SigFox, 6=IoT.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Id NUMÉRICO del tipo de dispositivo a consultar."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "count-device-types",
+      "description": "Cuenta cuántos tipos de dispositivo cumplen un filtro, SIN traer la lista. Devuelve\n`{ count: <número> }`. Acepta los mismos filtros RestQL que `search-device-types`.\nÚtil para responder \"¿cuántos modelos de marca X hay en el catálogo?\" de forma\nbarata en tokens.\n\nPara responder \"¿cuántos dispositivos del modelo X tenemos?\": busca aquí el tipo (p. ej. query { \"brand\": \"Geotab\" }), toma su `id` y cuenta con `count-devices` ({ \"query\": { \"deviceTypeId\": <id> } }). O usa `get-device-type-summary`, que hace las dos cosas en una sola llamada.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Criterios de filtrado (mismos campos y operadores RestQL que search-device-types). Si se omite, cuenta todos los tipos de dispositivo."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-device-type-summary",
+      "description": "Tool compuesto de tipos de dispositivo: resuelve un tipo a partir de su id, marca o\nmodelo y devuelve la ficha de cada tipo coincidente JUNTO con cuántos dispositivos\ndel registro de hardware (common/device) lo usan. Responde en una sola llamada a\n\"¿cuántos dispositivos del modelo X / marca Y tenemos?\", sin encadenar\nsearch-device-types → count-devices a mano.\n\nQué hace: resuelve el identificador (prioridad id > brand > model; si no hay\ncoincidencia exacta, prueba $contains sobre la marca/modelo), y por cada tipo\ncoincidente cuenta los dispositivos con `count-devices` ({ deviceTypeId: id }).\nDevuelve `types[]` (id, brand, model, protocol, gsm, deviceCount) y `totals`\n(tipos y dispositivos en total).\n\nSi la resolución es ambigua (varios tipos), devuelve la lista completa con el\nconteo por tipo; si no hay coincidencias, sugiere `search-device-types`.\n\nEnums: communicationProtocol → 1=TCP, 2=UDP, 3=AMQP, 4=MQTT, 5=HTTP (el catálogo actual solo usa TCP); gsmVersion → 1=2G, 2=3G, 3=4G, 4=5G, 5=SigFox, 6=IoT.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Id NUMÉRICO del tipo de dispositivo. Prioridad máxima si viene.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "brand": {
+            "description": "Marca del fabricante (ej: \"Geotab\"). Coincidencia exacta, con fallback a $contains.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Modelo del hardware (ej: \"GO9 +\"). Coincidencia exacta, con fallback a $contains.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-last-reports",
+      "description": "Obtiene los últimos reportes de combustible de los dispositivos con solución FUEL activa. Cada reporte incluye nivel de combustible, ubicación GPS, estado de ignición y velocidad. Puedes filtrar los resultados por dispositivo, cuenta, estado o vehículo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Filtros opcionales combinados. Si se omite, consulta todos los dispositivos con solución FUEL activa.",
+            "type": "object",
+            "properties": {
+              "imei": {
+                "description": "IMEI exacto del dispositivo.",
+                "type": "string"
+              },
+              "accountId": {
+                "description": "UUID de la cuenta del dispositivo.",
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "statusId": {
+                "description": "Estado del dispositivo, por ejemplo INSTALLED o INVENTORY.",
+                "type": "string"
+              },
+              "vehicle": {
+                "description": "Filtros del vehículo asociado.",
+                "type": "object",
+                "properties": {
+                  "nick": {
+                    "description": "Alias/nombre del vehículo",
+                    "type": "string"
+                  },
+                  "brand": {
+                    "description": "Marca del vehículo.",
+                    "type": "string"
+                  },
+                  "registrationPlates": {
+                    "description": "Placas del vehículo",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-device-report",
+      "description": "Obtiene el último reporte en tiempo real de un dispositivo GPS específico por su IMEI. Incluye niveles de combustible por tanque, posición GPS, velocidad, odómetro, estado de ignición y voltaje.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "imei": {
+            "type": "string",
+            "minLength": 1,
+            "description": "IMEI del dispositivo GPS a consultar"
+          }
+        },
+        "required": [
+          "imei"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-fuel-overview",
+      "description": "Obtiene el resumen de combustible (vista general) de la flota para un rango de fechas. Incluye totales de litros cargados, descargados, consumidos en ralentí y en toma de fuerza, junto con los eventos individuales de cada categoría por dispositivo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de inicio en formato ISO 8601 (ej: 2026-03-01T00:00:00.000Z)"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de fin en formato ISO 8601 (ej: 2026-03-19T23:59:59.999Z)"
+          },
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Filtros opcionales sobre los dispositivos (mismos campos y operadores RestQL que search-devices). Si se omite, se incluye toda la flota."
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-charge-evidence",
+      "description": "Obtiene las evidencias de carga de combustible (tickets, facturas) registradas para un vehículo en un rango de fechas. Cada evidencia incluye volumen cargado, costo, moneda, tipo de combustible, factura y media adjunta.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "vehicleId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID del vehículo a consultar (obtenible con search-devices como vehicleId)"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de inicio en formato ISO 8601 (ej: 2026-03-01T00:00:00.000Z)"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de fin en formato ISO 8601 (ej: 2026-03-19T23:59:59.999Z)"
+          }
+        },
+        "required": [
+          "vehicleId",
+          "start",
+          "end"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-fleet-performance",
+      "description": "Obtiene los metadatos de rendimiento de combustible de la flota para un rango de fechas. Incluye por cada dispositivo: rendimiento por distancia y por tiempo, consumo en movimiento y en ralentí, distancia recorrida, segundos operativos, cargas/descargas, y reportes esenciales de inicio y fin del período.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de inicio en formato ISO 8601 (ej: 2026-03-01T00:00:00.000Z)"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de fin en formato ISO 8601 (ej: 2026-03-19T23:59:59.999Z)"
+          },
+          "query": {
+            "description": "Filtros opcionales sobre los dispositivos. Si se omite, se incluye toda la flota con solución FUEL activa.",
+            "type": "object",
+            "properties": {
+              "imei": {
+                "description": "IMEI del dispositivo",
+                "type": "string"
+              },
+              "vehicle": {
+                "description": "Filtros del vehículo",
+                "type": "object",
+                "properties": {
+                  "brand": {
+                    "description": "Marca del vehículo",
+                    "type": "string"
+                  },
+                  "model": {
+                    "description": "Modelo del vehículo",
+                    "type": "string"
+                  },
+                  "nick": {
+                    "description": "Alias del vehículo",
+                    "type": "string"
+                  },
+                  "groups": {
+                    "description": "Grupo del vehículo",
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-device-fuel-events",
+      "description": "Obtiene la serie suavizada de eventos de nivel de combustible de un dispositivo GPS para un rango de fechas (reportes eventId: 2001): GPS, odómetro, ignición, nivel por tanque, nivel suavizado y valores intermedios del algoritmo. Útil para analizar el comportamiento del combustible a lo largo del tiempo. Formato de la salida: la PRIMERA LÍNEA es la cabecera con los nombres de columna separados por comas; cada LÍNEA SIGUIENTE es un evento, con los valores en el mismo orden, separados por comas y filas separadas por saltos de línea. Interprétalo como CSV (idealmente procesándolo con código). Usa `limit` para acotar rangos amplios (devuelve los más recientes al truncar). La respuesta de este tool es un CSV en TEXTO PLANO (NO JSON).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "imei": {
+            "type": "string",
+            "minLength": 1,
+            "description": "IMEI del dispositivo GPS a consultar"
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de inicio en formato ISO 8601 (ej: 2026-03-01T00:00:00.000Z)"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de fin en formato ISO 8601 (ej: 2026-03-19T23:59:59.999Z)"
+          },
+          "limit": {
+            "description": "Número máximo de eventos a devolver (más recientes primero al truncar). Si se omite, devuelve todos.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 5000
+          }
+        },
+        "required": [
+          "imei",
+          "startDate",
+          "endDate"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-device-fuel-summary",
+      "description": "Obtiene la información de COMBUSTIBLE de un dispositivo GPS a partir de su IMEI,\nnick o placas, en una sola llamada. Esta es la herramienta para pedir los EVENTOS\nDE COMBUSTIBLE de una unidad (serie de niveles por tanque a lo largo de un rango de\nfechas) y su estado actual, sin encadenar search-devices → get-device-report →\nget-device-fuel-events.\n\nQué hace: resuelve el identificador (prioridad IMEI > nick > placas), devuelve la\nidentidad del vehículo/dispositivo, el último reporte en tiempo real (nivel actual,\nignición, odómetro, GPS) y, si pasas start/end, la serie de eventos de combustible\ncomo CSV (campo `events.count` + `events.csv`, donde la primera línea es la cabecera).\n\nSi el identificador es ambiguo (varios candidatos), devuelve la lista corta para que\nacotes; si no hay coincidencias, indica que pruebes con search-devices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Identificador de la unidad: IMEI (solo dígitos), nick (alias) o placas del vehículo."
+          },
+          "start": {
+            "description": "Fecha de inicio del rango para traer la serie de eventos de combustible (ISO 8601, ej: 2026-07-01T00:00:00.000Z). Si se omite, se devuelve solo el estado actual.",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "end": {
+            "description": "Fecha de fin del rango para traer la serie de eventos de combustible (ISO 8601, ej: 2026-08-31T23:59:59.999Z). Requiere start.",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-zone-profiles",
+      "description": "Obtiene los perfiles de zona (geofences) registrados en la cuenta. Las zonas representan estaciones de carga de combustible u otros puntos geográficos relevantes, e incluyen coordenadas, estado de autorización para cargas/descargas y geometría WKT.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get-zone-types",
+      "description": "Obtiene el catálogo de TIPOS de zona definidos en HUB (endpoint `fuel/zones/types`): id y nombre traducido (es/en/pt) de cada tipo (caseta, sucursal, gasolinera, taller, etc.). Es el catálogo del que sale el `typeId` de los perfiles de zona (`get-zone-profiles`).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get-device-can-events",
+      "description": "Obtiene la serie de mensajes CAN bus de un dispositivo GPS para un rango de fechas.\nCada fila es una muestra del bus del vehículo: RPM, velocidad, temperatura del\nanticongelante, presión del acelerador, nivel de combustible y totalizadores del motor\n(horas de motor, tiempo de conducción/ralentí, frenadas, kickdowns, odómetro).\nÚtil para analizar el comportamiento de manejo: excesos de velocidad, RPM altas,\nralentí prolongado, frenadas bruscas y rendimiento por tramo.\n\nLos totalizadores vienen como strings con decimales fijos (ej: \"349739.000000\") y las\nlecturas sin dato como el literal \"NA\" (p. ej. con ignición apagada).\n\nFormato de la salida: la PRIMERA LÍNEA es la cabecera con los nombres de columna\nseparados por comas; cada LÍNEA SIGUIENTE es una muestra, con los valores en el mismo\norden, separados por comas y filas separadas por saltos de línea. Interprétalo como CSV\n(idealmente procesándolo con código). La respuesta es un CSV en TEXTO PLANO (NO JSON).\n\nUsa `limit` para acotar rangos amplios (devuelve las muestras más recientes al truncar).\nAntes de pedir una serie larga, considera `get-device-has-can` para saber si el dispositivo\nreporta datos CAN bus en el rango.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "imei": {
+            "type": "string",
+            "minLength": 1,
+            "description": "IMEI del dispositivo GPS a consultar"
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de inicio en formato ISO 8601 (ej: 2026-03-01T00:00:00.000Z)"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de fin en formato ISO 8601 (ej: 2026-03-19T23:59:59.999Z)"
+          },
+          "limit": {
+            "description": "Número máximo de muestras a devolver (más recientes primero al truncar). Si se omite, devuelve todas.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 5000
+          }
+        },
+        "required": [
+          "imei",
+          "startDate",
+          "endDate"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-device-has-can",
+      "description": "Verifica si un dispositivo GPS reportó datos CAN bus (RPM, velocidad, temperatura de\nmotor, etc.) en un rango de fechas. Devuelve `{ \"hasCan\": true | false }`.\n\nCuándo usarlo: para saber de forma barata si vale la pena consultar la serie completa\ncon `get-device-can-events` (que puede devolver cientos de muestras). Si `hasCan` es\n`false`, la serie vendrá vacía o llena de valores \"NA\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "imei": {
+            "type": "string",
+            "minLength": 1,
+            "description": "IMEI del dispositivo GPS a consultar"
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de inicio en formato ISO 8601 (ej: 2026-03-01T00:00:00.000Z)"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de fin en formato ISO 8601 (ej: 2026-03-19T23:59:59.999Z)"
+          }
+        },
+        "required": [
+          "imei",
+          "startDate",
+          "endDate"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-device-behavior-reports",
+      "description": "Obtiene los EVENTOS DE COMPORTAMIENTO de un dispositivo GPS en un rango de fechas\n(endpoint `analytics/fuel/devices/:imei/reports`): ralentís, tomas de fuerza (PTO) y\nmomentos en que el sensor de combustible estuvo DENTRO o FUERA de rango. Es la serie\nque alimenta la pestaña \"Comportamiento\" de la UI de HUB.\n\nCada evento trae: eventId (tipo), fecha GPS, intervalo de cambio de nivel (inicio/fin),\ndirección, nivel inicial, magnitud del cambio, consumo, segundos de ralentí\n(idleSeconds), combustible consumido en movimiento, odómetros, zona (zoneId),\nclasificación, tanques fuera de rango (outRange) y coordenadas.\n\nTipos de reporte (reportTypes, opcional; por defecto 2004,2005,2006,2007):\n2001=NIVEL (muy denso), 2002=CARGA, 2003=DESCARGA, 2004=FUERA_DE_RANGO,\n2005=DENTRO_DE_RANGO, 2006=RALENTI, 2007=PTO, 2008=CONSUMO_EXCESIVO.\n\nFormato de la salida: CSV de TEXTO PLANO (NO JSON); la PRIMERA LÍNEA es la cabecera\ny cada línea siguiente es un evento. Usa `limit` para acotar rangos amplios (al\ntruncar devuelve los MÁS RECIENTES). Para el resumen de rendimiento del mismo rango\n(horas de ralentí, consumo, etc.) usa `get-device-performance`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "imei": {
+            "type": "string",
+            "minLength": 1,
+            "description": "IMEI del dispositivo GPS a consultar."
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de inicio en formato ISO 8601 (ej: 2026-08-01T00:00:00.000Z)."
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de fin en formato ISO 8601 (ej: 2026-08-31T23:59:59.999Z)."
+          },
+          "reportTypes": {
+            "description": "Tipos de evento a incluir (números: 2004 fuera de rango, 2005 dentro de rango, 2006 ralentí, 2007 PTO, 2002 carga, 2003 descarga, 2008 consumo excesivo). Si se omite, usa el set de comportamiento: 2006,2007,2005,2004.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "limit": {
+            "description": "Número máximo de eventos a devolver (más recientes primero al truncar). Si se omite, devuelve todos.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 5000
+          }
+        },
+        "required": [
+          "imei",
+          "startDate",
+          "endDate"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-device-performance",
+      "description": "Obtiene el RENDIMIENTO de combustible de UN dispositivo GPS en un rango de fechas\n(endpoint `metadata/performances/:imei`).\n\nQué devuelve:\n- summary: resumen del período — reportFrequency, performanceTime (km/L por tiempo),\n  performanceDistance (km/L por distancia), movedPerformance (real vs\n  movedPerformanceExpected), idlePerformance (real vs expected), combustible esperado\n  en ralentí (idleFuelConsumedExpected), reportes inicial/final del período.\n- charge[]: rendimiento por cada ciclo entre cargas; operative[]: por cada tramo\n  operativo; trackingEvents[]: eventos de manejo brusco (frenado/aceleración/curva).\n- summaryTimeline[]: serie de 30 min con distancia recorrida y segundos en movimiento.\n\nCuándo usarlo: para analizar el rendimiento y el ralentí de UNA unidad en un período\n(p. ej. horas de ralentí, consumo en movimiento vs esperado). Para toda la flota usa\n`get-fleet-performance`; para los eventos puntuales (ralentís, fuera de rango) usa\n`get-device-behavior-reports`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "imei": {
+            "type": "string",
+            "minLength": 1,
+            "description": "IMEI del dispositivo GPS a consultar."
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de inicio en formato ISO 8601 (ej: 2026-08-01T00:00:00.000Z)."
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fecha de fin en formato ISO 8601 (ej: 2026-08-31T23:59:59.999Z)."
+          }
+        },
+        "required": [
+          "imei",
+          "start",
+          "end"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-accounts",
+      "description": "Busca y lista las cuentas registradas en la plataforma HUB. Las cuentas representan organizaciones o clientes que agrupan usuarios, vehículos y dispositivos. Cada cuenta tiene un nombre, estado activo/inactivo, y puede tener una cuenta padre (jerarquía). El backend exige **match exacto** en `name`, `active` y `parentId` (no acepta operadores RestQL en estos campos). Si no conoces el nombre exacto, llama al tool SIN `query` para obtener todas las cuentas (~460 en esta cuenta) y filtra localmente.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Filtros opcionales. Todos los campos son match exacto. Si se omite, devuelve todas las cuentas.",
+            "type": "object",
+            "properties": {
+              "name": {
+                "description": "Nombre EXACTO de la cuenta (match exacto; el backend rechaza $contains, $starts, etc. en este campo). Si no lo conoces, omite `query` y filtra localmente.",
+                "type": "string"
+              },
+              "active": {
+                "description": "Si la cuenta está activa (true) o inactiva (false)",
+                "type": "boolean"
+              },
+              "parentId": {
+                "description": "UUID EXACTO de la cuenta padre para buscar subcuentas (match exacto).",
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            }
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-users",
+      "description": "Busca y lista los usuarios registrados en la plataforma HUB. Cada usuario pertenece a una cuenta y tiene credenciales, nombre, correo, y una configuración personal (idioma, zona horaria, moneda, unidades de medida, precios de combustible). El backend exige **match exacto** en `username`, `email`, `givenName`, `familyName` y `accountId` (no acepta operadores RestQL en estos campos). Si no conoces el valor exacto, llama SIN `query` y filtra localmente.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Filtros opcionales. Todos los campos son match exacto. Si se omite, devuelve todos los usuarios.",
+            "type": "object",
+            "properties": {
+              "username": {
+                "description": "Nombre de usuario EXACTO (match exacto; el backend rechaza $contains).",
+                "type": "string"
+              },
+              "email": {
+                "description": "Correo electrónico EXACTO del usuario (match exacto).",
+                "type": "string"
+              },
+              "givenName": {
+                "description": "Nombre(s) EXACTO del usuario (match exacto; no $contains).",
+                "type": "string"
+              },
+              "familyName": {
+                "description": "Apellido(s) EXACTO del usuario (match exacto; no $contains).",
+                "type": "string"
+              },
+              "accountId": {
+                "description": "UUID EXACTO de la cuenta a la que pertenece el usuario.",
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            }
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-account",
+      "description": "Obtiene el detalle de una cuenta por su UUID (`GET /management/account/:id`).\nDevuelve `id`, `name`, `active`, `parentId` (jerarquía padre/hijo),\n`adminId` (cliente OAuth administrador), `createdById`, marcas de tiempo y\nconfiguración básica de la cuenta.\nRequiere que el UUID pertenezca al scope de cuentas del token OAuth\n(`payload.accounts`); si no, HUB responde con 403.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID de la cuenta (de la lista devuelta por `search-accounts`)."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-account-tree",
+      "description": "Obtiene el árbol jerárquico de cuentas subordinadas (`GET /management/account/:id/tree`).\nEl payload es recursivo: cada nodo trae sus cuentas hijas en la misma forma\n(sólo los campos devueltos por la búsqueda de cuentas: `id`, `name`,\n`active`, `parentId`, `adminId`).\nÚtil para explorar jerarquías padre/hijo (distribuidores con varias cuentas hijas).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID de la cuenta raíz del árbol."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-account-config",
+      "description": "Obtiene la configuración por defecto de una cuenta (`GET /management/account/:id/config`).\nIncluye `language`, `timezone`, `currency`, unidades (`metricVolume`,\n`metricLength`, `metricShortLength`, `metricTemperature`, `metricMass`),\n`country` y precios de combustible por tipo (`fuelPrice` con claves\n1=Diésel, 2=Gasolina, 3=Etanol).\nSi la cuenta no tiene config propia, el backend puede devolver `null`.\nEs el mismo objeto que se ve en `payload.config` del JWT para esa cuenta.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID de la cuenta."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-user",
+      "description": "Obtiene el detalle de un usuario por su UUID (`GET /management/user/:id`).\nDevuelve `id`, `username`, `email`, `givenName`, `familyName`,\n`accountId`, `createdById` y marcas de tiempo. **No** incluye permisos\nni cuenta (usa `get-user-permissions` o `get-user-account` para eso).\nRequiere que el UUID pertenezca al scope de cuentas del token; si no,\nHUB responde 403.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID del usuario (de la lista devuelta por `search-users`)."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-user-config",
+      "description": "Obtiene la configuración personal de un usuario (`GET /management/user/:id/config`).\nMisma estructura que `get-account-config` (`language`, `timezone`,\n`currency`, unidades, `country`, `fuelPrice` por tipo de combustible).\nSi el usuario no tiene config propia, HUB devuelve la de su cuenta.\nEsta es la contraparte de lectura del PUT ya existente en `user.api.ts`\n(`fetchUserConfig`).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID del usuario."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-user-account",
+      "description": "Obtiene la cuenta a la que pertenece un usuario (`GET /management/user/:id/account`).\nDevuelve el mismo objeto que devolvería un elemento de `search-accounts`\npara esa cuenta (`id`, `name`, `active`, `parentId`, `adminId`).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID del usuario."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-user-permissions",
+      "description": "Lista los permisos (scopes OAuth) asignados directamente al usuario\n(`GET /management/user/:id/permissions`).\nCada elemento trae `id`, `limit` (el scope textual, p. ej.\n`common_device_read`, `fuel_zones_read`...) y opcionalmente `scope`.\nLos scopes realmente concedidos al token viven en el JWT\n(`HubService.getGrantedScopes()`); esta lista muestra los permisos\nasignados a nivel de usuario en HUB.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID del usuario."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-active-diagnosis-fails",
+      "description": "Lista las fallas diagnósticas **activas** de la cuenta\n(`GET /diagnosis/fail`). El backend fuerza `endDate = null`,\nasí que sólo trae las que aún no fueron cerradas (`statusId`\ntípicamente `IN_REVIEW` o recién creadas).\n\nCada elemento expone `id`, `description`, `failCategory`,\n`startDate`, `endDate` (aquí siempre `null`), `vehicleId`,\n`deviceId`, `vehicle.nick`, `device.imei`, `createdById` y\n`endComment` si existe.\n\nCategorías (`failCategory`) reconocidas:\n`INTERMITTENT_ENERGY`, `OUT_RANGE_SENSORS`,\n`FAIL_ENERGY_SYSTEM`, `OFFLINE`, `MISCONFIGURATION`,\n`NO_IGNITION`, `NEEDS_REVIEW`.\n\nUsa la query RestQL (`findDiagnosisFailSchema`) para filtrar\npor IMEI del dispositivo, nick del vehículo, id de falla o\ncategoría. Operadores disponibles: `$eq`, `$not`, `$in`,\n`$nin`, `$contains`, `$starts`, `$ends`, `$gt`, `$lt`, `$bt`, `$or`.\nRequiere scope `diagnosis_fail_read`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Filtros RestQL opcionales. Si se omite, devuelve todas las fallas activas. Campos: id, failCategory, vehicle.nick, device.imei, startDate, etc."
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search-ended-diagnosis-fails",
+      "description": "Lista las fallas diagnósticas **cerradas** (`endDate != null`) en\nun rango de fechas (`GET /diagnosis/fail/finish`).\nÚtil para el histórico y reporting. A diferencia de la búsqueda de\nactivas, aquí `startDate` y `endDate` son obligatorios.\n\nFiltros opcionales: `vehicleId`, `deviceId`, `failCategory`\n(cualquiera de las categorías listadas en `search-active-diagnosis-fails`).\n\nCada elemento trae, además de los campos básicos, `endComment` y\n`endedById` (usuario que cerró la falla) si están presentes.\nRequiere scope `diagnosis_fail_read`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Inicio del rango (ISO 8601, ej: 2026-03-01T00:00:00.000Z)"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "Fin del rango (ISO 8601, ej: 2026-03-19T23:59:59.999Z)"
+          },
+          "vehicleId": {
+            "description": "UUID del vehículo (filtro exacto)",
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "deviceId": {
+            "description": "UUID del dispositivo (filtro exacto)",
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "failCategory": {
+            "description": "Categoría exacta de la falla cerrada",
+            "type": "string",
+            "enum": [
+              "INTERMITTENT_ENERGY",
+              "OUT_RANGE_SENSORS",
+              "FAIL_ENERGY_SYSTEM",
+              "OFFLINE",
+              "MISCONFIGURATION",
+              "NO_IGNITION",
+              "NEEDS_REVIEW"
+            ]
+          }
+        },
+        "required": [
+          "startDate",
+          "endDate"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-diagnosis-fail-association",
+      "description": "Obtiene una asociación específica de una falla diagnóstica por su UUID\n(`GET /diagnosis/fail/:id/:association`). Útil para inspeccionar el\nvehículo, dispositivo, sensor-Io, usuario creador o usuario que cerró\nla falla sin volver a listar todas las fallas.\n\nAssociations válidas:\n  - `account`     → cuenta asociada\n  - `vehicle`     → vehículo afectado\n  - `device`      → dispositivo afectado\n  - `sensor`      → sensor-Io asociado (si la falla lo tiene)\n  - `createdBy`   → usuario que creó la falla\n  - `endedBy`     → usuario que cerró la falla\n\nDevuelve el objeto asociado si existe, `[]` si la asociación existe\npero no trae elementos, o `null` si la falla no se encuentra / no es\naccesible.\nRequiere scope `diagnosis_fail_read`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID de la falla diagnóstica."
+          },
+          "association": {
+            "type": "string",
+            "enum": [
+              "account",
+              "vehicle",
+              "device",
+              "sensor",
+              "createdBy",
+              "endedBy"
+            ],
+            "description": "Nombre de la asociación a obtener."
+          }
+        },
+        "required": [
+          "id",
+          "association"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-activation-url",
+      "description": "Obtiene la URL de activación y el código de un solo uso para autorizar este MCP en HUB. Úsalo cuando NO haya sesión activa (por ejemplo, si un tool falla con error de autorización): devuelve el enlace de verificación y el código para que el usuario los abra/ingrese en su navegador. El MCP detecta la autorización automáticamente (pollea en segundo plano) y persiste la sesión. Si ya hay sesión, lo indica y no devuelve URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-auth-status",
+      "description": "Consulta el estado de autorización de este MCP contra HUB. Devuelve el estado (authenticated | pending | unauthenticated), el account_id y los scopes concedidos a la sesión. Si está pendiente, incluye la URL de verificación y el código para que el usuario active. Úsalo para comprobar si el usuario ya completó la activación antes de llamar a otros tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get-server-status",
+      "description": "Estado del servidor hub-mcp: versión instalada y si hay una NUEVA versión\npublicada en npmjs (paquete @luis-logica/hub-mcp-v1).\n\nQué devuelve:\n- currentVersion: versión instalada en esta máquina.\n- latestVersion: última versión publicada en npmjs (null si no se pudo consultar).\n- updateAvailable: true si hay una versión más nueva que la instalada; null si no se\n  pudo saber. Consulta npmjs en vivo (la respuesta normal del servidor usa caché de 24 h).\n- registry: endpoint npmjs consultado; packageUrl: página del paquete en npmjs.\n- checkEnabled: false si el usuario desactivó la verificación (HUB_SKIP_UPDATE_CHECK).\n\nCuándo usarlo: cuando el usuario pregunta si su hub-mcp está actualizado, o al inicio\nde una sesión para avisarle que hay una nueva versión disponible. Para el estado de la\nsesión OAuth usa `get-auth-status`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "MCP HUB",
+    "version": "1.6.1"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 10080,
+  "stderr": "[AUTH] Sin dominio HUB configurado. No se inicia el device flow automáticamente.\n       No hay dominio HUB configurado. Ejecuta `hub-mcp` (menú → 1) Dominio HUB) o define la variable de entorno HUB_DOMAIN antes de continuar.\nhub-mcp server running on stdio\n"
+}
