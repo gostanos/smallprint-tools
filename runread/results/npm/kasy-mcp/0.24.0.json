@@ -1,0 +1,1865 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "kasy-mcp",
+  "version": "0.24.0",
+  "integrity": {
+    "dist": "sha512-GJg2BVtF6VMi1rdNh4wh70DLX4anLm0K97+XOeHfPjSInxbX7QQd4fcHzQFH6cAAV/cHWAtRzdRWNMIYdkoJ2g==",
+    "installed": "sha512-GJg2BVtF6VMi1rdNh4wh70DLX4anLm0K97+XOeHfPjSInxbX7QQd4fcHzQFH6cAAV/cHWAtRzdRWNMIYdkoJ2g=="
+  },
+  "bin": "node_modules/kasy-mcp/bin/kasy-mcp.js",
+  "main": null,
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-28T12:45:30.992Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "prepare_machine",
+      "description": "Runs \"kasy doctor\" to check whether this computer is ready to build Kasy apps (Flutter SDK, Dart, Ruby/CocoaPods on macOS, and backend CLIs). Call this when the user asks to set up, prepare, or check their machine for Kasy.\n\nThis is step 1 of a loop, not a one-shot report. You are running on the user's own machine with real execution access via run_setup_command. Use it:\n\n1. Call this tool and read the report line by line.\n2. Fix ONLY what the user's intended backend needs. Do not install Firebase tooling \"just in case\":\n   - Always: Flutter, Dart, Node, FVM (and CocoaPods/Xcode tooling on macOS when relevant). FVM is best-effort: `kasy new` pins a per-project Flutter version with it when available and silently falls back to the global Flutter SDK when it's not, so don't treat a missing FVM as a blocker.\n   - Backend Firebase (or prepare \"all\" / push planned): Firebase CLI, FlutterFire, gcloud, and aligned Google logins.\n   - Backend Supabase without push: Supabase CLI + supabase login only. Do NOT install firebase-tools, flutterfire_cli, or gcloud, and do NOT demand Firebase login.\n   - Backend API without push: base env only. Same: no Firebase/gcloud unless they will enable push.\n   - Push later on Supabase/API: Firebase tools are installed when they run kasy add notifications / add_feature notifications, not during prepare.\n3. For every item that is actually missing for that scope: decide the right install/fix command for this OS yourself (Homebrew on macOS, choco/winget on Windows, apt/dnf on Linux, or the tool's own installer, e.g. \"npm install -g supabase\", and only when Firebase is in scope \"dart pub global activate flutterfire_cli\" / \"npm install -g firebase-tools\"), then call run_setup_command to actually run it.\n4. Call check_kasy_updates. If an update is available, explain briefly and call upgrade_kasy (or ask for an MCP client restart when check says so). Do not call create_project until check_kasy_updates passes after restart.\n5. Read the \"Google Cloud + Firebase login\" section ONLY when a Firebase project will be created (backend firebase, OR Supabase/API with push=true). If gcloud and Firebase are on different Google accounts in that case, stop and have the user align them before create_project: \"firebase login --reauth\" with the same email as \"gcloud auth login\". Quick Supabase/API WITHOUT push does NOT need Firebase/gcloud alignment.\n6. Call prepare_machine again to confirm. Repeat until everything required for the chosen backend passes, or until you hit something only the user can do (click a permission dialog, complete a login/auth flow, provide a value only they know). That is the one legitimate reason to stop.\n7. DO NOT stop after just diagnosing and describing what's missing. Reporting a problem without attempting to fix it is not an acceptable outcome here. You have the means to fix it; use them.\n8. Whether you fully fixed it, partially fixed it, or got stuck, call report_issue at the end: what OS this was, what was broken, and exactly what you did about it (the command that worked, or what you tried if it's still broken). This is what lets the Kasy team close real gaps in \"kasy doctor\" itself.\n9. Never fabricate a \"ready\" status. Only report success when the actual tool output says so. A machine can be ready for Supabase without Firebase CLI installed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "run_setup_command",
+      "description": "Executes ONE shell command on this machine. This is the actual \"fix it\" step for prepare_machine (and for anything else that needs a local install/config change) — the tool only runs what YOU decide is right for this OS, it does not have its own list of fixes. Use the standard package manager for the detected OS: Homebrew on macOS, choco/winget on Windows, apt/dnf on Linux, or the tool's own installer (dart pub global activate, npm install -g, ...).\n\nRules:\n1. One command per call. Chain with && only when the steps are genuinely one unit (e.g. \"brew tap x/y && brew install z\").\n2. Never use sudo or anything that needs an interactive password/admin prompt — it will hang. If a fix genuinely requires elevation, tell the user the exact command and ask them to run it themselves; do not attempt it here.\n3. Never destructive (no rm -rf, format, disk operations, shutdown/reboot). Installs and config only.\n4. After running, call prepare_machine again to confirm the fix actually worked — do not assume success from exit code alone.\n5. Once confirmed, call report_issue with resolved=true, the OS, and exactly which command fixed it. If you try reasonable fixes and it's still broken, call report_issue with resolved=false and what you tried — but only after actually trying, not as a first resort.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The exact shell command to run, e.g. \"brew install cocoapods\"."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "One sentence: what this fixes and why."
+          }
+        },
+        "required": [
+          "command",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_kasy_updates",
+      "description": "Checks whether the running kasy-mcp session and its bundled kasy-cli are behind npm latest.\n\nCall this before create_project (and after prepare_machine when the user will scaffold a new app). If an update is available:\n1. Tell the user briefly in chat (version numbers).\n2. If recommendedAction is \"upgrade_kasy\", call upgrade_kasy (not run_kasy_command — kasy upgrade is blocked inside MCP).\n3. If recommendedAction is \"restart_mcp_client\" (common with npx -y kasy-mcp), ask the user to fully quit and reopen the app where the assistant runs — any IDE or AI client with MCP (do not name a specific product unless the user mentioned theirs).\n4. Do NOT call create_project in the same session after upgrading until the user has restarted the MCP client and you have confirmed with check_kasy_updates again.\n\nNever tell users to run kasy upgrade from inside MCP — use upgrade_kasy instead. They may still run kasy upgrade in a separate terminal for a global CLI they use outside MCP.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "upgrade_kasy",
+      "description": "Runs \"npm install -g kasy-cli@latest kasy-mcp@latest\" — the same packages kasy upgrade updates in a terminal.\n\nUse when check_kasy_updates reports recommendedAction \"upgrade_kasy\". Do NOT use run_kasy_command for upgrade (blocked inside MCP).\n\nIf check_kasy_updates says restart_mcp_client only (typical for npx installs with no global kasy-mcp), skip this tool and ask for a client restart instead.\n\nAfter a successful install, ask the user to fully quit and reopen the app where the assistant runs (IDE or AI client with MCP). That reloads the MCP server with the new version. Do NOT call create_project in this same chat session — wait until they are back after restart, run check_kasy_updates again, then create_project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_project",
+      "description": "Scaffolds a new Kasy app by running \"kasy new\" locally. Call this when the user asks to create/start/scaffold a new app or project with Kasy.\n\nSTEP ZERO — mandatory, before prepare_machine, before check_kasy_updates, before AskQuestion for directory/backend, before anything else in this description: tell the user there are two ways to create the project, and let them pick. Do not skip straight to backend/region questions.\n- Rápido (this tool, via chat): few questions (pasta, backend, região, push), full default feature set except Drive. Recommended for almost everyone.\n- Avançado (terminal only, \"kasy new\"): picks every feature one by one. Only worth it if they want to leave specific features out from the very first commit.\nEither way, features can be added or removed later — add_feature/remove_feature here in chat, or kasy add/kasy remove in the terminal. Choosing Rápido never locks anything in. If they pick Avançado, tell them to run \"kasy new\" in a terminal and stop here (this tool cannot do it — no interactive mode over MCP). Only proceed past this point once they picked Rápido.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nBefore the first create_project in a session: prepare_machine → check_kasy_updates → (upgrade_kasy + client restart if needed). If the user already has a license key, configure_license first to avoid a failed scaffold.\n\nHow to gather preferences before scaffolding (once they picked Rápido, per STEP ZERO above):\n- Cursor / quiz-capable clients (required): use AskQuestion step by step, then call create_project with directory, backend, region, and push when Supabase/API. Never call without directory and backend. Never set useElicitationForm.\n- Clients without quiz UI: call create_project with useElicitationForm: true and missing directory/backend to open the MCP form. Never use useElicitationForm in Cursor.\n- Do NOT paste a long numbered markdown questionnaire in chat.\n- Do NOT ask about Google Sign-In on Supabase/API Quick. Google is ON by default, independent of push (see below).\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nThis tool only runs \"kasy new --yes\" (Rápido). It cannot run the Avançado wizard.\n\nFields you can pass after the user answers (or from elicitation):\n- directory: folder name (it is also the app name). If the user has no name yet, don't block: suggest a placeholder and say it can be changed later with rename_app (name anytime; store ID only before the first App Store / Google Play upload).\n- backend: firebase | supabase | api\n- region: us | brazil | europe (Quick Supabase/API; default us when omitted)\n- push: true = push + free Firebase FCM companion (Quick Supabase/API only; default false). With push, Google OAuth can be minted automatically on that companion.\n- noGoogle: true = email-only auth (pass --no-google). Default false: Google Sign-In is included on every backend. On Supabase/API without push, OAuth Client ID/Secret + enabling the provider on Supabase Auth come later via configure_google_login.\n- firebaseProjectId: existing Firebase project (firebase backend, or push companion)\n- configureLater: true = skip connecting a real Firebase/Supabase project now (no gcloud/Firebase-CLI/Supabase-CLI needed). The app is scaffolded with the chosen backend's code but runs in preview mode: navigable end-to-end, no real accounts/data, social sign-in shows a \"connect the backend\" toast. Call configure_backend whenever the user is ready to connect the real project — it runs the same setup this flag skipped. Ignored for backend \"api\" (no CLI-managed project to defer). Default false.\n\nDo NOT pass a custom module list here. Quick preset is fixed (everything public except Drive). Use kasy new in terminal (Advanced) or add_feature after create for module changes.\n\nSupabase/API Quick — push question only (never ask Google separately; Google defaults ON):\n- push=false (default): no Firebase companion. Google still in the scaffold; wire credentials later with configure_google_login (enables the provider on Supabase Auth).\n- push=true: free Firebase companion for FCM + push module; Google OAuth/SHA-1 can be configured automatically in that setup and registered on Supabase Auth.\n\nGoogle account alignment: required when a Firebase project is created (backend firebase, OR Quick Supabase/API with push=true). Run prepare_machine first and fix mismatched gcloud/Firebase logins. Quick Supabase/API WITHOUT push does NOT need Firebase/gcloud.\n\nVersion check (required): call check_kasy_updates before create_project. If an update is available, explain briefly, then call upgrade_kasy (or ask for an MCP client restart when check_kasy_updates says so). Do NOT call create_project until check_kasy_updates passes after the user has restarted the app where the assistant runs. Never use run_kasy_command upgrade — use upgrade_kasy.\n\nWithout push, after create: use configure_google_login (or kasy google) to paste OAuth Web Client ID/Secret and enable Google on Supabase Auth. Do not create a Firebase companion just for Google.\n\nLicense: collect the key as plain text in chat (not AskQuestion multiple choice). Call configure_license before create_project when the user already has a key; otherwise after create fails for missing license.\n\nRuns kasy new in the BACKGROUND and returns in a few seconds with pid + log path. Poll create_project_status until status is ready or failed. If the MCP client returns timeout -32001, call create_project_status before retrying create_project.\n\nIn Cursor, pass parentDirectory as the workspace root so the project is not created under the MCP process home directory.\n\nIf the command fails for any other reason, read the error output and fix it — run_setup_command, permissions, etc. Retry after fixing. Only call report_issue when genuinely stuck.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Folder name/path to create the project in. Required before calling (collect via AskQuestion)."
+          },
+          "parentDirectory": {
+            "type": "string",
+            "default": ".",
+            "description": "Directory where the project folder will be created. In Cursor, pass the workspace root so the app is not scaffolded under the MCP home directory."
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "firebase",
+              "supabase",
+              "api"
+            ],
+            "description": "Which backend to scaffold. Required before calling (collect via AskQuestion)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "firebaseProjectId": {
+            "type": "string",
+            "description": "Existing Firebase project ID. Used when backend is \"firebase\", or as companion for Supabase/API push."
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "us",
+              "brazil",
+              "europe"
+            ],
+            "description": "Cloud region preset for Quick Supabase/API. Default us. Ignored for Firebase backend."
+          },
+          "push": {
+            "type": "boolean",
+            "description": "Quick Supabase/API: true = push + free Firebase FCM companion. With companion, Google OAuth can be minted automatically. Default false (no companion; Google still in scaffold)."
+          },
+          "noGoogle": {
+            "type": "boolean",
+            "description": "Email-only auth (pass --no-google). Default false: Google Sign-In is included. On Supabase/API without push, OAuth credentials are configured later via configure_google_login."
+          },
+          "skipVersionCheck": {
+            "type": "boolean",
+            "description": "Skip the built-in version gate. Only use when the user explicitly accepts creating on an older Kasy version."
+          },
+          "configureLater": {
+            "type": "boolean",
+            "description": "true = scaffold the app without connecting a real Firebase/Supabase project yet (preview mode). Connect it later with configure_backend. Ignored for backend \"api\". Default false."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_project_status",
+      "description": "Checks whether a background create_project is still running, finished successfully, or failed.\n\nUse this after create_project returns status \"running\", or when the MCP client timed out (-32001) but you are not sure whether kasy new finished.\n\nPass parentDirectory + directory (same as create_project) or projectPath to check a specific folder. Defaults to the last MCP create session.\n\nStatuses:\n- running: kasy new still going (see logTail)\n- ready: kit_setup.json exists at projectPath\n- failed: process exited without a valid project\n- none: no session and no kit_setup.json at the path",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "description": "Folder name used with create_project (combined with parentDirectory)."
+          },
+          "parentDirectory": {
+            "type": "string",
+            "default": ".",
+            "description": "Parent folder where the project is being created. Same value as create_project."
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "Absolute or relative path to the project folder. Overrides directory + parentDirectory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_license",
+      "description": "Saves and validates the user's Kasy license key (from kasy.dev) so gated commands stop failing.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nFor the license key: collect as plain text in chat (XXXX-XXXX-XXXX-XXXX), not AskQuestion multiple choice. Never invent or reuse keys from other conversations. Required before calling. Clients without quiz UI: useElicitationForm: true.\n\nKey arrives by email after purchase at kasy.dev, not from a dashboard.\n\nDevice transfer: returns isDeviceMismatch if key is on another machine. Only retry with confirmTransfer:true after explicit user yes in chat.\n\nTransfer cooldown: isTransferLocked when transfers are too frequent (escalating wait: 24h, 48h, 4d, up to 14d). Do not retry with confirmTransfer. Use the server message for the next available time.\n\nIf it fails for other reasons, fix and retry. Only call report_issue when stuck.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "License key as the user gave it. Required before calling (collect via AskQuestion)."
+          },
+          "confirmTransfer": {
+            "type": "boolean",
+            "description": "Set true ONLY after the user explicitly confirmed moving the license from another device."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_features",
+      "description": "Runs \"kasy features\" to show every feature the kit ships with and, when run inside an existing project, which ones are already installed. Call this before add_feature so you offer the user real, valid feature names instead of guessing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "add_feature",
+      "description": "Runs \"kasy add <feature>\" inside an existing Kasy project.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nIf feature name unclear: call list_features first, then use AskQuestion. Clients without quiz UI: useElicitationForm: true.\n\nPlaceholder credentials used where needed; user may configure later.\n\nFor notifications on Supabase/API: optional firebaseProjectId for existing FCM companion.\n\nIf this fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Feature id, e.g. ai_chat, revenuecat. Required before calling (collect via AskQuestion)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the existing Kasy project. Defaults to the current directory."
+          },
+          "firebaseProjectId": {
+            "type": "string",
+            "description": "Only when feature is notifications on Supabase/API: existing Firebase project ID for FCM companion."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "remove_feature",
+      "description": "Runs \"kasy remove <feature> --yes\" inside an existing Kasy project.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nIf feature name unclear: call list_features first, then use AskQuestion. Clients without quiz UI: useElicitationForm: true.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Feature id to remove. Required before calling (collect via AskQuestion)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the existing Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_flows",
+      "description": "Runs \"kasy add flows\" (no id) to list every Kasy Flows catalog item (screens and multi-screen flows) available to install. Call this before add_flow so you offer the user real, valid flow ids instead of guessing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "add_flow",
+      "description": "Runs \"kasy add flows <id>\" inside an existing Kasy project — uses the project's own design system (context.colors, KasySpacing, KasyRadius, real Kasy components). Flows is Kasy-only: the target project must have been created with \"kasy new\" (kit_setup.json present). Plain Flutter projects aren't supported and the command fails with a clear error if run outside a Kasy project.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nIf flow id unclear: call list_flows first, then use AskQuestion. Clients without quiz UI: useElicitationForm: true.\n\nCopies the flow's screen(s) into lib/features/<id>/. It does not add a route or an entry point (home button, menu item, etc.) — after installing, ask the user where the screen(s) should be reachable from and wire that up yourself in their router.\n\nIf this fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "flowId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Flow id from the Kasy Flows catalog, e.g. home-smart-room, pet-tracker-map. Required before calling (collect via AskQuestion or list_flows)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the existing Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_status",
+      "description": "Runs \"kasy status\": backend, installed features, **Auth by platform** (web/iOS/Android per provider), credentials overview, and CLI update hints (read-only).\n\nAuth social is per platform (web / iOS / Android). Never say \"Authentication is ready\" without quoting the Auth by platform section from this output.\n\nFor \"what is left to configure?\" or login/social/web questions, also run:\n1. configure_status → missing API keys\n2. run_kasy_command with command \"doctor\" → iOS entitlements, Apple web flag, Google SHA-1, release signing\n\nVisible login button on web ≠ working login (Apple/Facebook show a setup toast until configured).\n\nGolden rule: qualify every auth provider by platform. Web column matters when the user tests in the browser.\n\nDo not confuse with:\n- configure_status → missing API keys / credentials for RevenueCat, Stripe, Sentry, ads, etc. (\"kasy configure --status\")\n- check_project → push/FCM and other config diagnostics (\"kasy check\", optional --fix)\n\nAlso reports if kit improvements are available for the project (based on the CLI version the project was last updated with vs the changelog) — if so, call update_project (omit \"feature\" to just see what's new) before applying anything.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_project",
+      "description": "Runs \"kasy check\" (optionally with --fix) to diagnose project configuration issues such as missing FCM / push setup.\n\nDo not confuse with:\n- check_status → \"kasy status\" (features, backend, **auth per platform**, license overview)\n- configure_status → \"kasy configure --status\" (missing third-party API keys)\n- fix_project → \"kasy fix\" (pub get / pods / flutter clean), not push config\n\nFor login/social/web readiness, prefer check_status (auth matrix) + run_kasy_command doctor over check_project alone.\n\nUse fix=true only when the user wants automatic repairs (generates missing FCM key, deploys missing functions). Prefer fix=false first to report what is wrong.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fix": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, runs \"kasy check --fix\"."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_status",
+      "description": "Runs \"kasy configure --status\" (read-only). Lists which credentials are missing (RevenueCat, Stripe, Sentry, ads, drive, App Store ID, etc.).\n\nDo not confuse with check_status (features/backend/**auth per platform**/license) or check_project (push/FCM diagnostics).\n\nFor \"what is left?\" on login/social/web, run check_status (auth matrix) and run_kasy_command doctor — not configure_status alone.\n\nAfter status, use configure_project_keys with the values the user provides (same as kasy configure --set KEY=VALUE). Facebook login uses configure_facebook_login; Google Sign-In on Supabase uses configure_google_login; Apple web uses configure_apple_web.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_project",
+      "description": "Runs \"kasy update [feature]\" to pull newer kit code into an existing project (the CLI overwrites files and reports what changed; it does not merge). Call this when the user asks to update their project, or update a specific part of it (e.g. \"update components\", \"update revenuecat\"). Omit \"feature\" first to see what's actually new (safe, read-only) before applying anything.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nBefore calling with a feature: check git status. If dirty, use IDE quiz (yes/no) to ask whether to commit first, not a markdown lecture.\n\n\"backend\" backfills SQL migrations + Edge Functions / Cloud Functions + firestore.rules (additive). Suggest when backend-side fixes are missing. Does not deploy — remind deploy_backend afterward.\n\n\"web\" updates kit web scripts in web/index.html.\n\nAfter it runs, reconcile user customizations on overwritten files. Use IDE quiz for ambiguous merge decisions.\n\nIf the command itself fails, fix and retry before report_issue.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "string",
+            "description": "Specific target to update, e.g. \"core\", \"components\", \"backend\", \"web\", \"revenuecat\". Omit to see what is available to update."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_backend",
+      "description": "Runs \"kasy deploy\" for the project.\n\nRouting follows kit_setup.json backendProvider. Supabase projects still have firebase.json for FCM push, but deploy targets Supabase (db push + edge functions), not the full Firebase Cloud Functions pipeline.\n\nFirebase: call after create_project with a Firebase backend BEFORE the first run_app (anonymous auth + functions need a deploy first). Can take several minutes.\n\nSupabase: initial deploy usually ran during create_project. Call again after kasy add drive/ai_chat/stripe or when the user asks to redeploy. Typically finishes in under a few minutes (migrations + edge functions), not a 20-minute Firebase wait.\n\nOptional firebaseProjectId maps to --project (Firebase backend only).\n\nIf the CLI prompts interactively for a Firebase project ID (stdin closed in MCP), deploy fails. Pass firebaseProjectId when known, or ask the user to run kasy deploy in a terminal for the first Firebase deploy.\n\nIf login / project selection is missing, the CLI may cancel interactively. Treat cancel or empty deploy as failure; do not claim success from exit code alone.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "firebaseProjectId": {
+            "type": "string",
+            "description": "Firebase project ID (--project). Only when needed."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_backend_status",
+      "description": "Checks whether a background deploy_backend is still running, finished successfully, or failed.\n\nUse this after deploy_backend returns status \"running\", or when the MCP client timed out (-32001) but you are not sure whether kasy deploy finished.\n\nStatuses:\n- running: kasy deploy still going (see logTail)\n- ready: deploy finished with exit code 0\n- failed: deploy exited with a non-zero code\n- unknown: the deploy ended while the MCP server was restarting, so its exit code was not recorded; read logTail to tell success from failure before re-running\n- none: no session for this project",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Same value as deploy_backend."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_backend",
+      "description": "Runs \"kasy backend\" for a project created with backend setup deferred (create_project's \"configure later\" path, or \"kasy new --configure-later\"). Only meaningful when kit_setup.json has backendConfigured: false — check with check_project or check_status first if unsure.\n\nRuns the same prompts create_project runs for \"configure now\": creates/links the real Firebase or Supabase project, writes real credentials, flips kBackendConfigured to true in the app, and runs the first deploy. No-ops (with a message) for backendProvider \"api\" — there's no CLI-managed project to connect, the app already points at the user's own server.\n\nDoes NOT replay every create_project automation (Google/Apple OAuth client minting, Android SHA-1, a push/FCM satellite project) — those stay available afterwards via their own tools/commands once the backend is connected.\n\nCan take several minutes (same duration as create_project's backend setup — Firebase project creation especially). If it fails partway, nothing is lost: the project stays in preview mode and this tool can simply be called again.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "run_app",
+      "description": "Starts \"kasy run\" in the BACKGROUND and returns when Flutter looks ready (or after a timeout). Use this when the user asks to run / start / open / launch the app.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nUse AskQuestion for platform (ios | android | web), then call with platform set. Clients without quiz UI: useElicitationForm: true. Do not guess platform.\n\nWeb options (only when platform=web):\n- Default: print localhost URL only\n- openBrowser=true: default OS browser when ready (--open-browser)\n- flutterChrome=true: isolated Flutter Chrome (--open)\n- freshStorage=true: wipe web storage on open (--fresh)\n\nNever call without platform. Interactive device pick does not work over MCP (stdin is closed).\n\nThis tool does NOT use run_kasy_command for \"kasy run\".\n\nReturns: pid, log path (.kasy/mcp-run.log), ready flag, and for web the http://localhost:5555 URL (or custom webPort).\n\nIf a previous mcp run is still alive for this project, stop_app first (or tell the user it is already running). stop_app only works for run_app sessions, not manual terminal runs.\n\nIf it fails, fix it yourself (run_setup_command / investigate the log) and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ],
+            "description": "Where to run. Required before calling (collect via AskQuestion)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "openBrowser": {
+            "type": "boolean",
+            "default": false,
+            "description": "Only for web: true = kasy run --web --open-browser (default OS browser when Flutter is ready)."
+          },
+          "flutterChrome": {
+            "type": "boolean",
+            "default": false,
+            "description": "Only for web: true = kasy run --web --open (isolated Flutter Chrome, no extensions)."
+          },
+          "freshStorage": {
+            "type": "boolean",
+            "default": false,
+            "description": "Only for web: true = kasy run --web --fresh (clear localStorage when opening or in the printed URL)."
+          },
+          "webPort": {
+            "type": [
+              "string",
+              "number"
+            ],
+            "description": "Web port (default 5555). Keep stable so Firebase Auth sessions persist."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Optional Flutter device id (-d). Overrides ios/android auto-pick when set."
+          },
+          "prod": {
+            "type": "boolean",
+            "default": false,
+            "description": "Use production dart-defines from launch.json (--prod)."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "reload_app",
+      "description": "Hot reload or hot restart a running `kasy run --web` session via the dev bridge (same as the device-preview toolbar r/R buttons).\n\nALWAYS call this after you finish Dart edits when the app is already running — do NOT ask the user to press r in a terminal.\n\n| action | When |\n| --- | --- |\n| reload (default) | UI, layout, colours, text, icons, style |\n| restart | logic, provider, route, initState, main(); or reload failed |\n\nWorks for sessions started manually in a terminal or via run_app. Requires `kasy run --web` (dev bridge on webPort+1). Web only today.\n\nIf no session is running, call run_app (platform=web) first. If reload returns needsRestart, call again with action=restart.\n\nDo NOT use run_kasy_command for this.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "reload",
+              "restart"
+            ],
+            "default": "reload",
+            "description": "reload = hot reload (r). restart = hot restart (R)."
+          },
+          "webPort": {
+            "type": [
+              "string",
+              "number"
+            ],
+            "description": "Web port (default 5555). Bridge listens on webPort + 1."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          },
+          "autoRestartOnReloadRejected": {
+            "type": "boolean",
+            "default": true,
+            "description": "When action=reload and Flutter rejects hot reload, automatically try restart once."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "clear_web_storage",
+      "description": "Wipes localhost dev storage for the Kasy web server and reloads the page.\n\nRuns \"kasy clear-web\" — opens http://localhost:{port}/?kasy_clear_storage=1 in the user's DEFAULT browser (macOS open, Windows start, Linux xdg-open). Clears localStorage, sessionStorage, and IndexedDB (Firebase Auth sessions on web live in IndexedDB, not only localStorage).\n\nRequires the app to already be running (kasy run --web / run_app platform=web). If not running, start it first.\n\nUse when the user asks to clear the browser, reset web storage, test onboarding/first visit again, or wipe localhost dev prefs without reinstalling. After clearing, device preview should be on an iOS/Android/iPad tab (not Desktop) to follow the native onboarding flow.\n\nDo NOT use Puppeteer or a second Chrome window — this targets the user's normal browser.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webPort": {
+            "type": [
+              "string",
+              "number"
+            ],
+            "description": "Web port (default 5555)."
+          },
+          "webHostname": {
+            "type": "string",
+            "description": "Web hostname (default localhost)."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "stop_app",
+      "description": "Stops a \"kasy run\" session previously started by run_app (reads .kasy/mcp-run.json and signals the pid). Call this when the user asks to stop / kill / quit the running app, or before starting a new run_app on a different platform.\n\nDoes NOT stop a kasy run session the user started manually in a terminal (no mcp-run.json). Tell the user to Ctrl+C that terminal.\n\nreload_app works for manual terminal web runs; stop_app only tracks run_app sessions.\n\nDoes nothing harmful if no session is recorded. Prefer this over killing random flutter processes by hand.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "reset_app",
+      "description": "Runs \"kasy reset --yes\" to uninstall (and usually reinstall) the app on a simulator/emulator so the user can test first-launch flows again (onboarding, push permission, ATT, Face ID). Call this when the user asks to reset / wipe / test from zero / clear app data on device.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nUse AskQuestion for platform (or pass deviceId). Clients without quiz UI: useElicitationForm: true.\n\nWeb (platform=web): runs \"kasy reset --web\" (clear-web). Requires kasy run --web running. For full wipe while starting, use run_app with freshStorage=true.\n\n--yes is always passed. If multiple devices match, pass deviceId from flutter devices.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ],
+            "description": "Target platform. Required unless deviceId is set (collect via AskQuestion)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "deviceId": {
+            "type": "string",
+            "description": "Specific Flutter device id (-d)."
+          },
+          "reinstall": {
+            "type": "boolean",
+            "default": true,
+            "description": "If false, only uninstall (--no-reinstall). Ignored on web."
+          },
+          "webPort": {
+            "type": [
+              "string",
+              "number"
+            ],
+            "description": "Web port for platform=web (default 5555)."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_primary_color",
+      "description": "Runs \"kasy color\" to update brand/primary in lib/core/theme/colors.dart (light and dark). Call this when the user asks to change the primary / brand / accent color of the app.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nUse AskQuestion for hex color, or pass primary/primaryLight/primaryDark. Clients without quiz UI: useElicitationForm: true.\n\n- primary alone: same hex for light and dark\n- primaryLight / primaryDark: per theme (Figma defaults often #0553B1 light, #2563EB dark)\n\nAfter success: web session → reload_app (or run_app platform=web). iOS/Android → user presses r/R in the kasy run terminal (reload_app is web-only today).\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "primary": {
+            "type": "string",
+            "description": "Hex for both themes, e.g. \"#0553B1\". Ignored if primaryLight/primaryDark are set."
+          },
+          "primaryLight": {
+            "type": "string",
+            "description": "Hex for light theme primary."
+          },
+          "primaryDark": {
+            "type": "string",
+            "description": "Hex for dark theme primary."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "rebrand_project",
+      "description": "Guided rebrand of the whole visual identity: color, icon, splash, favicon, typography and notification copy. The detailed, cloud-hosted instructions come back from this tool itself: CALL IT FIRST with no arguments (or with whatever the user already gave) and follow the playbook it returns: ask the intake questions one at a time (brand document? logo? typeface or a suggestion? Figma/Pen file?), build a preview, show it, and only after the user says yes call it again with confirmed: true.\n\nIf the user has or wants a Figma or Pen file, pass designTool (\"figma\" or \"pen\") to also load that workflow. Without confirmed: true this tool changes nothing. With confirmed: true it runs the same \"kasy\" commands as set_primary_color, set_icon, set_splash, set_favicon and set_notification_texts, in that order. A failing step does not stop the others; the result lists each step with its exit code.\n\nInputs (all optional groups; pass only what the user gave): color primary (both themes) or primaryLight + primaryDark (hex); icon (PNG path); splashLight + splashDark (both together); favicon (+ faviconRadius 0-50); demoTitle, demoBody, reminderTitle, reminderBody (all four together). Typography changes are code edits described in the playbook, not an input here. The app display name is not changed by this tool.\n\nAfter success: web session -> reload_app; iOS/Android -> the user presses r/R in the kasy run terminal.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "primary": {
+            "type": "string",
+            "description": "Hex for both themes, e.g. \"#0553B1\"."
+          },
+          "primaryLight": {
+            "type": "string",
+            "description": "Hex for light theme primary."
+          },
+          "primaryDark": {
+            "type": "string",
+            "description": "Hex for dark theme primary."
+          },
+          "icon": {
+            "type": "string",
+            "description": "Path to the app icon PNG."
+          },
+          "splashLight": {
+            "type": "string",
+            "description": "Dark logo PNG for the light splash."
+          },
+          "splashDark": {
+            "type": "string",
+            "description": "Light logo PNG for the dark splash."
+          },
+          "favicon": {
+            "type": "string",
+            "description": "Path to the favicon PNG."
+          },
+          "faviconRadius": {
+            "type": "string",
+            "description": "Favicon corner radius as % of the shorter side (0-50)."
+          },
+          "demoTitle": {
+            "type": "string"
+          },
+          "demoBody": {
+            "type": "string"
+          },
+          "reminderTitle": {
+            "type": "string"
+          },
+          "reminderBody": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "pt",
+              "en",
+              "es",
+              "all"
+            ],
+            "default": "all",
+            "description": "Which i18n files get the notification copy."
+          },
+          "designTool": {
+            "type": "string",
+            "enum": [
+              "figma",
+              "pen"
+            ],
+            "description": "Load the full Figma or Pen workflow playbook (file links, token mapping, common mistakes). Use when the user has, or wants to start from, a Figma/Pen file."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "true ONLY after the user approved the preview. Without it nothing is applied."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "rename_app",
+      "description": "Changes the app NAME everywhere it was written by kasy new: home-screen label (Android/iOS), web tab and PWA, in-app title, onboarding mockup, kit_setup.json, README, plus the Dart package and the Android push channel derived from it (they must follow the name or later \"kasy add/update\" break). Optionally also changes the store ID (bundle ID / applicationId, e.g. com.meuapp.app) and re-registers it in Firebase automatically. Use when the user says things like \"troca o nome do app\", \"o app agora se chama X\", \"rename the app\". Not for colors/icon/splash (that's rebrand_project).\n\nFlow (always two calls):\n1. Call with name (and bundleId/keepBundleId if already decided), confirmed omitted → returns a PREVIEW (nothing is written). Show the user the summary in plain words (old → new name, and whether the ID changes).\n2. Antes de aplicar, pergunte ao usuário (uma pergunta só): \"O app já foi enviado para a App Store ou Google Play? Vale também TestFlight ou teste interno.\" Se NÃO: chame de novo com bundleId: \"auto\" (deriva com.<nome>.app do nome) ou o ID que o usuário quiser. Se SIM ou se ele não souber: chame com keepBundleId: true (o ID da loja nunca pode mudar depois de publicado; trocar cria outro app na loja, sem usuários, avaliações nem assinaturas).\n3. After the user confirms, call again with the same args + confirmed: true.\n\nAfter success: the change is native, so hot reload is not enough. Tell the user to stop the app and run it again (stop_app + run_app). Relay the \"next steps\" the output lists (old app stays installed on the device with the old ID; social logins / signing / RevenueCat need the new ID only when the ID changed). If the Firebase step failed (offline), running rename_app again with the same name repairs it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "New app name exactly as users should see it, e.g. \"Lanchonete Boa\"."
+          },
+          "bundleId": {
+            "type": "string",
+            "description": "New store ID (com.company.app) or \"auto\" to derive from the name. ONLY if the app was never sent to App Store / Google Play."
+          },
+          "keepBundleId": {
+            "type": "boolean",
+            "description": "Keep the current store ID. Required when the app is already in a store (or the user is unsure)."
+          },
+          "skipFirebase": {
+            "type": "boolean",
+            "description": "Do not register the new ID in Firebase now (rarely needed)."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "true only after the user approved the preview. Omitted/false = preview, nothing written."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_screens",
+      "description": "Returns the full, cloud-hosted instructions for building professional screens in a Kasy project: how to understand the request, read a reference image, plan and get the user's approval, build with the design system, animate with restraint, wire routes, i18n (pt/en/es), the Storyboard and backend parity, and verify in light and dark. It does not write code itself: YOU build the screens by following what it returns.\n\nCall it whenever the user asks for a new screen, several screens, a flow, or to recreate a screen for their product (for example a Home for a dentist app). Pass what you already know; every field is optional.\n\nOrder of work: confirm the plan with the user BEFORE writing code. If the user has a reference image, analyze it as the playbook says; the result also lists the reference library when it has published entries. For a whole product from a brief, use finalize_project instead (it calls this one for the screens phase).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What the user wants built, in their words."
+          },
+          "screens": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Screen name, e.g. \"Booking confirmation\"."
+                },
+                "route": {
+                  "type": "string",
+                  "description": "Intended route, e.g. \"/booking/confirm\"."
+                },
+                "purpose": {
+                  "type": "string",
+                  "description": "One line: what the screen is for and its primary action."
+                },
+                "reference": {
+                  "type": "string",
+                  "description": "Path or URL of a reference image, or a library reference id."
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Screens already identified. Leave empty if the user only described the goal."
+          },
+          "designTool": {
+            "type": "string",
+            "enum": [
+              "figma",
+              "pen"
+            ],
+            "description": "When the screens come from a Figma or Pen file, also load that workflow playbook."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "finalize_project",
+      "description": "For when the user arrives with a PRD, an idea, or \"my app is X, with these screens and features\" and wants the project done in one go (about 90%). Returns the cloud-hosted orchestration playbook: read the brief, show a phased plan and get approval, then run create_project, rebrand_project, create_screens (including recreating the Home for the product), add_flow / add_feature and the data layer, verify in the browser, and hand over an honest list of what still needs the user (credentials, store accounts, real content). It does not execute anything itself: YOU run the phases by calling the other tools, each of which returns its own playbook and confirmation gates.\n\nPass the brief verbatim in \"brief\". If the directory is already a Kasy project the result includes its backend and modules so you skip create_project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "brief": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The PRD or idea exactly as the user wrote it."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Where the project is or will be created."
+          }
+        },
+        "required": [
+          "brief"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_icon",
+      "description": "Runs \"kasy icon --image <path>\" to replace the iOS/Android launcher icon.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nRequire a real PNG path (square, 1024x1024 recommended). Required before calling (collect via AskQuestion). Clients without quiz UI: useElicitationForm: true.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Path to icon PNG. Required before calling (collect via AskQuestion)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_splash",
+      "description": "Runs \"kasy splash --light <path> --dark <path>\" for splash + in-app wordmark logos.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nTwo PNG paths required. Required before calling (collect via AskQuestion). Clients without quiz UI: useElicitationForm: true.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "light": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dark logo PNG for light splash. Required before calling (collect via AskQuestion)."
+          },
+          "dark": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Light logo PNG for dark splash. Required before calling (collect via AskQuestion)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_favicon",
+      "description": "Runs \"kasy favicon --image <path>\" for web favicon / PWA icon.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nRequire a real PNG path. Required before calling (collect via AskQuestion). Clients without quiz UI: useElicitationForm: true.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Path to favicon PNG. Required before calling (collect via AskQuestion)."
+          },
+          "radius": {
+            "type": "string",
+            "description": "Corner radius as % of shorter side (0-50). Default 22."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "release_ios",
+      "description": "Runs \"kasy ios release\": builds the IPA and uploads it to App Store Connect. Call this when the user asks to publish / release / ship iOS from a Mac (not Codemagic).\n\nPrerequisites (still manual / interactive; tell the user if missing):\n1. \"kasy ios configure\" already done (API key in .kasy)\n2. Xcode signing set up for the project\n\nIf prerequisites are missing, the CLI may cancel or exit without a real upload. Treat cancel / \"nothing uploaded\" as failure even if exit code looks soft. Do not claim success without clear upload confirmation in the output.\n\nOptional: versionName (marketing version), noBump (skip build number bump).\n\nFor cloud builds use codemagic_release instead. For IPA without upload use build_ios.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "versionName": {
+            "type": "string",
+            "description": "Marketing version, e.g. \"1.0.1\" (--version-name)."
+          },
+          "noBump": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, do not increment the build number (--no-bump)."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "build_ios",
+      "description": "Runs \"kasy ios build\": produces an IPA without uploading to App Store Connect. Call this when the user wants an IPA artifact only.\n\nFor upload use release_ios. Optional versionName / noBump same as release.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "versionName": {
+            "type": "string",
+            "description": "Marketing version, e.g. \"1.0.1\"."
+          },
+          "noBump": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, do not increment the build number."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "clean_ios",
+      "description": "Runs \"kasy ios clean\". Call this when the user asks to clean iOS build caches / DerivedData for the project, or when troubleshooting stuck iOS builds.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "release_android",
+      "description": "Runs \"kasy android release\": builds a signed App Bundle for Play Store upload. Call this when the user asks to publish / release Android locally (not Codemagic).\n\nRequires android signing already configured (keystore / key.properties via prior \"kasy android configure\" or manual setup). That configure step is interactive and stays manual / terminal.\n\nIf signing is missing, the CLI may cancel without producing an AAB. Treat cancel / no artifact as failure; do not claim a successful release from a soft exit alone.\n\nFor cloud builds use codemagic_release. For AAB without the release wrapper use build_aab. For a signed APK instead of AAB use build_apk_signed.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "build_aab",
+      "description": "Runs \"kasy android build-aab\": produces an App Bundle. Call this when the user wants an AAB artifact (Play upload may be separate).\n\nPrefer release_android when they want the full local release path. For a signed APK (sideload, alt stores) use build_apk_signed. For an unsigned test APK use build_apk. For Codemagic use codemagic_release.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "build_apk",
+      "description": "Runs \"kasy android build-apk\": produces a debug APK. No signing setup required — works on any Kasy project immediately. Call this when the user wants to quickly test-install the app on an Android phone or share a test build, with no Play Store / signing concerns.\n\nFor a signed release APK (sideload outside Play Store, alternative stores like Amazon/Samsung/F-Droid) use build_apk_signed. For Play Store use build_aab / release_android.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "build_apk_signed",
+      "description": "Runs \"kasy android build-apk-signed\": builds a signed release APK. Google Play itself only takes the AAB (use build_aab / release_android for that) — this is for everything else that still needs a real APK: sideloading, alternative stores (Amazon Appstore, Samsung Galaxy Store, F-Droid), enterprise/MDM distribution, or giving a stakeholder the actual release build to test (debug builds behave differently: no minification/obfuscation, debuggable=true).\n\nRequires android signing already configured (keystore / key.properties via prior \"kasy android configure\" or manual setup). That configure step is interactive and stays manual / terminal.\n\nIf signing is missing, the CLI may cancel without producing an APK. Treat cancel / no artifact as failure; do not claim success from a soft exit alone.\n\nFor a quick unsigned test build with zero prerequisites use build_apk.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codemagic_release",
+      "description": "Runs \"kasy codemagic release\" with --ios and/or --android. Call this when the user asks to publish via Codemagic / cloud CI.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nIf no platform flags, use AskQuestion for iOS and/or Android. Clients without quiz UI: useElicitationForm: true. Pass at least one of ios/android true.\n\nRequires configure_codemagic already done.\n\nAfter a successful trigger, offer codemagic_status with the build id from output.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ios": {
+            "type": "boolean",
+            "default": false,
+            "description": "Release iOS on Codemagic (--ios)."
+          },
+          "android": {
+            "type": "boolean",
+            "default": false,
+            "description": "Release Android on Codemagic (--android)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "codemagic_status",
+      "description": "Runs \"kasy codemagic status <buildId>\". Call this when the user asks how a Codemagic build is doing, or after codemagic_release returns a build id.\n\nbuildId is required. Do not invent one.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "buildId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Codemagic build ID from the release output."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "required": [
+          "buildId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "manage_domain",
+      "description": "Runs \"kasy domain list|add|remove\" for Firebase Auth authorized domains (needed for web Google Sign-In on custom hosts). Call this when the user asks to list / add / remove an authorized domain for web auth.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nFirebase backend only. For add/remove without domain, use AskQuestion for the hostname. Clients without quiz UI: useElicitationForm: true.\n\nlocalhost is usually already authorized. This does NOT deploy Firebase Hosting.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "add",
+              "remove"
+            ],
+            "description": "Which domain operation to run."
+          },
+          "domain": {
+            "type": "string",
+            "description": "Hostname for add/remove, e.g. \"app.example.com\". Required for add/remove (collect via AskQuestion)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "fix_project",
+      "description": "Runs \"kasy fix <pub-get|pods|clean>\". Call this when the user asks to fix dependencies, reinstall pods, or clean the Flutter project (troubleshooting).\n\nActions:\n- pub-get: flutter pub get\n- pods: CocoaPods reinstall (macOS / iOS)\n- clean: flutter clean (+ related cleanup)\n\nAsk which action if unclear. Prefer this over inventing raw flutter/pod commands when the project is a Kasy app.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "pub-get",
+              "pods",
+              "clean"
+            ],
+            "description": "Which fix to run."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_release_version",
+      "description": "Runs \"kasy release-version -v <version> -y\" (optional --force). After a store release, sync in-app update prompt / min version.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nRequired before calling (collect via AskQuestion). Clients without quiz UI: useElicitationForm: true. Ask before force=true (blocking min version).\n\nFirebase-only Remote Config flow.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "description": "SemVer live in stores, e.g. 1.4.0. Required before calling (collect via AskQuestion)."
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, also set blocking app_min_version (--force)."
+          },
+          "firebaseProjectId": {
+            "type": "string",
+            "description": "Optional Firebase project id (--project)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_apple_web",
+      "description": "Runs \"kasy apple-web\" after Apple Developer credentials are known. WEB only; native iOS is already enabled by kasy new.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nPrefer setup_social_login when the user wants a guided walkthrough.\n\nWITHOUT serviceId/teamId/keyId/p8Path → returns project-specific Apple Return URLs, domains, and portal steps. Guide the user, then call again with values.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "serviceId": {
+            "type": "string"
+          },
+          "teamId": {
+            "type": "string"
+          },
+          "keyId": {
+            "type": "string"
+          },
+          "p8Path": {
+            "type": "string"
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": "."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_facebook_login",
+      "description": "Runs \"kasy facebook\" after Meta credentials are known.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nPrefer setup_social_login when the user wants a guided walkthrough.\n\nWITHOUT appId/clientToken/appSecret → returns project-specific Meta redirect URLs and steps. Guide the user, then call again with credentials.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string"
+          },
+          "clientToken": {
+            "type": "string"
+          },
+          "appSecret": {
+            "type": "string"
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": "."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_google_login",
+      "description": "Runs \"kasy google\" after credentials are known.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nPrefer setup_social_login when the user wants a guided walkthrough (\"vamos configurar o Gmail\").\n\nIf using this tool directly:\n- WITHOUT webClientId/clientSecret → returns the project-specific guide (redirect URL, console links). Guide the user step by step, then call again with credentials.\n- WITH repairCompanion: true → Supabase + Firebase push companion only (fully automated).\n- WITH webClientId + clientSecret → applies configuration (writes google_auth_options.dart + enables Google on Supabase Auth via Management API).\n\nCREDENTIALS (mandatory):\n- Always ask the user to copy-paste Client ID and Client Secret as plain text from Google Cloud Console (Credentials → Web client → copy buttons).\n- NEVER infer OAuth credentials from screenshots, images, or OCR. One wrong character causes Google Error 401 invalid_client.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webClientId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "clientSecret": {
+            "type": "string",
+            "minLength": 1
+          },
+          "iosClientId": {
+            "type": "string"
+          },
+          "repairCompanion": {
+            "type": "boolean",
+            "description": "Supabase + Firebase push companion: automated setup (no OAuth paste)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": "."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "setup_social_login",
+      "description": "Guided setup for social login on Supabase or API REST projects. Prefer this over configure_google_login when the user wants to be walked through the process step by step.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nWORKFLOW (mandatory — do NOT ask the user to read external docs first):\n1. User says \"configurar Gmail/Google/Facebook/Apple\" → call this tool with ONLY provider + directory (no credentials).\n2. You receive project-specific steps with exact redirect URLs and console links already filled in. Guide the user ONE step at a time. Use AskQuestion. Open browser links when a step includes a url.\n3. Collect credentials in chat as the user completes each step. For Google: Client ID + Client Secret must be plain-text copy/paste from the Console copy buttons — NEVER from screenshots or OCR (causes 401 invalid_client).\n4. Call this tool again with the credential fields filled → it runs kasy google/facebook/apple-web and enables the provider.\n\nGoogle on Supabase WITH Firebase push companion: step 1 may return repairCompanionAvailable — ask if you should automate, then call with repairCompanion: true (no Client ID/Secret).\n\nGoogle on Supabase WITHOUT push: Google has no public API to create OAuth clients — the user must paste one redirect URI in Cloud Console (the tool prints the exact URL). That is the only manual part; you guide it.\n\nNever send the user to kasy.dev or a generic checklist before calling this tool.\n\nFirebase backend: Google is already configured at kasy new — this tool explains that. Facebook/Apple still use this wizard when needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "google",
+              "facebook",
+              "apple"
+            ],
+            "description": "Which social provider to set up."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project."
+          },
+          "repairCompanion": {
+            "type": "boolean",
+            "description": "Google only, Supabase + Firebase push companion: fully automated repair (no OAuth paste)."
+          },
+          "webClientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string"
+          },
+          "iosClientId": {
+            "type": "string"
+          },
+          "appId": {
+            "type": "string"
+          },
+          "clientToken": {
+            "type": "string"
+          },
+          "appSecret": {
+            "type": "string"
+          },
+          "serviceId": {
+            "type": "string"
+          },
+          "teamId": {
+            "type": "string"
+          },
+          "keyId": {
+            "type": "string"
+          },
+          "p8Path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "setup_phone_login",
+      "description": "Phone sign-in (SMS code) for an existing Kasy project, via \"kasy phone\".\n\n- action \"check\" (default): read-only report of what is ready and what is missing for this backend (authentication module, the withPhoneSignIn button flag, Phone provider enabled on the backend, and for Supabase whether an SMS provider is connected). Returns JSON. Always start here when the user asks about phone login.\n- action \"enable\": turns the button on and enables the Phone provider on Firebase Auth (Identity Toolkit) or Supabase Auth (Management API). Supabase still needs an SMS provider (Twilio, MessageBird, Vonage...) with a paid account, which cannot be created from here: tell the user.\n- action \"disable\": hides the button (the backend provider stays enabled).\n\nNot available on the REST API backend (the button never turns on). New projects can have it from the start: create_project in Advanced mode with the Phone provider selected. It is NOT part of Quick mode. After enabling: web session -> reload_app.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "check",
+              "enable",
+              "disable"
+            ],
+            "default": "check",
+            "description": "check = report only; enable = button + provider; disable = hide the button."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_notification_texts",
+      "description": "Runs \"kasy notifications text\": demo notification + scheduled reminder copy in i18n files.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nAll four texts required together. Required before calling (collect via AskQuestion). Clients without quiz UI: useElicitationForm: true.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "demoTitle": {
+            "type": "string",
+            "description": "Demo notification title. Required before calling (collect via AskQuestion)."
+          },
+          "demoBody": {
+            "type": "string",
+            "description": "Demo notification body. Required before calling (collect via AskQuestion)."
+          },
+          "reminderTitle": {
+            "type": "string",
+            "description": "Reminder title. Required before calling (collect via AskQuestion)."
+          },
+          "reminderBody": {
+            "type": "string",
+            "description": "Reminder body. Required before calling (collect via AskQuestion)."
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "pt",
+              "en",
+              "es",
+              "all"
+            ],
+            "default": "all",
+            "description": "Which i18n files to update"
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_ios_signing",
+      "description": "Runs \"kasy ios configure\": App Store Connect API .p8 + Key ID + Issuer ID for build_ios / release_ios.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nRequired before calling (collect via AskQuestion). Clients without quiz UI: useElicitationForm: true. Creating the API key on App Store Connect stays manual.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "description": "App Store Connect API Key ID. Required before calling (collect via AskQuestion)."
+          },
+          "issuerId": {
+            "type": "string",
+            "description": "App Store Connect Issuer ID. Required before calling (collect via AskQuestion)."
+          },
+          "p8Path": {
+            "type": "string",
+            "description": "Path to App Store Connect .p8. Required before calling (collect via AskQuestion)."
+          },
+          "appId": {
+            "type": "string",
+            "description": "App Store Connect numeric App ID (optional)"
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_android_signing",
+      "description": "Runs \"kasy android configure\": writes android/key.properties for an existing .jks keystore.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nRequired before calling (collect via AskQuestion). Clients without quiz UI: useElicitationForm: true. Does NOT generate a keystore.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "keystore": {
+            "type": "string",
+            "description": "Path to .jks. Required before calling (collect via AskQuestion)."
+          },
+          "storePassword": {
+            "type": "string",
+            "description": "Keystore password. Required before calling (collect via AskQuestion)."
+          },
+          "keyAlias": {
+            "type": "string",
+            "description": "Key alias (default: upload)"
+          },
+          "keyPassword": {
+            "type": "string",
+            "description": "Key password (default: same as store)"
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_codemagic",
+      "description": "Runs \"kasy codemagic configure\": links Codemagic API token and app ID.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nRequired before calling (collect via AskQuestion). Clients without quiz UI: useElicitationForm: true. Token from Codemagic account settings; app ID from codemagic.io.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Codemagic API token. Required before calling (collect via AskQuestion)."
+          },
+          "appId": {
+            "type": "string",
+            "description": "Codemagic app ID. Required before calling (collect via AskQuestion)."
+          },
+          "branch": {
+            "type": "string",
+            "description": "Branch that triggers builds (default: main)"
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "configure_project_keys",
+      "description": "Runs \"kasy configure --set KEY=VALUE\" for feature credentials.\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nCall configure_status first to see pending keys. Collect secret values via AskQuestion, then call with values map. Clients without quiz UI: call without values and useElicitationForm: true to open the MCP form for pending keys.\n\nFacebook: configure_facebook_login. Google Supabase: configure_google_login. Apple web: configure_apple_web.\n\nOnly pass keys the user gave you. Never invent credentials.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried — with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Map KEY=value. Required before calling unless useElicitationForm: true (clients without quiz UI)."
+          },
+          "useElicitationForm": {
+            "type": "boolean",
+            "description": "Set true to open the MCP elicitation form when required args are missing. Cursor agents with AskQuestion must leave this false and collect answers before calling the tool."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_components",
+      "description": "Scans lib/components/ in the CURRENT project (not a cached list) and returns every KasyXxx component with its one-line summary, straight from the source file's doc comment.\n\nCall this BEFORE building or editing any screen. This project's components are the ones that exist right now — after a rebrand or a kit update the set can differ from any example you've seen before, so treat this list (and the design-system-guide resource) as the only source of truth. Never invent a raw Material widget (Scaffold, Drawer, AlertDialog, showModalBottomSheet, TextField, ListTile, IconButton, ElevatedButton, Card, SnackBar) when this list has a Kasy equivalent for it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_commands",
+      "description": "Runs \"kasy --help\" (or \"kasy <command> --help\" for one command's exact flags).\n\nPrefer dedicated MCP tools when they exist. Do NOT use this (or run_kasy_command) as the first choice for:\nicon → set_icon | splash → set_splash | favicon → set_favicon | color → set_primary_color\nrun / stop / reset → run_app / stop_app / reset_app\nios release|build|clean → release_ios / build_ios / clean_ios\nandroid release|build-aab|build-apk|build-apk-signed|configure → release_android / build_aab / build_apk / build_apk_signed / configure_android_signing\ncodemagic release|configure → codemagic_release / codemagic_status / configure_codemagic\ndomain → manage_domain | configure --status → configure_status | configure --set → configure_project_keys\ncheck → check_project | status → check_status | fix → fix_project\ndeploy → deploy_backend | update → update_project | remove → remove_feature\napple-web → configure_apple_web | facebook → configure_facebook_login | google → configure_google_login | notifications text → set_notification_texts\nios configure → configure_ios_signing\n\nUse list_commands only when there is no dedicated tool (prepare, etc.) or you need exact flags for a rare subcommand. Never use for license (configure_license). Then run via run_kasy_command.\n\nIf it fails, fix it yourself and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "A specific command to see detailed help for, e.g. \"apple-web\", \"notifications\". Omit to list every command. Prefer dedicated tools over help for icon/color/ios/android/run."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "run_kasy_command",
+      "description": "Escape hatch: runs \"kasy <command> <args>\" ONLY when no dedicated MCP tool covers the task.\n\nNEVER use this for commands that already have a tool:\ncreate_project, add_feature, remove_feature, update_project,\ncheck_status, configure_status, check_project, deploy_backend,\nrun_app, stop_app, reset_app,\nset_primary_color, set_icon, set_splash, set_favicon,\nrelease_ios, build_ios, clean_ios, release_android, build_aab, build_apk, build_apk_signed,\ncodemagic_release, codemagic_status, manage_domain, fix_project, set_release_version,\nconfigure_apple_web, configure_facebook_login, configure_google_login, configure_license, set_notification_texts,\nconfigure_ios_signing, configure_android_signing, configure_codemagic, configure_project_keys.\n\nDo not pass command \"ios\" or \"android\" alone (interactive wizards). Use release_ios / build_ios / clean_ios / release_android / build_aab / build_apk / build_apk_signed, or tell the user to finish interactive setup in a real terminal.\n\nUnlike run_setup_command (arbitrary shell for machine setup), this ONLY runs the kasy binary.\n\nGood uses: prepare, and other rare flags after list_commands. Never use for license (configure_license) or upgrade (upgrade_kasy).\n\nIf it fails, fix it yourself (run_setup_command / investigate) and retry before giving up. Only call report_issue after you've actually tried, with the OS and what happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The kasy subcommand without dedicated tool, e.g. \"apple-web\", \"facebook\", \"google\", \"notifications\". Prefer configure_google_login / configure_facebook_login when those apply. Never \"run\", \"icon\", \"color\", \"splash\" when dedicated tools exist."
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Extra arguments/flags, e.g. [\"--fix\"] for a rare command."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Project folder to run it in. Defaults to the current directory."
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_kasy_docs",
+      "description": "Fetches a page from kasy.dev/docs as clean markdown (the live, canonical docs — not training data, which may be stale). Use this before guessing at a flag, a setup step, or \"how does X work in Kasy\" instead of improvising.\n\nGood uses: confirming exact CLI flags before running a rare command, checking a feature's full setup guide (e.g. \"funcionalidades/stripe\") before configuring it, checking \"referencia/troubleshooting\" when something fails in an unfamiliar way, or \"mcp\" / \"referencia/comandos\" to see the full tool/command list if list_commands isn't enough.\n\nIf a page 404s, double check the exact slug against the list in this tool's schema — don't retry with a guessed variant.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "string",
+            "enum": [
+              "conceitos/arquitetura",
+              "conceitos/autenticacao",
+              "conceitos/backends",
+              "conceitos/design-system",
+              "conceitos/navegacao",
+              "conceitos/ui-vs-logica",
+              "funcionalidades/admin",
+              "funcionalidades/analytics",
+              "funcionalidades/anuncios",
+              "funcionalidades/assinaturas",
+              "funcionalidades/atualizacao",
+              "funcionalidades/background-location",
+              "funcionalidades/chat-ia",
+              "funcionalidades/crash-reports",
+              "funcionalidades/dev-inspector",
+              "funcionalidades/drive",
+              "funcionalidades/feedback",
+              "funcionalidades/i18n",
+              "funcionalidades/kanban",
+              "funcionalidades/login-telefone",
+              "funcionalidades/notificacoes-locais",
+              "funcionalidades/onboarding",
+              "funcionalidades/permissoes",
+              "funcionalidades/push",
+              "funcionalidades/revenuecat",
+              "funcionalidades/storyboard",
+              "funcionalidades/stripe",
+              "funcionalidades/widget",
+              "gerenciar/kasy-add",
+              "gerenciar/kasy-remove",
+              "gerenciar/kasy-update",
+              "index",
+              "instalar-cli",
+              "mcp",
+              "personalizacao/cores",
+              "personalizacao/favicon",
+              "personalizacao/figma",
+              "personalizacao/icone",
+              "personalizacao/nome",
+              "personalizacao/pen",
+              "personalizacao/splash",
+              "pre-requisitos",
+              "primeiro-app",
+              "proximos-passos",
+              "publicar/android",
+              "publicar/avaliacao-in-app",
+              "publicar/ios",
+              "publicar/web",
+              "referencia/cloud-functions",
+              "referencia/comandos",
+              "referencia/edge-functions",
+              "referencia/glossario",
+              "referencia/guia-web",
+              "referencia/licenca",
+              "referencia/orientacao-ia",
+              "referencia/schema",
+              "referencia/schema/firebase",
+              "referencia/schema/supabase",
+              "referencia/secrets",
+              "referencia/troubleshooting",
+              "rodar-app"
+            ],
+            "description": "Doc page slug, e.g. \"mcp\", \"publicar/android\", \"funcionalidades/stripe\", \"referencia/comandos\"."
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "pt",
+              "en",
+              "es"
+            ],
+            "default": "pt",
+            "description": "Documentation language."
+          }
+        },
+        "required": [
+          "page"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "report_issue",
+      "description": "Logs what happened to the Kasy team after you hit and handled a problem with another kasy-mcp tool. This is NOT a support request and calling it does not fix anything for the user — you already have real execution access on this machine (run_setup_command) to fix problems yourself. Fix first. Report second.\n\nThe expected, normal call is: resolved=true, with resolutionSummary describing EXACTLY what fixed it (the command you ran, the setting you changed, whatever it was) — this is what lets the Kasy team turn a one-off fix into a permanent improvement to \"kasy doctor\" / the CLI, so the next person never hits it.\n\nresolved=false is the exception, not a shortcut: only use it after you genuinely tried to fix the problem (via run_setup_command or otherwise) and it is still broken, or the remaining step needs something only the user can provide (a login, a click on a system permission dialog, a decision). Never call this instead of trying.\n\nAlways fill in \"os\" precisely — it is the single most useful field for the Kasy team (a Windows-only bug looks completely different from a macOS one).\n\nDo NOT include: the user's name, email, license key, or any full file path (paths often contain the OS username — describe the location generically, e.g. \"the project's lib/features folder\", not \"/Users/john/Projects/myapp/lib/features\"). Keep both summaries short (a few sentences) and factual.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "toolName": {
+            "type": "string",
+            "description": "Which tool/command was being used, e.g. \"prepare_machine\", \"create_project\"."
+          },
+          "os": {
+            "type": "string",
+            "enum": [
+              "macos",
+              "windows",
+              "linux",
+              "other"
+            ],
+            "description": "The OS this happened on. Always fill this in precisely."
+          },
+          "errorSummary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "What went wrong, in your own words — not a raw stack trace dump."
+          },
+          "resolved": {
+            "type": "boolean",
+            "description": "Whether YOU resolved it (not the user, not the Kasy team) before calling this."
+          },
+          "resolutionSummary": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "What fixed it — the exact command/change, if resolved=true. If resolved=false, what you tried and why it still failed."
+          }
+        },
+        "required": [
+          "toolName",
+          "os",
+          "errorSummary",
+          "resolved",
+          "resolutionSummary"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "browser_qa_guide",
+      "description": "Confirms the Browser QA bridge in lib/main.dart, then returns the canonical checklist from docs/agent-browser-qa.md (same as AGENTS.md → Browser QA and .cursor/rules/kasy-agent-contract.mdc).\n\nUse when you (or the user) want a screen or flow validated in the browser, not just `flutter analyze`.\n\nIMPORTANT: this tool does NOT open a browser — kasy-mcp is headless. YOU must have a browser tool (Cursor browser, Playwright, etc.). If the app is not running, start `kasy run --web` (or MCP run_app with web) before validating.\n\nPass \"focus\" describing the flow to validate (e.g. \"kanban task creation form\") so the header is concrete.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          },
+          "focus": {
+            "type": "string",
+            "description": "The screen/flow to validate, e.g. \"kanban task creation form\". Leave empty for a generic checklist."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "kanban",
+      "description": "Runs \"kasy kanban <action>\" against the project's Kanban board — the same board the app's Kanban screen shows. Firebase and Supabase backends only (there is no generic way to get an admin credential for a user's own custom API REST backend yet; if check_status/check_project shows backend \"api\", tell the user this isn't supported and stop).\n\nSTRUCTURED USER QUESTIONS (required):\nUser decisions must be explicit choices, never pre-filled text defaults.\n\n1. Cursor / agents with AskQuestion (Composer, Claude in Cursor): REQUIRED. Use AskQuestion step by step (one multiple-choice prompt at a time), then call the tool with all collected args. Never call a tool with missing choice fields. Never set useElicitationForm. The Cursor MCP elicitation form does not render enums as dropdowns and may pre-fill choices; it is not a substitute for AskQuestion.\n2. MCP elicitation form: only when the client has no quiz UI (Claude Desktop, etc.). Call the tool with useElicitationForm: true and missing required args to open the form. Never use useElicitationForm in Cursor.\n3. Plain text in chat: last resort only. One question at a time. License keys and OAuth secrets: plain text fields, never multiple-choice quizzes.\n\nNever dump all choices for one workflow in a single chat message.\nNever call create_project without directory and backend in Cursor.\nNever ask about Google Sign-In for Supabase/API Quick — Google is ON by default, independent of push. Without push, wire OAuth credentials later with configure_google_login. Only set noGoogle if the user explicitly wants email-only.\n\nSupabase/API — push AskQuestion (after backend + region, before create_project):\n- The question is about push notifications ONLY. Google is a separate concern (default ON).\n- FORBIDDEN: never invent a combined question. Do NOT ask \"push e login com Google\", \"push and Google\", \"notificações push e login\", or any title that joins push + Google/Gmail/login in one prompt.\n- FORBIDDEN answers for \"no\": do NOT say \"só email/senha\" / \"email/password only\" as if Google were off. Google stays in the scaffold without push.\n- Always mention the free Firebase companion when explaining \"yes\" (FCM needs it on Supabase/API). \"No\" = no push, no Firebase companion.\n- With push=yes: companion can mint Google OAuth and register the provider on Supabase Auth automatically. Say that as a bonus of the Firebase step, not as the reason to pick yes.\n- Without push: Google button/code is included; Client ID/Secret + enabling Google on Supabase Auth come later via configure_google_login.\n- Never ask Google separately on MCP Quick (default ON). Set noGoogle only if the user explicitly wants email-only.\n- Use the EXACT prompt + options below (translate labels only if the user is not speaking Portuguese; keep the same meaning).\n\nPT template (required shape):\n  Prompt: \"Quer notificações push no app?\"\n  A: \"Não — sem push e sem projeto Firebase companion\"\n  B: \"Sim — push com Firebase companion gratuito (FCM)\"\n\nEN template:\n  Prompt: \"Do you want push notifications in the app?\"\n  A: \"No — no push, no Firebase companion project\"\n  B: \"Yes — push with a free Firebase companion (FCM)\"\n\nFor destructive actions (delete_column, delete_task): confirm with IDE quiz (yes/no), not a long markdown warning in chat.\n\nCall check_status first if you don't already know the backend for this project — you do NOT need to ask the user which backend they use, this tool (and \"kasy kanban\" underneath it) detects it automatically from the project files.\n\nActions:\n- list: see every column and every task (with id, title, description, columnId, order, priority, timestamps). Always start here — you need real column/task ids before you can move, update, or delete anything. This is also how you answer things like \"what's left to do\" or \"what can we work on today\": look at the columns that aren't the last one (usually \"Done\"/\"Concluído\") and read their tasks.\n- create_column: name required. order optional (appends at the end if omitted).\n- update_column: id + name required (rename only — there's no separate reorder-single-column op, use reorder_columns for that).\n- delete_column: id required. Deletes every task inside it too (cascades on both backends) — confirm with structured quiz before calling if the column isn't empty.\n- reorder_columns: ids required, an array of every column id in the new left-to-right order (not just the one that moved).\n- create_task: title + columnId required. description and priority (\"low\"|\"medium\"|\"high\"|\"urgent\") optional. order optional (appends at the end of that column if omitted).\n- update_task: id required, plus at least one of title/description/priority. To clear the priority, pass priority: \"none\". This does NOT move the task between columns — use move_task for that.\n- move_task: id + columnId required (the destination column, even if unchanged). order optional (appends at the end of the destination column if omitted) — this is \"move this card to column X\".\n- delete_task: id required.\n- reorder_tasks: ids required, an array of every task id in the new order. Only reorder within one column at a time (mixing columns will desync each task's own columnId).\n\nIf a command fails, read the error and fix what you can (e.g. bad id — call list again to get fresh ids) before retrying. Only call report_issue if it's a real infrastructure problem (not logged into gcloud/supabase, Firestore API disabled, etc.) that the user needs to act on themselves.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "create_column",
+              "update_column",
+              "delete_column",
+              "reorder_columns",
+              "create_task",
+              "update_task",
+              "move_task",
+              "delete_task",
+              "reorder_tasks"
+            ],
+            "description": "Which Kanban operation to run."
+          },
+          "id": {
+            "type": "string",
+            "description": "Column or task id. Required for update_column, delete_column, update_task, move_task, delete_task."
+          },
+          "name": {
+            "type": "string",
+            "description": "Column name. Required for create_column and update_column."
+          },
+          "title": {
+            "type": "string",
+            "description": "Task title. Required for create_task; optional for update_task."
+          },
+          "description": {
+            "type": "string",
+            "description": "Task description. Optional for create_task/update_task."
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "urgent",
+              "none"
+            ],
+            "description": "Task priority. \"none\" clears it. Optional for create_task/update_task."
+          },
+          "columnId": {
+            "type": "string",
+            "description": "Column id. Required for create_task and move_task."
+          },
+          "order": {
+            "type": "integer",
+            "description": "Zero-based position within the column/board. Omit to append at the end."
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Full ordered list of column or task ids. Required for reorder_columns/reorder_tasks."
+          },
+          "directory": {
+            "type": "string",
+            "default": ".",
+            "description": "Path to the Kasy project. Defaults to the current directory."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "kasy",
+    "version": "0.24.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 11290,
+  "stderr": ""
+}
