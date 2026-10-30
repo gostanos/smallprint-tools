@@ -1,0 +1,208 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@pipeworx/mcp-grants-gov",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha512-mclWBg2LCCi7qOOhod4rTD4Z7zSuZ1hN/Q3OKhFb3m7G1MqAzZcM33pSfMc+21DgoX8WKAPUonWYyfhuUB3BHQ==",
+    "installed": "sha512-mclWBg2LCCi7qOOhod4rTD4Z7zSuZ1hN/Q3OKhFb3m7G1MqAzZcM33pSfMc+21DgoX8WKAPUonWYyfhuUB3BHQ=="
+  },
+  "bin": "node_modules/@pipeworx/mcp-grants-gov/bin/cli.js",
+  "main": "lib/index.js",
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "PIPEWORX_API_KEY"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-29T14:24:17.467Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "search_opportunities",
+      "description": "Search Grants.gov for currently-open or recently-closed federal funding opportunities. Filter by keyword, opportunity status, agency code, funding category, or date range. Returns opportunity number, title, agency, open/close dates, and assistance listing numbers (formerly CFDA).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "Grants.gov's own keyword match behaves like an exact/AND phrase across title and synopsis text, not a relevance-ranked full-text search — a compound multi-concept phrase (e.g. joining three unrelated nouns) routinely matches ZERO opportunities even when relevant ones are open (verified live 2026-09-25, fleet #2450: \"cancer liquid biopsy diagnostic\" -> 0 hits; the single word \"SBIR\" -> 29 hits including the exact NIH SBIR/STTR hub the compound phrase was trying to find). Prefer ONE short, salient term (\"SBIR\", \"liquid biopsy\", \"wastewater\") and narrow with `agencies`/`funding_categories`/`status` instead of cramming every concept into this field. A zero-hit result is worth one retry with a shorter keyword before concluding nothing is open."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "posted",
+              "closed",
+              "archived",
+              "forecasted"
+            ],
+            "description": "posted (open for applications now) | forecasted (announced, not yet posted) | closed | archived. Default posted. There is no \"open\" or \"active\" status: use \"posted\". For posted plus forecasted together pass open_only: true."
+          },
+          "open_only": {
+            "type": "boolean",
+            "description": "true restricts to currently-open or forthcoming opportunities (same as status \"posted|forecasted\"); omit or false leaves status at its default. Alias for status when a caller only knows open/not-open, not the exact status vocabulary."
+          },
+          "agencies": {
+            "type": "string",
+            "description": "Comma-separated agency codes (e.g., \"EPA,USDA\" or a bare department like \"HHS\" or \"NIH\"). Grants.gov itself indexes opportunities under a FULLY-QUALIFIED sub-agency code (\"HHS-NIH11\", \"HHS-CDC1\", ...), and its own filter returns ZERO hits for a bare department code (verified live 2026-09-25, fleet #2450) — this tool detects a bare code automatically and matches it client-side against every hit's sub-agency code instead of sending it upstream, so \"HHS\" still finds NIH/CDC/FDA opportunities. A code you already have in the full \"DEPT-SUBAGENCY#\" form is sent upstream unchanged."
+          },
+          "agency": {
+            "type": "string",
+            "description": "Alias for `agencies` — a single agency or department code (e.g. \"NIH\" or \"HHS\"; see `agencies` for how a bare code is matched)."
+          },
+          "funding_categories": {
+            "type": "string",
+            "description": "Comma-separated category codes (e.g., \"ED\" education, \"ENV\" environment, \"ST\" science)"
+          },
+          "aln": {
+            "type": "string",
+            "description": "Assistance Listing Number / CFDA number (e.g., \"10.001\")"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Rows per page (1-1000, default 25)"
+          },
+          "offset": {
+            "type": "number",
+            "description": "0-based start record (default 0)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "get_opportunity",
+      "description": "Fetch full details for a Grants.gov opportunity by ID. Returns synopsis text, eligibility, award ceiling/floor, attachments, contact info, and version history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "opportunity_id": {
+            "type": "number",
+            "description": "Numeric opportunity ID (returned by search_opportunities as \"id\")"
+          }
+        },
+        "required": [
+          "opportunity_id"
+        ]
+      }
+    },
+    {
+      "name": "search_historical_opportunities",
+      "description": "Search Grants.gov's FULL opportunity history (closed and archived opportunities back to 2004, plus forecasted opportunities not yet posted) — coverage search_opportunities' live API cannot serve, since search2 only usefully answers \"what is open right now\". Covers Grants.gov's full catalog, refreshed once a day (see `data_as_of`). Filter by agency code, CFDA/Assistance Listing number, keyword (full-text over title + description), status, opportunity category, or post-date range. Unlike search_opportunities, status here defaults to EVERY status, not just \"posted\" — pass status explicitly to narrow. Answers \"what did this agency fund last fiscal year\", \"what opportunities under CFDA 93.351 have ever closed\", \"what is forecasted for next year that hasn't posted yet\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agency_code": {
+            "type": "string",
+            "description": "Agency or sub-agency code, e.g. \"NIH\" or \"HHS-NIH11\" or \"DOS\". Matches as a prefix/segment against the fully-qualified codes on file (same bare-vs-qualified forgiveness as search_opportunities' `agencies`). Alias: agency."
+          },
+          "agency": {
+            "type": "string",
+            "description": "Alias for agency_code."
+          },
+          "cfda": {
+            "type": "string",
+            "description": "Assistance Listing Number / CFDA number, exact match, e.g. \"93.351\". Alias: aln."
+          },
+          "aln": {
+            "type": "string",
+            "description": "Alias for cfda."
+          },
+          "keyword": {
+            "type": "string",
+            "description": "Full-text search over the opportunity title and description (PostgreSQL websearch syntax — quote a phrase, \"-word\" to exclude). More forgiving than the live tool's exact-phrase keyword match."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "posted",
+              "closed",
+              "archived",
+              "forecasted"
+            ],
+            "description": "posted (open now) | closed | archived | forecasted (not yet posted). One value. There is no \"open\" or \"active\" status: use \"posted\" for opportunities open for applications. Omit to search every status, unlike the live tool (whose default is \"posted\")."
+          },
+          "opportunity_category": {
+            "type": "string",
+            "description": "Single-letter Grants.gov category code: D discretionary, M mandatory, C continuation, E earmark, O other."
+          },
+          "post_date_from": {
+            "type": "string",
+            "description": "Only opportunities posted on/after this date, YYYY-MM-DD."
+          },
+          "post_date_to": {
+            "type": "string",
+            "description": "Only opportunities posted on/before this date, YYYY-MM-DD."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Rows to return, 1-500 (default 25)."
+          },
+          "offset": {
+            "type": "number",
+            "description": "0-based start record, for paging."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "get_historical_opportunity",
+      "description": "Fetch one Grants.gov opportunity by its numeric opportunity ID, in ANY status (open, closed, archived, or forecasted) — unlike get_opportunity, which calls the live API and only reliably resolves currently-open opportunities. Returns the full record plus a computed `status` (derived from close/archive dates against today, the same vocabulary search_historical_opportunities uses) and `data_as_of`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "opportunity_id": {
+            "type": "number",
+            "description": "Numeric opportunity ID (returned by search_historical_opportunities or search_opportunities as \"id\")."
+          }
+        },
+        "required": [
+          "opportunity_id"
+        ]
+      }
+    },
+    {
+      "name": "agency_posting_trend",
+      "description": "An agency's opportunity-posting trend by federal fiscal year (Oct-Sep): how many opportunities it posted, total estimated program funding, and average award ceiling, per year. Answers \"is this agency posting more or fewer opportunities than last year\" and \"how has this agency's funding trended\". Fiscal year is derived from each opportunity's post_date.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agency_code": {
+            "type": "string",
+            "description": "Agency or sub-agency code, e.g. \"EPA\", \"NIH\", \"HHS-CDC1\". Matches as a prefix/segment, same forgiveness as search_historical_opportunities. Alias: agency."
+          },
+          "agency": {
+            "type": "string",
+            "description": "Alias for agency_code."
+          },
+          "years": {
+            "type": "number",
+            "description": "Number of most-recent fiscal years to return, 1-40 (default 10)."
+          }
+        },
+        "required": []
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "@pipeworx/mcp-grants-gov",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": "@pipeworx/mcp-grants-gov forwards to the Pipeworx gateway and lists only the grants-gov pack's tools. Set PIPEWORX_META_TOOLS=1 to also list ask_pipeworx and the other gateway-wide tools.",
+  "durationMs": 1815,
+  "stderr": "@pipeworx/mcp-grants-gov: initialize answered locally -- Could not reach the Pipeworx gateway at https://gateway.pipeworx.io/grants-gov/mcp (EAI_AGAIN). @pipeworx/mcp-grants-gov forwards every call to the Pipeworx gateway and has no local mode, so it needs network access.\n@pipeworx/mcp-grants-gov: notification notifications/initialized not delivered: Could not reach the Pipeworx gateway at https://gateway.pipeworx.io/grants-gov/mcp (EAI_AGAIN). @pipeworx/mcp-grants-gov forwards every call to the Pipeworx gateway and has no local mode, so it needs network access.\n@pipeworx/mcp-grants-gov: tools/list served from the snapshot bundled with this package -- Could not reach the Pipeworx gateway at https://gateway.pipeworx.io/grants-gov/mcp (EAI_AGAIN). @pipeworx/mcp-grants-gov forwards every call to the Pipeworx gateway and has no local mode, so it needs network access.\n"
+}

@@ -1,0 +1,516 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@pipeworx/mcp-openfda",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha512-Gvfh2SI1H6IWQABq0PTIssR9/AX0RtGD4yaZmC1un9k/Bor/Iotcbl7cw5aAZeCVd1QbJgqoBCqxXg7xiLQ9OQ==",
+    "installed": "sha512-Gvfh2SI1H6IWQABq0PTIssR9/AX0RtGD4yaZmC1un9k/Bor/Iotcbl7cw5aAZeCVd1QbJgqoBCqxXg7xiLQ9OQ=="
+  },
+  "bin": "node_modules/@pipeworx/mcp-openfda/bin/cli.js",
+  "main": "lib/index.js",
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "PIPEWORX_API_KEY"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-29T13:25:18.494Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "fda_drug_events",
+      "description": "Search FAERS adverse event reports by drug name, MedDRA reaction term, or date range. Returns report counts, reaction types, seriousness levels, and dates. Natural multi-word reaction phrasing is retried against MedDRA preferred-term word order before an empty result is reported. FAERS reports do not establish incidence or causality.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "OpenFDA search query. FAERS stores a drug under FOUR different fields and no single one is complete: patient.drug.openfda.generic_name / .brand_name / .substance_name are enrichment (missing for some newer or compounded drugs, but when present they fold every brand variant under the ingredient), and patient.drug.medicinalproduct is the reporter's own free-text drug name (always present, but literal — a generic-name filter there misses every report filed under a brand). A query that names exactly ONE of these four fields for a drug is automatically expanded to an OR across all four with the same value, so you get every report regardless of which field openFDA happened to index it under — the response names which fields were searched in drug_name_fields_searched. Write whichever single field is natural; do not hand-write the OR yourself. Examples: 'patient.drug.medicinalproduct:\"OZEMPIC\"', 'patient.drug.openfda.generic_name:\"semaglutide\"+AND+serious:1', 'receivedate:[20240101+TO+20241231]'"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Number of results (1-100, default 10)"
+          },
+          "skip": {
+            "type": "number",
+            "description": "Offset for pagination (default 0)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "fda_drug_approvals",
+      "description": "Find FDA-approved drugs by brand name, active ingredient, or application number. To find generic versions of a drug, search by active ingredient using products.active_ingredients.name (NOT openfda.generic_name — that field only works in the label endpoint). IMPORTANT: drug names in the FDA database are stored in UPPERCASE — always pass ingredient and brand names in uppercase (e.g. \"APIXABAN\" not \"apixaban\") or you will get 0 results. Returns approval status, sponsor, application number (ANDA = generic, NDA = brand), and application details. There is NO queryable \"application_type\" field — never add application_type:\"ANDA\" (it returns 0 results). To limit to generics, search by active ingredient and read the ANDA/NDA prefix on application_number in the results. This endpoint has NO indication/disease field — for \"drugs approved to treat <condition>\" use fda_drug_labels (which searches indications_and_usage); an indication phrase passed here is silently ignored and matches by drug name only. The response `total` can exceed the 100-row cap on a single page — use `skip` to page past it, and `sort` to get genuinely-newest-first ordering (\"most recently approved\" is not the default order).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "OpenFDA drugsfda search query. Drug names MUST be UPPERCASE in quotes. To find all generics for a drug: 'products.active_ingredients.name:\"APIXABAN\"' (returns all ANDA + NDA approvals). By brand: 'openfda.brand_name:\"KEYTRUDA\"'. By original submission: 'submissions.submission_type:\"ORIG\"'. Do NOT use application_type (no such field — returns 0); ANDA vs NDA is read from the application_number prefix in the results, not filtered in the query. NOTE: use products.active_ingredients.name (not openfda.generic_name which is a label-API field and returns 0 here)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Number of results (1-100, default 10)"
+          },
+          "skip": {
+            "type": "number",
+            "description": "Offset for pagination (default 0). The reported `total` is often larger than one page — pass skip=100 to reach the 101st+ result of a large query instead of assuming the first page is everything."
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "approval_date_asc",
+              "approval_date_desc"
+            ],
+            "description": "Order results by each drug's original FDA approval date instead of openFDA's default (unordered/relevance) order. approval_date_desc puts the genuinely most-recently-approved drug first — needed for \"most recent approval\" questions, which are wrong without it. Computed client-side from each record's own ORIG+approved submission (openFDA's native sort on this field is unreliable — it reads any submission in a drug's history, so an old drug with a recent label supplement can outrank a real new approval). Sorting is exact over up to 1000 matching records per call; a `sort_note` in the response says if the query matched more than that."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "fda_applications_by_cik",
+      "description": "Find ALL Drugs@FDA applications for a company by SEC CIK, ticker, or company name — without needing to know its FDA sponsor_name spelling. Drugs@FDA has no company-ID field: sponsor_name is free text, and one company routinely files under several forms (e.g. Eli Lilly appears as \"LILLY\", \"ELI LILLY AND CO\", \"ELI LILLY CO\", \"LILLY RES LABS\" — its own SEC-registered name \"ELI LILLY AND COMPANY\" matches ZERO of them in fda_drug_approvals). This resolves the company via SEC (same identity as the edgar pack), derives its most distinctive name token, and searches Drugs@FDA for every sponsor_name variant containing it in one call — returning the combined application list plus a `sponsor_name_forms` breakdown showing exactly which spellings were found. Only sponsors containing the company's distinctive name word are returned (industry words like PHARMACEUTICALS never anchor the match, and `excluded_non_word_matches` counts substring-only hits that were dropped). Use this INSTEAD of guessing sponsor_name strings for fda_drug_approvals when you have (or can resolve) the company's CIK/ticker. For a subsidiary or operating name that isn't itself SEC-listed, resolve to the parent first with edgar's sponsor_to_filer, then pass that CIK here.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cik_or_ticker": {
+            "type": "string",
+            "description": "SEC CIK (e.g. \"59478\"), stock ticker (e.g. \"LLY\"), or exact SEC-listed company name (e.g. \"Eli Lilly and Co\")."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max applications to return (1-200, default 100)."
+          }
+        },
+        "required": [
+          "cik_or_ticker"
+        ]
+      }
+    },
+    {
+      "name": "fda_novel_approvals",
+      "description": "Most recent NOVEL drug approvals, in FDA/CDER's own sense of the word: a new drug or biologic never before approved or marketed in the U.S. (read live from FDA's own published Novel Drug Approvals list). Use for \"what is the most recent novel drug the FDA approved\", \"how many novel drugs has CDER approved this year\", \"latest FDA drug approvals\". Excludes generics, reformulations of an already-approved ingredient, and biosimilars — these are NOT on FDA's novel list even though they are \"original\" NDA/BLA submissions. Returns approval date, drug name, active ingredient, and approved use, sorted newest-first; application numbers/sponsors are not published on FDA's novel-drug page. Pass include_generics:true for a different, broader count (every original NDA/BLA/ANDA approval reconstructed from Drugs@FDA, reformulations/biosimilars included) — that path says so in its own note. Not for label text (fda_drug_labels) or searching a specific known drug (fda_drug_approvals).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "number",
+            "description": "Look-back window in days (1-365, default 90)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max approvals to return (1-50, default 10)"
+          },
+          "include_generics": {
+            "type": "boolean",
+            "description": "When true, switch from FDA's own novel-drug list to a broader Drugs@FDA reconstruction that also includes original ANDA (generic) approvals, reformulations, and biosimilars (default false — the default is FDA's own \"novel\" list, which excludes all of those)."
+          },
+          "skip": {
+            "type": "number",
+            "description": "Offset into the newest-first results (default 0). total_in_window can exceed the 50-result cap on one call — pass skip=50 to page further into the window instead of assuming the window is fully covered."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "fda_drug_labels",
+      "description": "Get FDA drug labeling (SPL) by drug name OR by INDICATION. This is the tool for \"what drugs are approved to treat <condition>\" — it searches the indications_and_usage text, which the drugsfda approvals endpoint does NOT carry. Query by brand/generic name (openfda.brand_name:\"HUMIRA\"), or by indicated use (indications_and_usage:\"rheumatoid arthritis\"). Returns indications, boxed/other warnings, dosage, contraindications, and adverse reactions (each text field capped, set_id preserved for out-of-band full-label fetch). Note: FDA label publication trails approval by weeks, so a just-approved drug may not have a label yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "OpenFDA search query. Examples: 'openfda.brand_name:\"HUMIRA\"', 'openfda.generic_name:\"adalimumab\"'"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Number of results (1-100, default 5)"
+          },
+          "skip": {
+            "type": "number",
+            "description": "Pagination offset (default 0) — the reported total can exceed one page of 100."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "fda_drug_recalls",
+      "description": "Search FDA drug recalls and enforcement actions by drug name or reason — returns recall classification, date, reason and enforcement status. A multi-word search is tried as ALL terms first and falls back to ANY term when nothing matches all of them; the response says which happened in match_mode, so a loose match is never mistaken for a precise one. Recall reasons are free narrative text and often name the contaminant rather than the harm (\"NDMA impurity\", not \"cancer\"), so search the substance when a symptom finds nothing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "OpenFDA search query. Examples: 'openfda.brand_name:\"VALSARTAN\"', 'classification:\"Class I\"', 'reason_for_recall:\"contamination\"'"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Number of results (1-100, default 10)"
+          },
+          "skip": {
+            "type": "number",
+            "description": "Pagination offset (default 0) — the reported total can exceed one page of 100."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "fda_drug_shortages",
+      "description": "Search the FDA Drug Shortages database by generic or brand name, manufacturer, status, or an advanced openFDA query. Returns national supply records and available FDA dates; reason and other details are sparse in the upstream data. This is not local pharmacy inventory or medical advice.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string",
+            "description": "Generic or proprietary drug name, e.g. \"lisdexamfetamine\"."
+          },
+          "manufacturer": {
+            "type": "string",
+            "description": "Company/manufacturer name."
+          },
+          "status": {
+            "type": "string",
+            "description": "FDA status filter: \"Current\", \"Resolved\", or \"To Be Discontinued\"."
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional raw openFDA shortage query for advanced filters. Combined with the structured filters using AND."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Number of records (1-100, default 20)."
+          },
+          "skip": {
+            "type": "number",
+            "description": "Pagination offset (default 0)."
+          }
+        }
+      }
+    },
+    {
+      "name": "fda_shortage_changes",
+      "description": "FDA drug-shortage records ordered by update_date, newest first, then restricted to the requested look-back window. Use for recently updated, discontinued, or resolved national shortages; this does not imply availability at any specific pharmacy or hospital. Most rows in any window are \"Reverified\" (FDA re-checking a status it already had) — pass update_type to filter to the change kinds that actually matter, e.g. New/Discontinued/To Be Discontinued/Resolved, and exclude Reverified.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "number",
+            "description": "Look-back window in days (1-365, default 30)."
+          },
+          "status": {
+            "type": "string",
+            "description": "Optional FDA status: \"Current\", \"Resolved\", or \"To Be Discontinued\"."
+          },
+          "update_type": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Optional filter on the kind of change, applied before paging (e.g. \"New\", \"Discontinued\", \"To Be Discontinued\", \"Resolved\", \"Updated\"; exclude \"Reverified\" to skip routine re-checks). String or array of strings, matched case-insensitively."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum records to return (1-100, default 25)."
+          },
+          "skip": {
+            "type": "number",
+            "description": "Pagination offset into the filtered, windowed result set (default 0)."
+          }
+        }
+      }
+    },
+    {
+      "name": "fda_complete_response_letters",
+      "description": "Search FDA-disclosed Complete Response Letters for drug and biologic applications. Defaults to letter_type \"COMPLETE RESPONSE\"; optionally include other letter types in the same dataset. Returns the application’s current approval_status, letter metadata, an excerpt, and the official document URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "company": {
+            "type": "string",
+            "description": "Sponsor/company name."
+          },
+          "application_number": {
+            "type": "string",
+            "description": "NDA/BLA application number."
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional full-text term or raw openFDA CRL search expression."
+          },
+          "from_date": {
+            "type": "string",
+            "description": "Optional start date, YYYY-MM-DD."
+          },
+          "to_date": {
+            "type": "string",
+            "description": "Optional end date, YYYY-MM-DD."
+          },
+          "include_other_letter_types": {
+            "type": "boolean",
+            "description": "Include tentative approvals, rescissions, refusal-to-file letters, and other non-CRL records (default false)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Number of letters (1-100, default 20)."
+          },
+          "skip": {
+            "type": "number",
+            "description": "Pagination offset (default 0)."
+          }
+        }
+      }
+    },
+    {
+      "name": "fda_crl_detail",
+      "description": "Retrieve one FDA Complete Response Letter by application number and optionally letter date. Returns the FDA-disclosed letter text and document URL. Confidential commercial and trade-secret material may be redacted by FDA.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "application_number": {
+            "type": "string",
+            "description": "Required NDA/BLA application number."
+          },
+          "letter_date": {
+            "type": "string",
+            "description": "Optional exact letter date, YYYY-MM-DD, when an application has multiple CRLs."
+          }
+        },
+        "required": [
+          "application_number"
+        ]
+      }
+    },
+    {
+      "name": "fda_food_recalls",
+      "description": "Search FDA FOOD recall / enforcement reports (openFDA /food/enforcement) — product recalls, reasons, classification, recalling firm, distribution, and status. Use for food-safety / recall-history questions (distinct from fda_drug_recalls which covers drugs).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "OpenFDA search query (optional — omit for most recent recalls). Examples: 'reason_for_recall:\"Listeria\"', 'state:\"CA\"', 'classification:\"Class I\"'."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Number of results (1-100, default 10)"
+          },
+          "skip": {
+            "type": "number",
+            "description": "Pagination offset (default 0) — the reported total can exceed one page of 100."
+          }
+        }
+      }
+    },
+    {
+      "name": "fda_event_counts",
+      "description": "Aggregate adverse events by reaction type, patient age, or outcome. Returns top reactions for a drug and event trends over time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "OpenFDA search query to filter events before counting. Same syntax as fda_drug_events."
+          },
+          "count_field": {
+            "type": "string",
+            "description": "Field to count/aggregate by. Examples: \"patient.reaction.reactionmeddrapt.exact\" (top reactions), \"receivedate\" (timeline), \"serious\" (severity breakdown), \"patient.drug.openfda.brand_name.exact\" (co-reported drugs)"
+          }
+        },
+        "required": [
+          "query",
+          "count_field"
+        ]
+      }
+    },
+    {
+      "name": "fda_warning_letters",
+      "description": "Search FDA WARNING LETTERS — official enforcement letters FDA sends firms for violations (CGMP, adulterated/misbranded products, unapproved claims). Answers \"has <company> received an FDA warning letter\", \"recent FDA warning letters about supplements/devices\". By default `search` matches the RECIPIENT company the letter was issued to, so the answer is about that firm's own enforcement history; set match:\"fulltext\" to search the whole letter record instead, which also finds letters that merely mention a firm. Every row reports matched_field so a caller can tell \"issued to\" from \"mentions\". Covers the 3,680 letters fda.gov publishes from 2021 onward — recipient company, posted and issued dates, issuing FDA office, subject and a link to the full letter text — and, for a firm with nothing in that window, falls back to the FDA compliance-actions archive of older letters back to 2010, which gives the firm, place, product type and issue date but no document. Every row says which of the two it came from. Live, no caller credential needed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "Company the letter was issued to (e.g. \"Elanco\", \"Merck Sharp & Dohme\") under the default match mode. Under match:\"fulltext\" this is a free-text query over the whole record — a product (\"supplement\") or violation topic (\"CGMP\"). Omit for the most recent letters."
+          },
+          "match": {
+            "type": "string",
+            "enum": [
+              "recipient",
+              "fulltext"
+            ],
+            "description": "How `search` is applied. \"recipient\" (default) keeps only letters whose addressed company matches. \"fulltext\" returns every record matching anywhere in its indexed text, including letters that only mention the term."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max letters to return, 1–50 (default 10). Newest first."
+          }
+        }
+      }
+    },
+    {
+      "name": "fda_faers_signal_summary",
+      "description": "Calculate report-level FAERS disproportionality routing metrics for one drug/reaction pair using a 2×2 reporting table. The reaction argument matches one whole MedDRA preferred term, so a broad word like \"neuropathy\" counts only reports filed under that exact term and not the specific terms containing it. Natural multi-word phrasing is resolved to MedDRA word order and disclosed; a term matching nothing is reported as unresolved rather than as zero reports. ROR/PRR are screening statistics—not incidence, causality, comparative drug safety, or an FDA safety conclusion.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string",
+            "description": "Brand or generic drug name."
+          },
+          "reaction": {
+            "type": "string",
+            "description": "MedDRA preferred term, matched whole rather than as a substring. Natural English word order is accepted and corrected (\"ischaemic optic neuropathy\" resolves to \"OPTIC ISCHAEMIC NEUROPATHY\")."
+          },
+          "from_date": {
+            "type": "string",
+            "description": "Optional YYYY-MM-DD."
+          },
+          "to_date": {
+            "type": "string",
+            "description": "Optional YYYY-MM-DD."
+          }
+        },
+        "required": [
+          "drug",
+          "reaction"
+        ]
+      }
+    },
+    {
+      "name": "fda_faers_reaction_profile",
+      "description": "Summarize the most frequently co-reported FAERS reactions plus serious/non-serious report counts for a drug. Counts are spontaneous reports with duplicates, co-medications, and reporting bias—not event rates or proof of causation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string"
+          },
+          "from_date": {
+            "type": "string",
+            "description": "Optional. YYYY-MM-DD. OMIT for all-time counts (the common case). Only specify if the question is about a specific date range — and never set from_date equal to to_date (a zero-width window returns 0)."
+          },
+          "to_date": {
+            "type": "string",
+            "description": "Optional. YYYY-MM-DD. OMIT unless from_date is also set. Must be after from_date."
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "drug"
+        ]
+      }
+    },
+    {
+      "name": "fda_faers_trend",
+      "description": "Aggregate daily FAERS report counts into calendar months for a drug and optional reaction over a bounded date window. The reaction argument matches one whole MedDRA preferred term, so a broad word like \"neuropathy\" counts only reports filed under that exact term and not the specific terms containing it. Natural multi-word phrasing is resolved to MedDRA word order and disclosed; a term matching nothing is reported as unresolved rather than as zero reports. Trends reflect reporting activity, publicity, utilization, duplicates, and database updates—not incidence or changing clinical risk.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string"
+          },
+          "reaction": {
+            "type": "string"
+          },
+          "from_date": {
+            "type": "string"
+          },
+          "to_date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "drug",
+          "from_date",
+          "to_date"
+        ]
+      }
+    },
+    {
+      "name": "fda_application_history",
+      "description": "Retrieve one Drugs@FDA NDA, ANDA, or BLA application and return its products and chronological submission-action history. Submission codes require regulatory interpretation and do not by themselves establish approval scope, exclusivity, or current marketing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "application_number": {
+            "type": "string",
+            "description": "NDA, ANDA, or BLA followed by digits."
+          }
+        },
+        "required": [
+          "application_number"
+        ]
+      }
+    },
+    {
+      "name": "fda_postmarket_risk_profile",
+      "description": "Combine a drug’s FAERS reporting profile, label warning fields, and FDA recall records for review routing. This is not a validated safety comparison, causal assessment, incidence estimate, or substitute for FDA communications and clinical review.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string"
+          },
+          "from_date": {
+            "type": "string"
+          },
+          "to_date": {
+            "type": "string"
+          },
+          "reaction_limit": {
+            "type": "number"
+          },
+          "recall_limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "drug"
+        ]
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "@pipeworx/mcp-openfda",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": "@pipeworx/mcp-openfda forwards to the Pipeworx gateway and lists only the openfda pack's tools. Set PIPEWORX_META_TOOLS=1 to also list ask_pipeworx and the other gateway-wide tools.",
+  "durationMs": 1818,
+  "stderr": "@pipeworx/mcp-openfda: initialize answered locally -- Could not reach the Pipeworx gateway at https://gateway.pipeworx.io/openfda/mcp (EAI_AGAIN). @pipeworx/mcp-openfda forwards every call to the Pipeworx gateway and has no local mode, so it needs network access.\n@pipeworx/mcp-openfda: notification notifications/initialized not delivered: Could not reach the Pipeworx gateway at https://gateway.pipeworx.io/openfda/mcp (EAI_AGAIN). @pipeworx/mcp-openfda forwards every call to the Pipeworx gateway and has no local mode, so it needs network access.\n@pipeworx/mcp-openfda: tools/list served from the snapshot bundled with this package -- Could not reach the Pipeworx gateway at https://gateway.pipeworx.io/openfda/mcp (EAI_AGAIN). @pipeworx/mcp-openfda forwards every call to the Pipeworx gateway and has no local mode, so it needs network access.\n"
+}

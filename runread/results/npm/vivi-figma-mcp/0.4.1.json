@@ -1,0 +1,970 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "vivi-figma-mcp",
+  "version": "0.4.1",
+  "integrity": {
+    "dist": "sha512-OpTFFHz7rdVYNZxEoUNuQEbErSY4UGZsHVm8MFqU3z0wM/tBDt1f/XTJ0unGWNFduIIOkAJUXpS7NE9w9ESvcQ==",
+    "installed": "sha512-OpTFFHz7rdVYNZxEoUNuQEbErSY4UGZsHVm8MFqU3z0wM/tBDt1f/XTJ0unGWNFduIIOkAJUXpS7NE9w9ESvcQ=="
+  },
+  "bin": "node_modules/vivi-figma-mcp/server/cli.mjs",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-29T16:53:23.281Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "figma_status",
+      "description": "Which Figma file/page is open in the Vivi plugin and how many nodes are selected. Call it first to check the plugin is connected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_selection",
+      "description": "The nodes currently selected in Figma: their full structure (layout, sizes, colors, text, fonts) as a JSON tree with node ids.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_outline",
+      "description": "Top-level frames of the current page (id, name, size, position, child count) — use it to pick what to open with node/screenshot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_node",
+      "description": "Structure of one node and its children as a JSON tree (type, name, sizes, auto-layout, padding, gap, fills, strokes, radius, shadows, text with fonts, component links; vectors/lines carry fill, stroke, strokeWidth, rotation). Every node has box:[x,y,w,h] relative to the requested node. Nodes carry vars (names of bound Figma variables/styles) and asset (photo/icon + export format) where present. Text wrapped only by block width comes as one line with lines:N. Deeper trees are cut by maxNodes/depth.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Figma node id, e.g. \"12:345\"",
+            "type": "string"
+          },
+          "ids": {
+            "description": "Several nodes in ONE call (up to 10) instead of id: the result is a list, one entry per node, in the same order",
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "depth": {
+            "description": "Tree depth, default 6",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "maxNodes": {
+            "description": "Node limit, default 300",
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 600
+          },
+          "compact": {
+            "description": "Drop default values (zero padding/gap, align start/left, name = text). Default true",
+            "type": "boolean"
+          },
+          "boxes": {
+            "description": "Add \"box\":[x,y,w,h] to every node, relative to the requested node (absolute placement). Default true",
+            "type": "boolean"
+          },
+          "format": {
+            "description": "json (default): node tree. css: ready HTML with inline flex styles, var(--name, #hex) for variables bound in Figma, :root list, asset <img> placeholders",
+            "type": "string",
+            "enum": [
+              "json",
+              "css"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_screenshot",
+      "description": "PNG picture of a node exactly as it looks in Figma (use it to judge visual design: spacing, colors, hierarchy). A tall page is unreadable as one picture: use tiles:N for a sequence of readable slices, or region:[x,y,w,h] to zoom into a part (coordinates from figma_node box).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Figma node id",
+            "type": "string"
+          },
+          "ids": {
+            "description": "Several nodes in ONE call (up to 8) instead of id: the result is a list, one entry per node, in the same order",
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxSize": {
+            "description": "Longest side in px, default 1024",
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 4096
+          },
+          "scale": {
+            "description": "Explicit scale (overrides maxSize). Use 1–2 for small text",
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 4
+          },
+          "region": {
+            "description": "CROP: [x, y, w, h] in the node's own coordinates (px from its top-left) — a zoomed look at one part (a heading, a card, a form). Default scale fits maxSize, up to 2x",
+            "minItems": 4,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "tiles": {
+            "description": "Cut the node into N vertical slices (slightly overlapping) and return N images in order — read a long page in detail instead of one tiny picture",
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 12
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_search",
+      "description": "Find nodes by name (or by text content) on the page or inside one frame; filter by type (TEXT, FRAME, COMPONENT, INSTANCE…).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Substring of the layer name; \"*\" matches any node (with type)"
+          },
+          "text": {
+            "description": "Also search inside text layers",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "Only this node type, e.g. TEXT or FRAME",
+            "type": "string"
+          },
+          "in": {
+            "description": "Search inside this node id only (default: the whole page)",
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_assets",
+      "description": "List the assets inside a node: photos (image fills) and icons (vectors) with id, name, size and the best export format. Use it before export to get the exact ids. Accepts a node id or a figma.com link with node-id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Node id (\"12:345\", \"12-345\") or a Figma link with ?node-id=…",
+            "type": "string"
+          },
+          "ids": {
+            "description": "Several nodes in ONE call (up to 10) instead of id: the result is a list, one entry per node, in the same order",
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_export",
+      "description": "Save nodes as image files (PNG/JPG/SVG/PDF) on disk and return their paths — to use photos and icons from the design in code. Default format: svg for vector icons, png for the rest; raster scale 0.5–4 (default 2). Files are written only inside the current project: <project>/figma-exports by default, or the absolute folder passed as dir (must be inside the project).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 1,
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Node ids (or links with node-id) to export"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpg",
+              "svg",
+              "pdf"
+            ]
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 4
+          },
+          "folder": {
+            "description": "Subfolder name inside the target folder, letters (any language), digits, space, - _ .",
+            "type": "string"
+          },
+          "dir": {
+            "description": "Absolute target folder INSIDE the current project (e.g. <project>/public/img); anything outside the project is refused. Default: <project>/figma-exports",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_export_assets",
+      "description": "One call: find every photo and icon inside a node and save them as files (icons as svg, photos as png@2x). Identical images are saved once. Returns the list of assets with paths.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Node id or Figma link with node-id"
+          },
+          "kinds": {
+            "description": "Which assets to export, default all",
+            "type": "string",
+            "enum": [
+              "all",
+              "photo",
+              "icon"
+            ]
+          },
+          "scale": {
+            "description": "Raster scale, default 2",
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 4
+          },
+          "folder": {
+            "description": "Subfolder inside the target folder (letters (any language), digits, space, - _ .)",
+            "type": "string"
+          },
+          "dir": {
+            "description": "Absolute target folder INSIDE the current project (e.g. <project>/public/img); anything outside the project is refused. Default: <project>/figma-exports",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_tokens",
+      "description": "Design tokens used inside a node: colors (with usage fill/text/stroke), fonts (family, weight, size, line height), radii, gaps, paddings, shadows — most used first. Use it to write CSS variables.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Node id or Figma link with node-id",
+            "type": "string"
+          },
+          "ids": {
+            "description": "Several nodes in ONE call (up to 10) instead of id: the result is a list, one entry per node, in the same order",
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_design_system",
+      "description": "Local styles and variables of the file: color styles, text styles, variables with values, plus the list of components.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_create",
+      "description": "Build a design in the open Figma file as REAL nodes (frames, auto-layout, text, shapes, photos, icons) from a JSON spec. One section per call (up to ~80 nodes); returns rootId, node tree with ids, lint issues, warnings and a screenshot. New top-level frames are placed in free space (right of what is already on the page, top-aligned; direction:'below' puts them under it, after:<id> next to a given node, x/y exact) so they never overlap. Use parent to put it inside a container, replace to rebuild an existing node in place. Undo with figma_undo. Stock photos (image.query) are searched on the internet by the keywords. Spec = a tree of nodes, each {\"type\":...}: frame (layout none|vertical|horizontal, gap, padding [v,h]|[t,r,b,l], align, cross, w/h number|\"hug\"|\"fill\", fill \"#RRGGBB\"|gradient, radius, stroke, strokeWidth, shadow, clip, children), text (text, fontSize, fontWeight regular|medium|semibold|bold, fontFamily, color, align, lineHeight, letterSpacing, textCase, w), rect, ellipse, line, image ({\"query\":\"keywords\"} downloads a stock photo; or \"path\" = a file inside the project; or \"data\" base64 + \"mime\"), icon ({\"icon\":\"arrow-right\"} Lucide name; \"ph:heart\" Phosphor if installed), instance ({\"component\":\"<id|name>\",\"overrides\":{...}}), shape/bool (vector shapes), and ready blocks: chart (bar/line/area/pie/donut…), table, avatar, logo, qr, barcode, mockup, map — expanded into real layers (editable; change a block's data with update + the block field). Full block fields: figma_guide + figma_schema. Root must be a frame with a numeric w. Auto-layout by default (\"hug\" + padding), no emoji, real copy. Call figma_guide before the first design — it has the full schema and the design rules. For a NEW page/screen also read figma_guide topics process + taste so it does not look generic.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "spec": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "frame"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": {},
+            "description": "Root frame spec"
+          },
+          "parent": {
+            "description": "Container node id to insert into (default: the current page)",
+            "type": "string"
+          },
+          "replace": {
+            "description": "Node id to delete and rebuild from this spec (only for an explicit redesign)",
+            "type": "string"
+          },
+          "after": {
+            "description": "Place the new frame next to this node (right of it, or below with direction:'below') instead of the default",
+            "type": "string"
+          },
+          "direction": {
+            "description": "Where free space is taken: right of everything on the page (default) or below it / below 'after'",
+            "type": "string",
+            "enum": [
+              "right",
+              "below"
+            ]
+          },
+          "x": {
+            "description": "Explicit position on the page (needs y too)",
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "gap": {
+            "description": "Space to the neighbour, default 120",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "file": {
+            "description": "Expected name of the open Figma file (from figma_status): the write is refused if another file is open now",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spec"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "figma_edit",
+      "description": "Change existing nodes with a list of operations run in order: update (fields: name, fill, stroke, radius, shadow, text, fontSize, color, w, h, layout, gap, padding, align…; bulk via \"ids\":[..] or \"match\":{in,name,text,type}), move, delete, insert (a full node spec into a parent), duplicate, rename, reorder, restructure (regroup nodes by a target tree), group/ungroup, make_component, combine_variants, rebuild. Ids come from figma_node/figma_outline. An op that creates a node may carry \"as\":\"name\" — later ops refer to it as \"$name\" (\"$page\" = current page). Returns warnings (failed ops), lint issues, changed trees and a screenshot. See figma_guide for the full op list.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "edits": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Operations, e.g. [{op:'update',id:'12:3',fill:'#111111'}]"
+          },
+          "file": {
+            "description": "Expected name of the open Figma file (from figma_status): the write is refused if another file is open now",
+            "type": "string"
+          }
+        },
+        "required": [
+          "edits"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_variants",
+      "description": "Create a Component Set with states in ONE call (button Default/Hover/Pressed, accordion Closed/Open, tab Active/Inactive, size or type variants): \"base\" is the frame spec of the component (name its text layers, e.g. \"Label\"), each variant gives props ({\"Type\":\"Primary\",\"State\":\"Hover\"}), optional \"set\" (fields of the root to change, e.g. {\"fill\":\"#8F430A\"}) and \"children\" (changes by layer name, e.g. {\"Label\":{\"color\":\"#fff\"}}). Components land in the top-level \"Components\" frame; hover/press/click interactions are wired automatically (Default to Hover, Default to Pressed, or two states click both ways; \"none\" or an explicit list to change). \"replace\" swaps loose copies on the page for instances of a chosen variant with text overrides. Same checks and result as figma_edit; undo with figma_undo. Use it for every interactive element and repeated control (see figma_guide process, components).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Set name, e.g. \"Button/Primary\""
+          },
+          "base": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "frame"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": {},
+            "description": "Component frame spec; text layers that change should have explicit names"
+          },
+          "variants": {
+            "minItems": 2,
+            "maxItems": 24,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "props": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "{\"State\":\"Default\"}; same keys in every variant"
+                },
+                "set": {
+                  "description": "Fields of the root frame to override for this variant",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "children": {
+                  "description": "Changes by layer name: {\"Label\":{\"color\":\"#FFFFFF\"}}",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": [
+                "props"
+              ]
+            }
+          },
+          "interactions": {
+            "description": "Default \"auto\"",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "none"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "to": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "trigger": {
+                      "type": "string",
+                      "enum": [
+                        "hover",
+                        "press",
+                        "click"
+                      ]
+                    },
+                    "transition": {
+                      "type": "string",
+                      "enum": [
+                        "instant",
+                        "dissolve",
+                        "smart_animate"
+                      ]
+                    },
+                    "duration": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to"
+                  ]
+                }
+              }
+            ]
+          },
+          "replace": {
+            "maxItems": 40,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Node to replace (a loose copy on the page)"
+                },
+                "variants": {
+                  "description": "Variant to show, default: the first",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "overrides": {
+                  "description": "Text by layer name: {\"Label\":\"Order now\"}",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "w": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "hug",
+                        "fill"
+                      ]
+                    }
+                  ]
+                },
+                "h": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "hug",
+                        "fill"
+                      ]
+                    }
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          },
+          "file": {
+            "description": "Expected name of the open Figma file (from figma_status): the write is refused if another file is open now",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "base",
+          "variants"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_undo",
+      "description": "Revert the last N write runs (figma_create / figma_edit calls) made through this plugin: restores changed nodes and removes created ones. Default 1; the last 8 runs are kept.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "description": "How many recent runs to revert, default 1",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "file": {
+            "description": "Expected name of the open Figma file (from figma_status): the write is refused if another file is open now",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_styles",
+      "description": "Create or update (by name) color styles, text styles and variables from design tokens, so a design system exists before building. Then reference them in specs as \"style:<name>\" (fill, color, stroke) and \"textStyle\":\"<name>\" on text nodes. Not covered by figma_undo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "colors": {
+            "description": "{\"Brand/Primary\":\"#B6F24A\",\"Text/Default\":\"#F2F5FF\"}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "texts": {
+            "description": "{\"Heading/H1\":{\"family\":\"Inter\",\"weight\":\"bold\",\"size\":56,\"lineHeight\":60}}",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "family": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number"
+                },
+                "lineHeight": {
+                  "type": "number"
+                },
+                "letterSpacing": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "size"
+              ]
+            }
+          },
+          "variables": {
+            "description": "Variables in one collection: hex strings become COLOR, numbers FLOAT, booleans BOOLEAN, other strings STRING",
+            "type": "object",
+            "properties": {
+              "collection": {
+                "type": "string"
+              },
+              "values": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "collection",
+              "values"
+            ]
+          },
+          "file": {
+            "description": "Expected name of the open Figma file (from figma_status): the write is refused if another file is open now",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_componentize",
+      "description": "Turn 2+ repeated blocks of the SAME structure (e.g. 4 stat cards, 3 list rows) into one main component plus instances: the main component is moved into the top-level \"Components\" frame (created if missing), and the design keeps ONLY instances that retain their own texts and photos. Run it before you call a design done for every repeated card, row, chip, button, FAQ item, review. ids must be frames; undo with figma_undo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 2,
+            "maxItems": 40,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Node ids (or links) of the repeated blocks"
+          },
+          "name": {
+            "description": "Component name, e.g. \"Card / Stat\"",
+            "type": "string"
+          },
+          "file": {
+            "description": "Expected name of the open Figma file (from figma_status): the write is refused if another file is open now",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_fonts",
+      "description": "Fonts available in Figma: families (optionally filtered by query) and those already used on the page; with family — its available styles (weights). Pick fontFamily for specs from here.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Filter families by substring",
+            "type": "string"
+          },
+          "family": {
+            "description": "Return the styles of this family",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_focus",
+      "description": "Select nodes and scroll/zoom Figma to show them to the user (switches page if needed). Use after building something the user should see.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Node ids or Figma links"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_schema",
+      "description": "Full schema text of rarely used spec parts: \"logo\", \"barcode\", \"qr\", \"mockup\", \"map\" (ready blocks), \"shapes\" (blob/wave/star/polygon/ring/path + boolean ops + masks), \"patterns\" (texture fills), \"grouping\" (group/ungroup). Without name lists the names.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "logo | barcode | qr | mockup | map | shapes | patterns | grouping",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_guide",
+      "description": "Design guide for creating designs: spec = node schema (all fields), craft = sizing + design rules, components = reusing components, edits = workflow and the list of edit operations. Taste layer for NEW pages/screens (read it before designing so results do not look generic): process (order of work: ask, shape, direction, hero first, sweep), taste (what makes a design look designed, reflexes to avoid), typography, layout, imagery, patterns (textures), anatomy (sections per job: book, buy, subscribe...), shapes (21 page shapes), genres, trends (what is current in 2026 and what is fading), composition (make sections unusual: overlaps, absolute placement, shapes; an idea, not a recipe). Read spec and edits (and craft for pages) BEFORE the first figma_create. Without topic returns spec + edits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "description": "spec | craft | components | edits | all (these four) | process | taste | typography | layout | imagery | patterns | anatomy | shapes | genres | trends | composition",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "figma_icons",
+      "description": "Find icon names for {\"type\":\"icon\",\"icon\":\"<name>\"}: Lucide (always) plus Phosphor \"ph:\", Tabler \"tabler:\", Material \"ms:\" when installed. Returns up to 20 matches for a keyword.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Keyword, e.g. \"cart\", \"arrow\", \"user\""
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "vivi-figma",
+    "version": "0.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 16649,
+  "stderr": "vivi-figma MCP: готов (stdio), мост ws://127.0.0.1:8787; картинки только в /pkg\n"
+}

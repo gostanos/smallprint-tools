@@ -1,0 +1,524 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "health-export-mcp",
+  "version": "1.7.3",
+  "integrity": {
+    "dist": "sha512-lkGc4rfFAtPpH6unNfa+UMmeQa6QpddR4che30gQ+/ogQtdLPmuA/VfSaIevZlhGyAmOwq92R7bNqCc+cXwiuA==",
+    "installed": "sha512-lkGc4rfFAtPpH6unNfa+UMmeQa6QpddR4che30gQ+/ogQtdLPmuA/VfSaIevZlhGyAmOwq92R7bNqCc+cXwiuA=="
+  },
+  "bin": "node_modules/health-export-mcp/server.mjs",
+  "main": null,
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "HEALTH_DATA_DIR",
+    "PAIRING_SECRET",
+    "HEALTH_EXPORT_PASSPHRASE"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-29T11:09:43.173Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_mcp_status",
+      "description": "Health check: data source, how many metrics/workouts are available, which optional context files exist, the most recent data date, and a `recompute` summary of past days rebuilt after late-arriving samples (with any days too old to rebuild). Call this first to confirm the bridge is connected. The result also includes `app.unlockUrl` and `app.appStoreUrl`, the website and App Store page of the companion iOS app that writes the export; both links carry fixed campaign attribution labels.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_freshness",
+      "description": "How current the exported files are, so you can decide whether to trust what you read or ask the user to refresh. Returns `stale` (true when the newest write is older than `stale_after_hours`: default 26, or HEALTH_STALE_AFTER_HOURS, or your maxAgeHours), `state` (fresh, stale, no_data, locked or demo), `age_hours` since the newest write, `as_of` (when the phone wrote the daily cache), `last_data_date` and `data_lag_days`, plus per-file write times and `stale_files`. Same rule as the `status --max-age` cron gate. When no export is found, `recommendation` also names the companion iOS app's App Store page and website (the same links as `app.appStoreUrl` and `app.unlockUrl`); when the newest readable export is older than the server's own window (not a stricter maxAgeHours), it names the website. Both carry fixed campaign labels. Cheap: call it again before a long analysis.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxAgeHours": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 8760,
+            "description": "Treat the data as stale when the newest write is older than this many hours (greater than 0, at most 8760). Default 26, or HEALTH_STALE_AFTER_HOURS when set."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_metrics",
+      "description": "List every available Apple Health metric with its unit, day count, and date range. Use this to discover metric names before querying.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_health_metrics",
+      "description": "Get values for a metric (or all metrics) over an optional date range, with an aggregate (avg/sum/min/max/latest). The core data-retrieval tool. Every result carries a `coverage` block giving the metric's real firstDate/lastDate/days: check it before trusting a long window, and note that `aggregate` is always computed over the full range even when `points` are rolled up. Single-metric answers also list any logged point events inside the window as segmentBoundaries. A day the app rebuilt after samples arrived late (or were deleted) carries `recomputed_at`, and a metric with rebuilt or possibly stale past days carries a `recompute` block (backfilled_days, recomputed_at, capped); untouched days carry neither.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "description": "Metric name, e.g. step_count, heart_rate, sleep_analysis. Omit for all."
+          },
+          "start": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "end": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "aggregation": {
+            "type": "string",
+            "enum": [
+              "avg",
+              "sum",
+              "min",
+              "max",
+              "latest"
+            ]
+          },
+          "granularity": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "day",
+              "week",
+              "month",
+              "quarter",
+              "year"
+            ],
+            "description": "Roll daily values up before returning them. 'auto' (default) picks the finest granularity that fits the response budget, so a multi-year range returns monthly points instead of thousands of daily ones."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum data points to return (default 365, max 3000). The server rolls up rather than truncating."
+          },
+          "filterDays": {
+            "type": "object",
+            "description": "Restrict to days covered by matching logged events (health-events.json): endDate ranges cover every day inclusive, point events cover their single day, negate:true keeps only days NOT covered. The answer states how many days matched. Example: HRV on night-shift blocks vs days off.",
+            "properties": {
+              "eventType": {
+                "type": "string",
+                "description": "Event type to match, e.g. shift, medication, travel."
+              },
+              "eventTag": {
+                "type": "string",
+                "description": "Event tag to match, e.g. nights."
+              },
+              "negate": {
+                "type": "boolean",
+                "description": "Keep only days NOT covered by matching events."
+              }
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_trends",
+      "description": "Compare the most recent N-day window against the prior N days for a metric: change, percent change and direction (up/down/flat). Also returns `daysAvailable` and `windowSatisfied`: if windowSatisfied is false the file does not hold enough history for the window you asked for, and the comparison is over less data than requested. Logged point events inside the compared span are listed as segmentBoundaries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string"
+          },
+          "window": {
+            "type": "integer",
+            "description": "days per window (default 7)"
+          },
+          "excludeTravelDays": {
+            "type": "boolean",
+            "description": "Drop days on which a timezone change landed (health-days.json): those days were not 24 hours long, so their totals are stretched or shortened by the clock. The answer reports how many days were excluded and why."
+          }
+        },
+        "required": [
+          "metric"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "compare_periods",
+      "description": "Compare a metric between two arbitrary date periods (A vs B): each aggregate plus the change and percent change. Pass periodA/periodB explicitly, or pass anchor {eventId, days} to build both periods around a logged event (the before/after question, with the event day excluded from both sides).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string"
+          },
+          "periodA": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "string",
+                "description": "YYYY-MM-DD"
+              },
+              "end": {
+                "type": "string",
+                "description": "YYYY-MM-DD"
+              }
+            }
+          },
+          "periodB": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "string",
+                "description": "YYYY-MM-DD"
+              },
+              "end": {
+                "type": "string",
+                "description": "YYYY-MM-DD"
+              }
+            }
+          },
+          "anchor": {
+            "type": "object",
+            "description": "Build both periods around a logged event instead of passing dates: periodA is the {days} days before the event date, periodB the {days} days after, the event day itself excluded from both. Get event ids from list_events. Pass either anchor or periodA/periodB, not both.",
+            "properties": {
+              "eventId": {
+                "type": "string",
+                "description": "Event id from list_events."
+              },
+              "days": {
+                "type": "integer",
+                "description": "Days on each side of the event."
+              }
+            }
+          },
+          "excludeTravelDays": {
+            "type": "boolean",
+            "description": "Drop days on which a timezone change landed (health-days.json): those days were not 24 hours long, so their totals are stretched or shortened by the clock. The answer reports how many days were excluded and why."
+          }
+        },
+        "required": [
+          "metric"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_structured_export",
+      "description": "Return clean structured JSON for the chosen metrics/date range. Paginated: the result carries `nextCursor` when more metrics remain; pass it back as `cursor` for the next page. Prefer naming the metrics you need and a date range; calling it bare over a full history is a lot of data.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "start": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "end": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "granularity": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "day",
+              "week",
+              "month",
+              "quarter",
+              "year"
+            ],
+            "description": "Roll daily values up before returning them. 'auto' (default) picks the finest granularity that fits the response budget, so a multi-year range returns monthly points instead of thousands of daily ones."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum data points to return (default 365, max 3000). The server rolls up rather than truncating."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor from a previous call's nextCursor."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_intraday",
+      "description": "The current hour-by-hour window from the iOS app's HOURLY automations (health-intraday.json, app 1.4+): each metric's hourly points plus its latest value. The file is REPLACED on every hourly run, so this is a live within-day view, not history; use get_health_metrics for day-level questions. Returns available:false with setup guidance when no hourly automation has delivered yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "description": "Metric name to filter, e.g. heart_rate. Omit for every metric in the window."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "query_health_data",
+      "description": "Natural-language convenience: pass a question and get routed structured results. Prefer the specific tools above when you can, and call list_metrics first to see how much history exists, since this tool answers over whatever the file holds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_events",
+      "description": "Logged context events from health-events.json: medication starts, habit changes, doctor visits, life events, shift blocks, episodes, travel, and any type a newer app adds. Optional {type, tag, start, end} filters; a range event matches a window it overlaps. Sorted ascending by date. Returns available:false when the file was never exported; absence means nothing was exported, not that nothing happened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Event type, e.g. medication, habit, visit, life, shift, episode, travel, other. Unknown types pass through and can be filtered by their stored string."
+          },
+          "tag": {
+            "type": "string",
+            "description": "Match events carrying this tag."
+          },
+          "start": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "end": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_profile",
+      "description": "The context fields the user explicitly opted in to sharing (health-profile.json): conditions, medications, goals, allergies, notes. Returns the fields plus a presentFields list. An absent field was withheld by the user or never enabled; absence must never be read as \"none\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_workouts",
+      "description": "Query the workouts cache with {activityType (a name like Running, or a raw HealthKit id like 37), start, end} filters and pagination ({limit} default 50 max 200, {cursor} from a previous nextCursor). Records are returned exactly as stored, including the newer optional keys (avgHeartRate, maxHeartRate, running dynamics, cycling power, intervals, hasRoute) when the app exported them; older caches simply lack those keys and nothing is fabricated. Also returns summary {count, byActivityType} over everything that matched.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "activityType": {
+            "type": "string",
+            "description": "Activity name (e.g. Running) or raw HealthKit activity id (e.g. 37)."
+          },
+          "start": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "end": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Workouts per page (default 50, max 200)."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor from a previous call's nextCursor."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_sleep_sessions",
+      "description": "Clustered sleep sessions from health-sessions.json with {start, end, day} filters. Sessions are attributed to the WAKING day, matching the daily cache's sleep_analysis, so the two surfaces never disagree; a split night appears as multiple sessions with the same day, returned as-is. Timestamps carry the local UTC offset at the time of the sample.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "description": "First waking day (inclusive), YYYY-MM-DD."
+          },
+          "end": {
+            "type": "string",
+            "description": "Last waking day (inclusive), YYYY-MM-DD."
+          },
+          "day": {
+            "type": "string",
+            "description": "A single waking day, YYYY-MM-DD."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_cycle_context",
+      "description": "Cycle context derived from user-logged period starts (health-cycles.json): day-in-cycle and a coarse phase label (follicular from day 1 to the observed midpoint of that cycle, luteal for the remainder). Derived from logged periods only, never predictive, and no ovulation estimate is made. Optional {date} for a single day; default returns per-day context for the last cycle.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "correlate_metrics",
+      "description": "Pearson correlation between two metrics' daily values: {metricA, metricB, lag (0 to 3, default 0), start, end}. lag pairs metricA on day d with metricB on day d+lag, so lag 1 compares against the FOLLOWING day. Returns alignedPairs, r (withheld below 10 aligned pairs), and both means. The answer always carries the association-not-causation caveat; treat every r as alignment in this file, not mechanism.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "metricA": {
+            "type": "string"
+          },
+          "metricB": {
+            "type": "string"
+          },
+          "lag": {
+            "type": "integer",
+            "description": "0 to 3 days. lag 1 pairs metricA on day d with metricB on the following day."
+          },
+          "start": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "end": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "metricA",
+          "metricB"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "resolve_metric",
+      "description": "Look a metric name up in the canonical naming and unit table. Accepts the export's own name (step_count), a HealthKit identifier (StepCount, HKQuantityTypeIdentifierStepCount), a display title (Step Count) or a common alias (steps, hrv, spo2, weight) and returns the canonical metric, its unit (percentages are 0 to 1 fractions), the unit variants other apps use with the exact formula into the canonical unit, and whether this export holds it. Pass {value, unit} to convert one value, e.g. 180 lb to kg. A word naming several metrics (distance, calories) comes back ambiguous with candidates, and a different measure (RMSSD vs the SDNN that Apple Health stores) is refused with the reason: nothing is guessed. get_health_metrics, get_trends, compare_periods, get_structured_export and correlate_metrics accept the same aliases and report `resolvedFrom` when they used one; other tools take the export's own names. The export holds one value per metric per day, merged across sources by Apple Health, so this tool states honestly whether per-source disagreement can be seen in the file (exports that record per-source attribution carry `src`/`by` and a `sources` block; others report it as not available) rather than inventing it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Any spelling of a metric, e.g. steps, StepCount, Body Weight, VO2 max."
+          },
+          "value": {
+            "type": "number",
+            "description": "Optional value to convert into the canonical unit. Pass with unit."
+          },
+          "unit": {
+            "type": "string",
+            "description": "Unit of value, e.g. lb, mmol/L, degF, km, %. Unknown units are refused, never guessed."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "health-export-ai",
+    "version": "1.7.3"
+  },
+  "protocolVersion": null,
+  "instructions": "Apple Health export bridge. Call get_mcp_status (its `freshness` block says whether the export is stale; get_freshness has the detail), then list_metrics, then the data tools (get_health_metrics, get_trends, compare_periods, get_structured_export, get_workouts, correlate_metrics). The context tools (list_events, get_profile, get_sleep_sessions, get_cycle_context) read optional files: absence is reported explicitly, never read as \"no data\". prompts/list serves ready-made analysis prompts.",
+  "durationMs": 1865,
+  "stderr": "[mcp] ready: 16 tools, 22 prompts, source: file /pkg/smallprint-placeholder/.health-cache.json\n"
+}

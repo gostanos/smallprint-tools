@@ -1,0 +1,136 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@pipeworx/mcp-fed-nic",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha512-Ya7UTWeX2xSt+RVa8psDjSNaRbsA5dtoCZqRWRUJGe+JFcZIGAbiZz61q+j/K3S0gOFAYhOFjwMzFz8GHsFwfA==",
+    "installed": "sha512-Ya7UTWeX2xSt+RVa8psDjSNaRbsA5dtoCZqRWRUJGe+JFcZIGAbiZz61q+j/K3S0gOFAYhOFjwMzFz8GHsFwfA=="
+  },
+  "bin": "node_modules/@pipeworx/mcp-fed-nic/bin/cli.js",
+  "main": "lib/index.js",
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "PIPEWORX_API_KEY"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-10-29T14:22:35.128Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "nic_search_institutions",
+      "description": "Search US banks, bank holding companies, financial holding companies and their subsidiaries by name — sourced from the Federal Reserve National Information Center (NIC, ffiec.gov/npw), the Fed's own repository of bank structure data. Case-insensitive substring match on legal/short name, RANKED (not alphabetical): exact name match first, then a prefix match on an active institution with an FDIC certificate, then any prefix match, then other active FDIC-cert institutions, then the rest — so searching \"Wells Fargo Bank\" returns the main national bank ahead of same-family entities like an Ireland-domiciled affiliate with no FDIC cert. Returns RSSD ID (NIC's identifier), FDIC certificate number, LEI, institution type, city/state, and active/closed status — RSSD ID and FDIC cert chain to the `fdic` pack (fdic_get_institution) and `ffiec-call-reports` pack (idrssd) for financials on the same bank.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Institution name, or part of it, e.g. \"JPMorgan Chase Bank\""
+          },
+          "status": {
+            "type": "string",
+            "description": "Filter: \"active\" | \"closed\" | \"any\" (default \"active\")"
+          },
+          "state": {
+            "type": "string",
+            "description": "Optional 2-letter US state abbreviation filter, e.g. \"OH\""
+          },
+          "limit": {
+            "type": "number",
+            "description": "1-50, default 20"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "nic_get_institution",
+      "description": "Full NIC record for one institution — legal name, FDIC certificate, LEI, institution type, charter type, location, and active/closed status. Sourced from the Federal Reserve National Information Center (ffiec.gov/npw). Look it up by RSSD ID (NIC's own identifier), FDIC certificate number (the join key shared with the `fdic` pack), or LEI (the join key shared with the `gleif` pack) — provide exactly one. Use nic_search_institutions first to find an RSSD ID from a name.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rssd_id": {
+            "type": "number",
+            "description": "NIC RSSD ID, e.g. 852218 for JPMorgan Chase Bank, N.A. Provide exactly one of rssd_id, fdic_cert, lei."
+          },
+          "fdic_cert": {
+            "type": "number",
+            "description": "FDIC certificate number — chains to the `fdic` pack (fdic_get_institution), e.g. 3511 for Wells Fargo Bank, N.A. Provide exactly one of rssd_id, fdic_cert, lei."
+          },
+          "lei": {
+            "type": "string",
+            "description": "Legal Entity Identifier (20-character LEI code) — chains to the `gleif` pack, e.g. \"7H6GLXDRUGQFU57RNE97\" for JPMorgan Chase Bank, N.A. Provide exactly one of rssd_id, fdic_cert, lei."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "nic_get_hierarchy",
+      "description": "Corporate ownership hierarchy for a bank or holding company, sourced from the Federal Reserve NIC (ffiec.gov/npw) Relationships data — \"which holding company owns this bank?\" / \"list the subsidiaries of this BHC\". direction=\"up\" (default) walks the ownership chain to its top holder(s) — for a bank subsidiary this typically resolves to a single ultimate parent (e.g. a bank holding company). direction=\"down\" lists entities OWNED BY the given RSSD ID; pass rssd_id of the TOP-TIER parent (found via direction=\"up\") to get the full corporate family. total_subsidiary_count is a DISTINCT count computed in SQL (deduped by RSSD ID across multiple ownership paths to the same subsidiary) — it is always the true total, independent of `limit`/`offset`; use offset to page beyond the first `limit` rows. Coverage note: this is our own computed closure over NIC's public Relationships file, not necessarily identical to NIC's own web UI tiering figure — see pack README.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rssd_id": {
+            "type": "number",
+            "description": "NIC RSSD ID to start from"
+          },
+          "direction": {
+            "type": "string",
+            "description": "\"up\" (ancestors/owners, default) or \"down\" (subsidiaries/descendants)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "For direction=\"down\": max subsidiary rows to return, 1-200, default 50 (total_subsidiary_count is always the true distinct total, not the page size)"
+          },
+          "offset": {
+            "type": "number",
+            "description": "For direction=\"down\": pagination offset into total_subsidiary_count, default 0"
+          }
+        },
+        "required": [
+          "rssd_id"
+        ]
+      }
+    },
+    {
+      "name": "nic_get_history",
+      "description": "Merger, acquisition, failure and charter-transformation history for an institution, sourced from the Federal Reserve NIC (ffiec.gov/npw) Transformations data — \"what predecessor institutions merged into this bank?\" / \"what happened to this bank?\". Returns rows where the given RSSD ID is either predecessor (was absorbed/transformed) or successor (absorbed/received the other institution), each with the counterpart institution's name, RSSD ID and event date.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rssd_id": {
+            "type": "number",
+            "description": "NIC RSSD ID"
+          }
+        },
+        "required": [
+          "rssd_id"
+        ]
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "@pipeworx/mcp-fed-nic",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": "@pipeworx/mcp-fed-nic forwards to the Pipeworx gateway and lists only the fed-nic pack's tools. Set PIPEWORX_META_TOOLS=1 to also list ask_pipeworx and the other gateway-wide tools.",
+  "durationMs": 1841,
+  "stderr": "@pipeworx/mcp-fed-nic: initialize answered locally -- Could not reach the Pipeworx gateway at https://gateway.pipeworx.io/fed-nic/mcp (EAI_AGAIN). @pipeworx/mcp-fed-nic forwards every call to the Pipeworx gateway and has no local mode, so it needs network access.\n@pipeworx/mcp-fed-nic: notification notifications/initialized not delivered: Could not reach the Pipeworx gateway at https://gateway.pipeworx.io/fed-nic/mcp (EAI_AGAIN). @pipeworx/mcp-fed-nic forwards every call to the Pipeworx gateway and has no local mode, so it needs network access.\n@pipeworx/mcp-fed-nic: tools/list served from the snapshot bundled with this package -- Could not reach the Pipeworx gateway at https://gateway.pipeworx.io/fed-nic/mcp (EAI_AGAIN). @pipeworx/mcp-fed-nic forwards every call to the Pipeworx gateway and has no local mode, so it needs network access.\n"
+}
