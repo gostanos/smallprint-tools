@@ -1,0 +1,3456 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "sx-platform-mcp",
+  "version": "0.0.2",
+  "integrity": {
+    "dist": "sha512-tml7z8tgjoxE3icFr2IRgmYmsN9V3fzJ1hQ+mR2vGgpm4CA4LbMkxUUHgs8cl+4ikao7VrfV0aX3DyIelwbZEw==",
+    "installed": "sha512-tml7z8tgjoxE3icFr2IRgmYmsN9V3fzJ1hQ+mR2vGgpm4CA4LbMkxUUHgs8cl+4ikao7VrfV0aX3DyIelwbZEw=="
+  },
+  "bin": "node_modules/sx-platform-mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.2",
+    "sdk": "1.32.1",
+    "at": "2026-11-03T12:19:33.467Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "sx_connect",
+      "description": "设置后续请求要访问的平台地址与默认租户，并立即探测该地址是否可达。\n\n**不需要账号密码** —— 身份由调用方按请求头带来（`sx-token` / `sx-tenant-id`），服务端不做登录、也不保存凭据。\n\n**不调用也可以** —— 服务会使用启动时读到的配置（`.env` 或环境变量）。\n同机 nginx 部署时默认 http://127.0.0.1:8000，通常无需调用本工具。\n\n典型用法（临时指向另一个环境）：\n```\nsx_connect { baseUrl: \"http://10.0.0.5:8080\", tenantId: \"TEST\" }\n```\n\n只传部分字段时，其余沿用当前值。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "baseUrl": {
+            "type": "string",
+            "description": "平台地址，默认同机 nginx：http://127.0.0.1:8000（结尾斜杠可省略）"
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "默认租户 ID，如 TEST / MES / 000000（管理租户）"
+          },
+          "tlsInsecure": {
+            "type": "boolean",
+            "description": "是否跳过 TLS 证书校验。仅用于自签证书的内网 https 环境；开启会失去中间人攻击防护，默认 false"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_disconnect",
+      "description": "清除服务端当前持有的令牌。正常调用路径下令牌是**按请求**注入的，请求结束即不再保留；本工具用于手动兜底清理。\n地址与默认租户保留不变。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_local_login",
+      "description": "用租户 + 账号 + 密码登录平台，**返回 accessToken**，由调用方自己放进请求头。\n\n**服务端不保存任何状态**：登录结果只出现在本次返回里，不缓存、不写文件。\n后续调用需要令牌的接口时，请在请求头带上：\n```\nsx-token: <返回的 token>\n```\n\n**用途**：本地调试时手里没有现成 token，不想每次手动登录取 token。\n生产环境不用它 —— 正常调用链路的身份由上层（dsh / nginx）注入请求头。\n\n密码只用于这一次请求，不回显、不落盘、不写日志。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "登录账号"
+          },
+          "password": {
+            "type": "string",
+            "description": "登录密码（明文；服务按平台约定转 md5 提交）"
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "租户 ID，如 TEST / MES / 000000（管理租户）；省略则用当前配置的租户"
+          },
+          "passwordMode": {
+            "type": "string",
+            "enum": [
+              "md5",
+              "plain",
+              "auto"
+            ],
+            "description": "密码提交形式：md5(默认) 按平台约定转换；plain 原样提交；auto 值已是 32 位 md5 时原样用"
+          }
+        },
+        "required": [
+          "account",
+          "password"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_status",
+      "description": "返回当前平台地址、租户、登录态与写操作开关。排障时先调它：能区分「配置不对」「连不上」「没登录」三类问题。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_dynamic",
+      "description": "低代码数据层的**唯一查询入口**。用 `action` 选择查什么：\n\n· **`page`**（最常用）—— 分页查询模型数据，带 total。`current` / `size` **必填且为正整数**。\n  适合「列出/统计满足条件的 X 记录」。「最近 N 条」用 `orderList` + 小 size，不要拉全量再截断。\n· **`list`** —— 同上但**不分页**，返回数组。数据量大时改用 page 或先收窄条件。\n· **`get`** —— 查单条（按 `sxKey` 或 `queryValue`）。**编辑前先调它**拿全部字段、当前值与 SX_KEY。\n  `actionType:\"ADD\"` 返回**带新增默认值**的记录（当前登录人/时间/STATUS 都已填好），不需要定位；\n  `EDIT` / `VIEW` / `COPY_ADD` / `CHANGE` 需要定位。\n· **`search`** —— 下拉/自动补全。给定模型与值列/标签列，把编码翻译成文本。\n  `fieldDictTable` 传 SX_DICT / SX_DICT_BIZ 表示查平台字典。\n· **`datasource`** —— 统一取数接口，支持**分组汇总**与 **SQL 数据源**：\n  `dataSourceType:\"model\"`（按模型名，单表）/ `\"sql\"`（按 SQL 编码，**多表关联用这个**）；\n  `queryMode:\"2\"`（列表）/ `\"1\"`（分组汇总，需 `groupSumFieldList`）。\n  ⚠️ groupSum：`\"1\"`=分组字段、`\"3\"`=COUNT、其它=SUM。**不支持 AVG**（自己 SUM÷COUNT）。\n  **不要自己写 `sqlField:\"COUNT(1)\"` 配 `groupSum:\"2\"`** —— 会生成 SUM(COUNT(1)) 报 ORA-00937。\n· **`change_log`** —— 单条记录的字段级审计轨迹（旧值/新值/操作人）。需 `sxKey`。\n· **`formula`** —— 服务端公式解析，用于落库前先验证公式写法。\n\n**字段范围**：传 `formCode` 只返回表单字段；传 `modelName` 返回模型全部字段；两者都传时**表单优先**。`allField:\"1\"` 优先于表单。\n不确定列名时：先 `allField:\"1\"` 查一条看真实物理列名。\n`subData:\"2\"` 连带返回子模型数据 —— **这是发现模型关系的正确方式**（子记录 PID = 主记录 ID）。\n\n⚠️ 写操作（保存/批量/删除/锁定等）全部在 `sx_dynamic_save`，本工具只读。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "page",
+              "list",
+              "get",
+              "search",
+              "datasource",
+              "change_log",
+              "formula"
+            ],
+            "description": "查什么：page / list / get / search / datasource / change_log / formula"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "表单编码，如 ALTER_FORM。**传它则只返回表单里的字段**；与 modelName 同时传时，表单优先生效。SX_ 开头的系统表单存放在 000000 管理租户，按编码会自动路由过去"
+          },
+          "formId": {
+            "type": "string",
+            "description": "表单 ID，语义同 formCode"
+          },
+          "modelName": {
+            "type": "string",
+            "description": "模型编码，如 SX_USER。**传它则返回模型全部字段**（含未放进表单的）。最常用的定位方式。SX_ 开头的系统模型存放在 000000 管理租户，按编码会自动路由过去"
+          },
+          "modelId": {
+            "type": "string",
+            "description": "模型 ID（SX_MODEL_TABLE.ID），语义同 modelName"
+          },
+          "current": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "action=page 必填：页码，从 1 开始"
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "action=page 必填：每页条数（建议 ≤100）"
+          },
+          "maxRows": {
+            "type": "integer",
+            "description": "action=page：独立于 size 的返回行数硬上限"
+          },
+          "queryValue": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "简单等值过滤（仅 AND）。值语义：标量=等值；\"A,B\" 或数组=IN；\"NULL\"=IS NULL；含 % =LIKE"
+          },
+          "queryParam": {
+            "type": "string",
+            "description": "简易查询串（仅 AND，& 连接，无空格无引号）。如 \"MODEL_NAME=SX_USER\"。等号取值支持 %(LIKE)、NULL、逗号(IN)；不等号 <> 表示 IS NOT NULL / NOT IN。"
+          },
+          "queryList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "字段名（物理列名，如 MODEL_NAME）"
+                },
+                "controlType": {
+                  "type": "string",
+                  "description": "控件类型，如 input / select / date / number，影响取值解析"
+                },
+                "dataType": {
+                  "type": "string",
+                  "description": "数据类型，如 string / int / date"
+                },
+                "fuzzySearch": {
+                  "type": "string",
+                  "description": "是否模糊匹配"
+                },
+                "list": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "operator": {
+                        "type": "string",
+                        "description": "操作符：EQ NE GT GE LT LE LIKE NLIKE BT(区间) NULL NOTNULL IN NIN 等"
+                      },
+                      "lowerValue": {
+                        "description": "主值 / 区间下界"
+                      },
+                      "upperValue": {
+                        "description": "区间上界（仅 BT 用）"
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "条件列表；同一项内多个条件之间是 OR"
+                }
+              },
+              "required": [
+                "field",
+                "list"
+              ],
+              "additionalProperties": false
+            },
+            "description": "结构化查询条件，项与项之间是 AND。示例：[{field:\"STATUS\",list:[{operator:\"EQ\",lowerValue:\"1\"}]}]"
+          },
+          "compoundQuery": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "字段名（物理列名）"
+                },
+                "controlType": {
+                  "type": "string",
+                  "description": "控件类型：input / select / date / number，影响取值解析"
+                },
+                "dataType": {
+                  "type": "string",
+                  "description": "数据类型。**过滤日期时必须传 \"Date\"**，否则报 ORA-01861"
+                },
+                "operator": {
+                  "type": "string",
+                  "description": "操作符：EQ NE GT GE LT LE LIKE NLIKE BT NBT NULL NNULL"
+                },
+                "lowerValue": {
+                  "description": "主值 / 区间下界（单边操作符只读这个）"
+                },
+                "upperValue": {
+                  "description": "区间上界（仅 BT / NBT 用）"
+                },
+                "relation": {
+                  "type": "string",
+                  "description": "分组内条件关系：AND / OR"
+                },
+                "children": {
+                  "type": "array",
+                  "description": "子条件，配合 relation 表达 (a OR b) 这类分组"
+                }
+              },
+              "required": [
+                "field"
+              ],
+              "additionalProperties": false
+            },
+            "description": "组合查询条件（扁平结构）。**优先用 queryList**；compoundQuery 对复杂嵌套表达式的支持不稳定。"
+          },
+          "compoundExpr": {
+            "type": "string",
+            "description": "组合查询公式，编号对应 compoundQuery 第 N 条。⚠️ 实测不生效"
+          },
+          "orderList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "prop": {
+                  "type": "string"
+                },
+                "order": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "prop"
+              ],
+              "additionalProperties": false
+            },
+            "description": "排序：[{prop:\"ID\",order:\"1\"}]。**注意 order 语义**：字符串 \"1\" 表示倒序(DESC)，其它值（含 \"0\"）表示升序(ASC) —— 与直觉相反，实测确认。省略 order 默认升序。"
+          },
+          "sumColumns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "action=page：需要求和的列名，结果在 sumData 中"
+          },
+          "distinct": {
+            "type": "string",
+            "description": "传 \"1\" 时对结果去重"
+          },
+          "allField": {
+            "type": "string",
+            "description": "传 \"1\" 返回模型全部字段（优先于 formCode 的字段范围限制）"
+          },
+          "noSystemField": {
+            "type": "string",
+            "description": "⚠️ 实测无效，不影响返回字段（保留仅为兼容）"
+          },
+          "subData": {
+            "type": "string",
+            "description": "page/list 传 \"2\" 连带返回子模型数据、\"3\" 再带孙数据；get 为递归层数（默认 2）。\n子模型数据以「模型名数组」挂在每条记录上（如 XZGZXC_MX），子记录 PID = 主记录 ID。\n**不要通过解析表单 jsonText 推断关联模型。**"
+          },
+          "tree": {
+            "type": "string",
+            "description": "传 \"1\" 时按模型的树形字段返回嵌套树"
+          },
+          "sxNewFlag": {
+            "type": "string",
+            "description": "传 \"1\" 取变更模型的最新版本数据"
+          },
+          "search": {
+            "type": "string",
+            "description": "page/list：快速模糊搜索文本（作用于表单配置的移动端搜索字段）；action=search 时是下拉的模糊搜索词"
+          },
+          "sxKey": {
+            "type": "string",
+            "description": "记录键：各主键字段值以 | 拼接（单主键即该值）。取自 page/list 返回的 SX_KEY"
+          },
+          "actionType": {
+            "type": "string",
+            "enum": [
+              "ADD",
+              "EDIT",
+              "VIEW",
+              "COPY_ADD",
+              "CHANGE"
+            ],
+            "description": "action=get 用，默认 VIEW；ADD 返回带新增默认值的记录（不需要 sxKey）"
+          },
+          "fieldDictTable": {
+            "type": "string",
+            "description": "action=search 必填：模型编码（如 SX_USER），或 SX_DICT / SX_DICT_BIZ 表示平台字典"
+          },
+          "fieldDictField": {
+            "type": "string",
+            "description": "action=search 必填：作为选项 VALUE 的列，如 ID"
+          },
+          "fieldDictRemark": {
+            "type": "string",
+            "description": "action=search：作为选项 LABEL 的列，如 NAME"
+          },
+          "fieldDictDesc": {
+            "type": "string",
+            "description": "action=search：作为选项描述的列"
+          },
+          "fieldDictTableId": {
+            "type": "string"
+          },
+          "valueList": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "action=search：限定结果只取 fieldDictField 的这些值（IN）"
+          },
+          "queryOther": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/queryList/items"
+            },
+            "description": "action=search：⚠️ **实测会被静默忽略**，请改用 queryList"
+          },
+          "databaseName": {
+            "type": "string",
+            "description": "action=search：外部数据源名称，用于直接搜原始表"
+          },
+          "dicData": {
+            "type": "string",
+            "description": "action=search：内联字典的 JSON 字符串，如 [{\"dictKey\":\"1\",\"dictValue\":\"启用\"}]"
+          },
+          "dataSourceType": {
+            "type": "string",
+            "enum": [
+              "model",
+              "sql"
+            ],
+            "description": "action=datasource 必填：model=按模型名取数；sql=按 SQL 编码（多表关联用这个）"
+          },
+          "queryMode": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2"
+            ],
+            "description": "action=datasource 必填：1=分组汇总（需 groupSumFieldList）；2=列表明细"
+          },
+          "sqlCode": {
+            "type": "string",
+            "description": "action=datasource + dataSourceType=sql 必填：SQL 编码"
+          },
+          "groupSumFieldList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fieldName": {
+                  "type": "string",
+                  "description": "结果列名（分组字段用真实列名，统计列可自定义如 CNT）"
+                },
+                "fieldRemark": {
+                  "type": "string",
+                  "description": "中文名"
+                },
+                "groupSum": {
+                  "type": "string",
+                  "description": "1=分组字段；3=COUNT；其他（常用 2）=SUM"
+                },
+                "sqlField": {
+                  "type": "string",
+                  "description": "参与聚合的真实列（如 ID / TOTAL_AMOUNT）；分组字段若填则用其表达式"
+                }
+              },
+              "required": [
+                "fieldName",
+                "groupSum"
+              ],
+              "additionalProperties": false
+            },
+            "description": "action=datasource + queryMode=1 必填：分组汇总字段清单"
+          },
+          "queryColumns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "action=datasource：指定返回列（列表模式）"
+          },
+          "formData": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=datasource：SQL 里 ${...} 的取值来源"
+          },
+          "sqlAllField": {
+            "type": "string",
+            "description": "action=datasource：SQL 取数返回全部字段，传 \"1\""
+          },
+          "formula": {
+            "type": "string",
+            "description": "action=formula：单个公式（ValueLogic JSON 配置或表达式）"
+          },
+          "formulaList": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "action=formula：批量公式，返回以公式原文为键的映射"
+          },
+          "rowData": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=formula：行数据，公式中通过 $rowData 访问"
+          },
+          "mainData": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=formula：主表数据，作为公式变量顶层作用域"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_dynamic_save",
+      "description": "低代码数据层的**唯一写入入口**。用 `action` 选择操作。\n\n· **`save`**（默认）—— 新增或修改单模型数据。引擎按主键查找，存在则更新、不存在则插入（新 ID 回写结果）。同一次调用执行必填/唯一性/业务规则/行级权限校验，可在同一事务内级联保存子模型、删除 `deleteList` 中的子行。\n  `formValue` 三种形态：单条平坦映射 / `{\"模型名\":[{...}]}` 批量 / `{\"模型名\":{单条}}`。**修改时记录里要带 ID。**\n· **`batch_save`** —— 多模型同事务批量保存（`list` 每项与 save 的 body 同构）。适合「一次业务动作同时写主表与其它模型」。\n· **`batch_update`**（需 `confirm`）—— 对匹配条件的所有记录统一设同一字段值（`updateData`）。**必须给 keyList 或 queryValue/queryList/queryParam 至少一个条件**，拒绝无条件调用。\n· **`delete`**（需 `confirm`）—— 逻辑删除。必须给 `id` 或 `queryValue` 之一。`deleteLevel` 控制级联层数：1（默认）仅主模型、2 连带直接子模型、依此类推。**请先用 sx_dynamic {action:\"page\"} 确认命中范围**。\n· **`lock`** —— 锁定/释放记录（`lock:true/false`），防止并发编辑。\n· **`process_change`**（需 `confirm`）—— 触发变更模型的变更数据处理，把待处理数据合并进主数据。需 `modelId`。\n· **`get_code`** —— 按业务键取一个自增编号。⚠️ **会消费一个序号**，是有副作用的操作。\n\n⚠️ 所有写操作受写开关（SX_ALLOW_WRITES）与角色校验限制。只读查询用 `sx_dynamic`。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "save",
+              "batch_save",
+              "batch_update",
+              "delete",
+              "lock",
+              "process_change",
+              "get_code"
+            ],
+            "description": "写操作类型，默认 save"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "表单编码，如 ALTER_FORM。**传它则只返回表单里的字段**；与 modelName 同时传时，表单优先生效。SX_ 开头的系统表单存放在 000000 管理租户，按编码会自动路由过去"
+          },
+          "formId": {
+            "type": "string",
+            "description": "表单 ID，语义同 formCode"
+          },
+          "modelName": {
+            "type": "string",
+            "description": "模型编码，如 SX_USER。**传它则返回模型全部字段**（含未放进表单的）。最常用的定位方式。SX_ 开头的系统模型存放在 000000 管理租户，按编码会自动路由过去"
+          },
+          "modelId": {
+            "type": "string",
+            "description": "模型 ID（SX_MODEL_TABLE.ID），语义同 modelName"
+          },
+          "formValue": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=save 必填：要保存的数据（三种形态见描述）。字段用大写物理列名，修改时带 ID"
+          },
+          "dataFormat": {
+            "type": "string",
+            "enum": [
+              "UPPER",
+              "LOWER",
+              "HUMP"
+            ],
+            "description": "formValue 键的字段结构，默认 UPPER（大写物理列名，推荐）"
+          },
+          "saveLevel": {
+            "type": "integer",
+            "description": "级联保存深度，默认 2 级"
+          },
+          "deleteList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "action=save：同时删除的子行集合。每项 {modelName|formCode|modelId|formId, id, deleteLevel}。id 支持单值或数组；多主键用 \"|\" 拼接"
+          },
+          "batchCommit": {
+            "type": "string",
+            "description": "action=save：传 \"1\" 走批量落库路径，适合表格多行保存"
+          },
+          "checkNewData": {
+            "type": "string",
+            "description": "action=save：校验最新数据标记"
+          },
+          "list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "action=batch_save 必填：DynamicSaveDTO 数组，每项含自己的 modelName/formCode、formValue、dataFormat、saveLevel、deleteList 等"
+          },
+          "updateData": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=batch_update 必填：要写入的 字段->新值 映射，作用于所有匹配行"
+          },
+          "keyList": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "action=batch_update：要更新的主键值数组；多主键模型每个元素用 | 拼接"
+          },
+          "queryValue": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "条件映射，用**物理列名**（如 STATUS），不做字段名自动匹配"
+          },
+          "queryList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "字段名（物理列名，如 MODEL_NAME）"
+                },
+                "controlType": {
+                  "type": "string",
+                  "description": "控件类型，如 input / select / date / number，影响取值解析"
+                },
+                "dataType": {
+                  "type": "string",
+                  "description": "数据类型，如 string / int / date"
+                },
+                "fuzzySearch": {
+                  "type": "string",
+                  "description": "是否模糊匹配"
+                },
+                "list": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "operator": {
+                        "type": "string",
+                        "description": "操作符：EQ NE GT GE LT LE LIKE NLIKE BT(区间) NULL NOTNULL IN NIN 等"
+                      },
+                      "lowerValue": {
+                        "description": "主值 / 区间下界"
+                      },
+                      "upperValue": {
+                        "description": "区间上界（仅 BT 用）"
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "条件列表；同一项内多个条件之间是 OR"
+                }
+              },
+              "required": [
+                "field",
+                "list"
+              ],
+              "additionalProperties": false
+            },
+            "description": "结构化查询条件，项与项之间是 AND。示例：[{field:\"STATUS\",list:[{operator:\"EQ\",lowerValue:\"1\"}]}]"
+          },
+          "queryParam": {
+            "type": "string",
+            "description": "简易查询串（仅 AND，& 连接，无空格无引号）。如 \"MODEL_NAME=SX_USER\"。等号取值支持 %(LIKE)、NULL、逗号(IN)；不等号 <> 表示 IS NOT NULL / NOT IN。"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "action=delete：主键值（单个 / 逗号分隔 \"k1,k2\" / 数组）；多主键模型每个元素用 | 拼接"
+          },
+          "deleteLevel": {
+            "type": "integer",
+            "description": "action=delete：级联删除层数，默认 1（仅主模型）"
+          },
+          "lock": {
+            "type": "boolean",
+            "description": "action=lock 必填：true=锁定，false=释放锁定"
+          },
+          "sxKey": {
+            "type": "string",
+            "description": "action=lock：记录键（各主键字段值以 | 拼接）。与 id 二选一，用于定位要锁的记录"
+          },
+          "key": {
+            "type": "string",
+            "description": "action=get_code 必填：编号业务键"
+          },
+          "sequenceReset": {
+            "type": "integer",
+            "description": "action=get_code：序号重置策略（平台按 int 解析）"
+          },
+          "length": {
+            "type": "integer",
+            "description": "action=get_code：编号长度（平台按 int 解析）"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "高风险操作（batch_update / delete / process_change）必须显式传 true 才会执行。这是安全闸门 —— 确认你已明确知道要修改的范围。"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_model",
+      "description": "模型设计下**唯一的读取入口**。用 `action` 选择查什么：\n\n· **`list`** —— 模型清单。`scope` 选范围：\n  `tenant`（默认，本租户）/ `all`（含 SX_ 系统模型）/ `dict`（字典来源）/ `by_app`（需 appId）。\n  **要取 modelId 建表单时用 scope:\"tenant\"**；确认模型名是否存在用 scope:\"all\"。\n\n· **`get`** —— 单个模型某一面。`section` 选：\n  `summary`（默认，模型头 + 内嵌 fieldList，**最省事的看模型入口**）/   `basic_fields`（新建模型会自动补的系统标准字段）/   `by_relation`（按主/子/中间表挑候选关联模型）。\n  summary 用 `by:\"name\"`（默认，推荐）或 `by:\"id\"` 定位。\n\n· **`fields`** —— 字段集合。`kind` 选口径：\n  `db`（默认，数据库字段完整实体，**建 payload 的权威清单**）/   `form`（面向表单渲染的控件结构）/ `tree`（仅可用于树形的字段）/   `dict`（value/label/desc 格式，直接做下拉）。\n  用 `by` 选 name（默认，支持 SX_）/ id（仅 db、form）。\n\n· **`db`** —— 直接读物理库。`kind`：`tables`（默认，列出所有表）/ `table_fields`（需 dbTableName，看表结构）。\n\n· **`config`** —— 模型**全量配置**：模型头 + 7 类子配置（字段/引用/验证/排序/索引/关系）。**改模型前先调它**，在完整数据基础上改，避免只回存部分配置把其它抹掉。\n\n· **`citation`** —— 模型引用配置 + 完整性体检。体检会指出三类**静默失败**：引用字段未登记为宿主字段（读时恒 null）、FIRST/LAST 缺 orderList（结果不稳定）、CITATION_TYPE=1 缺 MODEL_NAME。不传 modelName 列出全部引用。\n\n⚠️ **`SX_` 系统模型住在 000000 管理租户**：按编码查会自动路由，按 ID 查不会（会报错或静默返回空数组）。所以优先用 `by:\"name\"` / `modelName`。\n⚠️ 写操作（保存/加字段/同步/删除/绑应用/反向生成）全部在 `sx_model_save`，本工具只读。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "fields",
+              "db",
+              "config",
+              "citation"
+            ],
+            "description": "查什么：list / get / fields / db / config / citation"
+          },
+          "modelName": {
+            "type": "string",
+            "description": "模型编码。get/fields/config/citation 用；推荐都传它"
+          },
+          "id": {
+            "type": "string",
+            "description": "模型 ID（get 的 by=\"id\"）"
+          },
+          "modelId": {
+            "type": "string",
+            "description": "模型 ID（fields 的 by=\"id\"；get section=by_relation 时为主模型 ID）"
+          },
+          "relatedModelId": {
+            "type": "string",
+            "description": "get section=by_relation：关联/子模型 ID"
+          },
+          "middleModelId": {
+            "type": "string",
+            "description": "get section=by_relation：中间表模型 ID"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "tenant",
+              "all",
+              "dict",
+              "by_app"
+            ],
+            "description": "list 的范围，默认 tenant"
+          },
+          "by": {
+            "type": "string",
+            "enum": [
+              "name",
+              "id"
+            ],
+            "description": "get/fields 的寻址方式，默认 name（推荐）"
+          },
+          "section": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "basic_fields",
+              "by_relation"
+            ],
+            "description": "get 要哪一面，默认 summary"
+          },
+          "kind": {
+            "type": "string",
+            "description": "fields: db/form/tree/dict（默认 db）；db: tables/table_fields（默认 tables）"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "list 的本地模糊过滤"
+          },
+          "appId": {
+            "type": "string",
+            "description": "list scope=by_app 时必填：应用 ID"
+          },
+          "dataFormat": {
+            "type": "string",
+            "description": "fields kind=form：字段命名风格（如 HUMP/LOWER）"
+          },
+          "dbTableName": {
+            "type": "string",
+            "description": "db kind=table_fields 时必填：物理表名"
+          },
+          "datasourceId": {
+            "type": "string",
+            "description": "db：数据源 ID，省略用默认"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_model_save",
+      "description": "模型设计下**唯一的写入入口**。用 `action` 选择操作。\n\n⚠️ **改已有模型前先调 `sx_model {action:\"config\"}` 读全量** —— 保存是整条覆盖，没传的配置会被清空。\n\n· **`save`**（默认）—— 新建/修改模型，一次写入模型头 + 全部字段。\n  新建：自动补 15 个系统基础字段，按 `enableFlow` 加 5 个流程字段、`enableChange` 加 4 个变更字段；**`appId` 必填**（平台 afterSave 自动绑定应用）。\n  修改：先读全量再合并回存，**不会抹掉引用/验证/排序/索引/关系**；`fields` 传的是**要新增的**字段。\n  **建完还需 `action:\"sync_db\"` 才会在数据库建表。**\n\n· **`add_fields`** —— 给已存在模型追加业务字段。`sync:true` 一次完成加字段 + 建物理列。\n\n· **`remove_fields`** —— 从模型定义删除字段（需 `fieldNames`）。系统字段不可删；**物理列不会被删除**（平台保守设计）。\n\n· **`sync_db`**（需 `confirm`）—— 模型定义同步到物理库（建表/加列）。**所有字段变更生效的必要步骤**。同步**只增不减**。\n\n· **`delete`**（需 `confirm`）—— 按 `modelIds` 删除模型。**平台自带护栏：物理表有数据就拒绝删除**，这是刻意的保护。\n  被拦下时只提示、不要试图清理数据 —— 请与用户确认后走停用（改 STATUS）而非删除。\n  **直接删模型头，不要先删字段**（先删字段会让护栏误报「已存在数据」）。\n\n· **`bind_app`** —— 模型绑定应用（`bind` 默认 true）或解绑（`bind:false` 需 `confirm`）。幂等。\n\n· **`from_db_table`**（需 `confirm`）—— 反向生成：把物理表变成平台模型。建议先用 `sx_model {action:\"db\", kind:\"table_fields\"}` 看表结构。\n\n· **`save_citation`** —— 配置宿主模型从另一个模型拉数据（引用用于查询数据、跨表带值）。一次调用完成写引用定义（SX_MODEL_CITATION）+ 写引用字段（SX_MODEL_CITATION_FIELD）。**引用字段不需要登记为宿主模型字段**，平台读取时会自动合并。queryList 里用 {\"calculate\":\"mainData.字段名\"} 引用宿主字段；SOURCE_TYPE=FIRST/LAST 时必须配 orderList，否则结果不稳定。\n\n· **`save_relations`**（需 `confirm`）—— 配置**模型关系（主子表）**。一次写入关系定义（SX_MODEL_FOREIGN）+ 关联键（SX_MODEL_FOREIGN_KEY）。\n  · `operation`：**1=一对一，2=一对多**（默认）。平台按它决定取首条还是列表。\n  · `keys` 是关系**真正生效**的地方，典型主子表 `[{mainField:\"ID\", relatedField:\"PID\"}]`。\n  · `middleModelName` 用于多对多（走中间表 EXISTS 查询）。\n  · **全量覆盖**：没列出的旧关系会被删除，所以需要 confirm。\n  · **读取时子表挂在 `alias` 键下**（不是模型名）：配了 `alias:\"items\"` 就读 `data.items`；不配 alias 时才用子模型名。\n  · 用 `sx_dynamic {action:\"get\", modelName:\"主模型\", subData:\"2\"}` 读取 —— **走 modelName 不需表单**；走 formCode 则要求表单里真的放出该子表控件。\n  · `operation:\"1\"` 时子表是**单个对象**，`\"2\"` 时是**数组**（实测确认）。\n\n⚠️ 所有写操作受写开关（SX_ALLOW_WRITES）与角色校验限制。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "save",
+              "add_fields",
+              "remove_fields",
+              "sync_db",
+              "delete",
+              "bind_app",
+              "from_db_table",
+              "save_citation",
+              "save_relations"
+            ],
+            "description": "写操作类型，默认 save"
+          },
+          "modelName": {
+            "type": "string",
+            "description": "模型编码（大写下划线）。save/add_fields/remove_fields/sync_db 用；已存在则 save 为修改"
+          },
+          "modelRemark": {
+            "type": "string",
+            "description": "模型中文名（save 必填）"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "物理列名（大写），如 APPLY_NO"
+                },
+                "remark": {
+                  "type": "string",
+                  "description": "中文字段名"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "String",
+                    "Integer",
+                    "BigDecimal",
+                    "Date",
+                    "DateTime",
+                    "Text"
+                  ],
+                  "description": "字段类型，默认 String"
+                },
+                "length": {
+                  "type": "integer",
+                  "description": "列长度。**Integer 建议 11**（不给会生成 NUMBER(0)，Oracle 建表失败）"
+                },
+                "point": {
+                  "type": "integer",
+                  "description": "小数位（BigDecimal，默认 2）"
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "是否必填"
+                },
+                "unique": {
+                  "type": "boolean",
+                  "description": "是否唯一"
+                },
+                "dbField": {
+                  "type": "boolean",
+                  "description": "是否是「数据库字段」（对应界面上的复选框）。**默认 true**，取消勾选则该字段不落到物理表"
+                }
+              },
+              "required": [
+                "name",
+                "remark"
+              ],
+              "additionalProperties": false
+            },
+            "description": "业务字段。save 新建时是全部业务字段、修改时是要新增的；add_fields 为要追加的"
+          },
+          "enableFlow": {
+            "type": "boolean",
+            "description": "save 新建时：是否需要审批流（追加 5 个流程字段）。**建议显式给**"
+          },
+          "enableChange": {
+            "type": "boolean",
+            "description": "save 新建时：是否启用变更留痕（追加 4 个变更字段 + RECORD_CHANGE=1）"
+          },
+          "appId": {
+            "type": "string",
+            "description": "save 新建必填：所属应用 ID（来自 sx_app {action:\"list\"}）；bind_app 必填"
+          },
+          "dbTableName": {
+            "type": "string",
+            "description": "物理表名，省略时平台按 T{租户}_{模型名} 生成"
+          },
+          "isSync": {
+            "type": "integer",
+            "description": "模型是否纳入数据库同步，默认 1"
+          },
+          "extra": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "其它要写入模型头的字段（大写下划线）"
+          },
+          "sync": {
+            "type": "boolean",
+            "description": "add_fields：true=加完立即同步到数据库（建议）"
+          },
+          "fieldNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "remove_fields 必填：要删除的字段名"
+          },
+          "modelId": {
+            "type": "string",
+            "description": "模型 ID。sync_db 可与 modelName 二选一"
+          },
+          "modelIds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "delete 必填：模型 ID（单个 / 逗号分隔 / 数组）；bind_app 为要绑定的模型 ID"
+          },
+          "bind": {
+            "type": "boolean",
+            "description": "bind_app：true=绑定（默认），false=解绑（需 confirm）"
+          },
+          "datasourceId": {
+            "type": "string",
+            "description": "from_db_table：数据源 ID，省略用默认"
+          },
+          "appIds": {
+            "type": "string",
+            "description": "from_db_table：要同时关联的应用 ID（多个逗号分隔）"
+          },
+          "hostModelName": {
+            "type": "string",
+            "description": "宿主模型编码（在哪个模型上使用引用）"
+          },
+          "citationId": {
+            "type": "string",
+            "description": "引用 ID；带它=修改已有引用"
+          },
+          "targetModelName": {
+            "type": "string",
+            "description": "save_citation 必填：被引用的模型编码（如 MES_MARA）"
+          },
+          "queryList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "save_citation 必填：查询条件数组。每项如 {field:\"MATNR\",operator:\"EQ\",dataType:\"String\",lowerValue:\"{\\\"calculate\\\":\\\"mainData.MATNR\\\"}\"}。**省略会导致取到第一条数据**"
+          },
+          "orderList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "排序数组，如 [{prop:\"ID\",order:\"0\"}]。**FIRST/LAST 必须配**，否则顺序不确定。注意 order:\"1\"=倒序、其它=升序（平台反直觉设计）"
+          },
+          "conditionExpr": {
+            "type": "string",
+            "description": "高级组合表达式，如 \"(1 and 2) or 3\"（编号对应 queryList 下标）；传了会自动置 ENABLE_EXPR=1"
+          },
+          "citationFields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fieldName": {
+                  "type": "string",
+                  "description": "宿主上的字段名；省略时按 {被引用模型名}_{来源字段} 生成"
+                },
+                "sourceField": {
+                  "type": "string",
+                  "description": "被引用模型的来源字段"
+                },
+                "sourceType": {
+                  "type": "string",
+                  "enum": [
+                    "FIRST",
+                    "LAST",
+                    "SUM",
+                    "JOIN"
+                  ],
+                  "description": "聚合方式"
+                },
+                "fieldType": {
+                  "type": "string",
+                  "description": "字段类型，默认 String"
+                },
+                "remark": {
+                  "type": "string",
+                  "description": "中文名"
+                }
+              },
+              "required": [
+                "sourceField",
+                "sourceType"
+              ],
+              "additionalProperties": false
+            },
+            "description": "save_citation 必填：要带过来的字段清单（至少一个）"
+          },
+          "refreshCache": {
+            "type": "boolean",
+            "description": "save_citation：true=同时刷新模型缓存，让引用立即生效"
+          },
+          "mainModelName": {
+            "type": "string",
+            "description": "save_relations：**主模型**编码（父表，如 CONTRACT_REVIEW）"
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "childModelName": {
+                  "type": "string",
+                  "description": "子模型编码（如 CONTRACT_REVIEW_ITEM）"
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "1",
+                    "2"
+                  ],
+                  "description": "关系：1=一对一，2=一对多（默认 2）。平台源码按它决定取首条还是列表"
+                },
+                "alias": {
+                  "type": "string",
+                  "description": "子模型别名（读取时挂在主数据上的键名）"
+                },
+                "middleModelName": {
+                  "type": "string",
+                  "description": "中间表模型编码（多对多才需要，省略即普通主子关系）"
+                },
+                "relatedField": {
+                  "type": "string",
+                  "description": "指定子模型字段时，读取结果会把多行该字段拼成逗号串而不是列表"
+                },
+                "readOnly": {
+                  "type": "boolean",
+                  "description": "仅显示（不可编辑）"
+                },
+                "copyClean": {
+                  "type": "boolean",
+                  "description": "复制主记录时清空子表"
+                },
+                "changeClean": {
+                  "type": "boolean",
+                  "description": "主记录变更时清空子表"
+                },
+                "remark": {
+                  "type": "string",
+                  "description": "关系描述"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "mainField": {
+                        "type": "string",
+                        "description": "主模型上的关联字段（通常是 ID）"
+                      },
+                      "relatedField": {
+                        "type": "string",
+                        "description": "子模型上的关联字段（通常是 PID）"
+                      }
+                    },
+                    "required": [
+                      "mainField",
+                      "relatedField"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "**关联键**（写进 SX_MODEL_FOREIGN_KEY，这是关系真正生效的地方）。典型主子表是 [{mainField:\"ID\", relatedField:\"PID\"}]。至少一个"
+                }
+              },
+              "required": [
+                "childModelName",
+                "keys"
+              ],
+              "additionalProperties": false
+            },
+            "description": "save_relations：要配置的关系数组。**全量覆盖** —— 没列出的旧关系会被删除"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "sync_db / delete / from_db_table / bind_app 解绑 / save_relations 必须显式传 true"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_form_widget",
+      "description": "表单基础组件与组件配置的统一入口。用 `action` 选择：\n\n· **`list`** —— 平台**全部表单控件**目录（`GET /api/system/widget/allWidgetList`，实测 91 个）。\n  这是写表单 JSON 时 `type` 取值的**权威来源**，比前端设计器面板更全，平台加控件会自动跟随。\n  每条含 `code`（即 `type` 的值）/ `name` / `group`（布局/常用/图表/其他/移动端首页/PC首页）/\n  `widgetForm`（自身属性表单编码）/ `parentForm`（父级扩展属性表单编码）/ `isDic`（是否字典类）。\n  可用 `group` / `keyword` 过滤；`withDefault:true` 额外返回默认配置。\n\n· **`props`** —— 某个控件**能配哪些属性**，这是写表单 JSON 最实用的一步。\n  用 `widgetCode`（如 `input`）或直接给 `formCode`（如 `SX_FORM_INPUT`）。\n  分两层：`ownProps` 控件自身属性、`parentProps` 父级扩展属性。\n  **`parentForm` 是什么**：同一控件单独放、和放进表格/查询里，能配的属性不同。\n  放进表格后多出的「列宽/对齐/固定/排序/合计」等列级属性就来自 `parentForm`。\n  实测只有 4 个控件有：`table`/`pagetable` 共用 `SX_FORM_PARENT_TABLE`、\n  `query` 用 `SX_FORM_PARENT_QUERY`、`kanban` 用 `SX_FORM_PARENT_KANBAN`。\n\n返回的 `props` 是**属性名清单**（`labels` 是中文名），**只含叶子节点** ——\n属性面板里的 `collapse`/`group`/`tab` 等分组容器会被跳过，它们的 `prop` 是随机串\n（如 `jX7K_br9KoJtcBl-RmCbe`）仅供布局，不是可配置属性；真正的属性在其子节点里，已展开。\n\n⚠️ `props.xxx` 形式的属性要写进控件的 `props` 对象；不带前缀的（如 `defaultValue`）是控件顶层字段。\n━━ 新增控件时 withDefault 必传 ━━\n把 `widgetDefault` 当作**控件结构骨架**，在它基础上改，不要从零拼。\n若控件要放进 query/table/pagetable，再合并 `parentDefault` 得到列级扩展属性。\n漏字段会让控件在页面上「没值/不显示/栅格错乱」。完整流程见 `sx_form_save` 的描述。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "props"
+            ],
+            "description": "默认 list：控件目录；props：某控件的可配属性"
+          },
+          "group": {
+            "type": "string",
+            "description": "action=list：按分组过滤 layout（布局）/ common（常用）/ chart（图表）/ other / mobile_home / pc_home"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "action=list：按控件类型码或中文名模糊过滤"
+          },
+          "widgetCode": {
+            "type": "string",
+            "description": "action=props：控件类型码，如 input / select / table；与 formCode 二选一"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "action=props：直接指定属性表单编码，如 SX_FORM_INPUT"
+          },
+          "includeParent": {
+            "type": "boolean",
+            "description": "action=props：是否同时返回父级扩展属性（默认 true）"
+          },
+          "withDefault": {
+            "type": "boolean",
+            "description": "list：返回 widgetDefault 默认配置；props：返回属性默认值 JSON（默认都 false）"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_dashboard_guide",
+      "description": "「应用集成看板」的完整实现经验（MCP_INTEGRATION_DASHBOARD 表单的建设过程沉淀）。\n\n**做 iframe 看板 / 自建数据页面前先读这个** —— 里面每一条都对应实际踩过的坑。\n\n**普通用户（非 administrator）调用时自动切换为「单文件原生 HTML + 国内 CDN（BootCDN） + 数据静态内联」方案**：\n普通用户没有表单/控件写权限，不建表单、不用平台 iframe 注入。\n\n━━━━ 最重要的两条工作规则 ━━━━\n① **用户说不清模型和字段时，不要反问用户** —— 用 sx_model / sx_model_fields\n   / sx_model_config / sx_model_citation_list 自己查，再拉一条真实数据验证，\n   推理出该用哪个模型、哪个字段。查完仍不确定，才带着候选方案问用户。\n   详见 section `discover`。\n② **取数一律走 datasourceList（模型模式）**，不要建 SQL。过滤用扁平 compoundQuery，\n   聚合不支持 AVG（自己 SUM ÷ COUNT）。详见 section `params`。\n③ **图表必须 ECharts**；图标用内联 SVG fill（看板 skill），禁止手写 SVG/canvas 图表、禁止 Font Awesome 线稿图标。\n   详见 section `iframe` / `charts`。\n④ **新建看板时必须把 jsonText 和表单头一次传齐** —— 漏传也返回「保存成功」，\n   但得到的是空壳表单（jsonText=null、fieldList=[]），打开一片空白且不报错。\n   详见坑 I。\n\n可用 section（省略则返回目录）：\n· overview  —— 整体思路（iframe + datasourceList，零 SQL 依赖）\n· params    —— **datasourceList 接口详解（13 条，依据源码）**：请求字段全清单；\n               groupSum 三语义与 SX_COUNT 含义；compoundQuery 扁平结构(错写报 ORA-00936)；\n               maxRows 走 list/page 的区别；queryColumns 会让 IS_DB_FIELD=0 的字段全返回 null；\n               **${SYS.XXX} 内置变量（model 模式可用，含本月/上月/今年等日期变量）**；\n               order \"1\"=倒序；dataAuth 1/2；不支持 AVG；过滤与计数分离\n· structure —— 看板各区块构成与跳转关系\n· menuAnalysis —— **按「用户有权限的菜单」反推该分析哪些数据**：\n               sx_menu_user → 菜单 code/path/ancestorsName → 表单 → 主模型 + 关联模型，\n               做业务数据分析时**优先用这条链路**，而不是盲扫全库模型\n· discover  —— **用户说不清模型/字段时，自己去查、自己推理**（含推理顺序与判断经验）\n· openform  —— ctx.openFormByCode 打开列表页/单条记录，含 data-row 转义要点\n· pitfalls  —— **8 个踩过的坑**：区间替换误删、data-open 层级、401 静默失败、\n               名称映射时序、响应层级、桩数据过友好、模板字符串、文档写法\n· colors    —— 视觉规范（底色 #e8edf3、卡片阴影、配色表）\n· iframe    —— **平台 iframe 运行规范**：sxIframe / jQuery / 内联 SVG 图标 / ECharts / 滚动条 / 全屏滚动\n· charts    —— **图表必须 ECharts**：初始化、空数据、样式、禁止手绘 SVG\n· responsive —— **多端适配**：栅格断点、图表 resize、表格卡片化、触控尺寸、375/768/1440 自检\n· checklist —— **交付前检查清单**（16 项自检 + 保存规范 + 回读校验 + 真实取数验证 + 菜单）\n\n也可以传 all: true 一次拿全部。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string",
+            "enum": [
+              "overview",
+              "params",
+              "structure",
+              "menuAnalysis",
+              "discover",
+              "openform",
+              "pitfalls",
+              "colors",
+              "iframe",
+              "charts",
+              "responsive",
+              "checklist"
+            ],
+            "description": "要查看的章节；省略时返回目录"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "返回全部章节"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_form",
+      "description": "列出表单。用 `scope` 选择范围：\n· `tenant`（默认）—— **当前租户**的全部表单。**找表单编码的默认入口**。注意不含 000000 管理租户的 `SX_` 系统表单。\n· `by_app` —— 某个应用下的表单（需 appId），按表单编码升序。\n· `by_model` —— 某模型生成的标准表单（需 modelName）。平台按固定命名约定拼接后查找，**只会命中三个编码**：`{modelName}_PAGE`（列表页）/ `{modelName}_FORM`（表单页）/ `{modelName}_VERSION`（版本页）。若模型用自定义编码建表单，这里查不到，请改用 `scope:\"tenant\"` 按编码找。\n\n`keyword` 在返回结果上做本地模糊过滤（仅 scope=tenant / by_app 生效）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "tenant",
+              "by_app",
+              "by_model"
+            ],
+            "description": "范围，默认 tenant"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "按表单编码/名称本地模糊过滤"
+          },
+          "appId": {
+            "type": "string",
+            "description": "scope=by_app 时必填：应用 ID"
+          },
+          "modelName": {
+            "type": "string",
+            "description": "scope=by_model 时必填：模型编码，如 ALTER"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_form_get",
+      "description": "获取单张表单。用 `by` 选择寻址方式，用 `detail` 选择要哪一部分。\n\n**`by`（寻址）**\n· `code`（默认，推荐）—— 按 formCode。`SX_` 开头的系统表单在 000000 管理租户，**按编码会自动路由**。\n· `id` —— 按 formId。**不做 SX_ 租户路由**，系统表单查不到，请改用编码。\n\n**`detail`（要什么）**\n· **`full`**（默认）—— FormVO：formCode / formName / modelId / formType / **jsonText（表单设计 JSON）** / fieldList / formViewList / userLayoutList。**这是读表单内容的首选。**\n· `raw` —— 后端原始响应。**保存后立即回读请用这个**：实测 getFormByCode 对新保存的表单立即可见，而 full（POST /getForm）有约 300ms 缓存滞后。\n· `public` —— 读**其它租户**的公共表单，需同时给 formCode 与 tenantId。目标表单未标记 publicForm 会报 `form_must_authorized`。这是跨租户读取的**正规途径**。\n· `auth` —— 该表单配置了权限控制（auth）的控件子集；没配置返回空数组（正常）。\n· `extensions` —— 视图列表 + 当前用户的自定义布局。\n· `user_layout` —— 仅当前用户的布局（换个人调用结果不同）。\n· `ueditor` —— 富文本编辑器配置，**平台源码固定返回 null**，属占位实现。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "enum": [
+              "full",
+              "raw",
+              "public",
+              "auth",
+              "extensions",
+              "user_layout",
+              "ueditor"
+            ],
+            "description": "要哪一部分，默认 full"
+          },
+          "by": {
+            "type": "string",
+            "enum": [
+              "code",
+              "id"
+            ],
+            "description": "寻址方式，默认 code（推荐）"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "表单编码，如 ALTER_FORM。系统表单以 SX_ 开头（在 000000 管理租户），按编码会自动路由"
+          },
+          "formId": {
+            "type": "string",
+            "description": "表单 ID。仅适用于当前租户自己的表单"
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "detail=public 时必填（目标租户）；其它 detail 下用于读其它租户的公共表单"
+          },
+          "action": {
+            "type": "string",
+            "description": "detail=ueditor 专用：平台预留参数，当前无效果"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_form_save",
+      "description": "表单设计的**唯一写入入口**。用 `action` 选择操作。\n\n· **`save`**（默认）—— 保存表单设计。带 `id` 为修改，不带为新增。\n  **必须传 `formType` / `formCode` / `formName` / `modelId` 四项**（平台只校验非空、不校验真实存在）。\n  走 `/modelform/form/save`（**不能**改用 /dynamic/save）—— 平台会额外重建\n  字段索引表 SX_FORM_FIELD 并写历史版本；用通用接口只改 JSON 会留下不一致。\n  传 `jsonText` 时自动把 iframe 控件设为 fullScreen=true（不改 height）。\n\n  **绑定审批流程**：传 `flowKey`（流程的 FLOW_KEY）即可，工具会把它写进 jsonText 顶层，平台再同步到表单头 —— 之后 `sx_flow_inst {action:\"start\"}` 带这份表单就能发起审批。只有变更场景才需要 `bgFlow`（非必填）。\n  ⚠️ flowKey 必须带平台自动加的**租户后缀**（如 `CUSTOMER_FLOW_TEST`），以 `sx_flow_config {action:\"list\"}` 返回的 flowKey 为准。\n\n· **`delete`**（需 `confirm`）—— 按 `ids` 删除表单（支持批量）。\n  🚫 **不要用「删除+重建」改表单** —— id 会变，菜单/流程/外链引用全部失效，\n  历史版本链断裂，用户布局与权限丢失。**改表单请 save + id**。\n\n· **`auto_generate`**（需 `confirm`）—— 按模型自动生成界面，一次最多 3 个：\n  `{模型名}_PAGE` / `_FORM` / `_VERSION`。需 `appId` + (`modelId` 或 `modelName`)。\n  `formCategory` 控制生成哪几类（PAGE/FORM/VERSION，逗号拼接，默认全部）；\n  **不要传空字符串 —— 平台会 NPE**。平台自行构造 jsonText，调用方无需准备。\n\n· **`auto_generate_sql`**（需 `confirm`）—— 按 SQL 编码生成查询页。需 `appId` + `sqlCode`。\n\n· **`save_user_layout`** —— 保存**当前用户**在某个控件上的自定义布局。\n  需 `formCode` / `controlId` / `jsonText`（+ 可选 `viewId`）。用户级，不影响他人。\n\n· **`rebuild_fields`**（需 `confirm`）—— 重建**当前租户全部表单**的字段索引，\n  用于修复 JSON 与 SX_FORM_FIELD 不一致的脏数据。**影响面大**，只改一张表单用 save 即可。\n\n━━ 保存表单（action=\"save\"）时的规则 ━━\n保存表单（POST /modelform/form/save）。**带 id 为修改，不带 id 为新增。**\n\n必填四项：`formType` / `formCode` / `formName` / `modelId`。\n· formType：1=界面，2=含流程的界面，3=变更界面，4=含流程的变更界面；\n· formCode：**当前租户内必须唯一**，重复会报 form_code_repeat。\n\n平台会自动处理（不需要你传）：\n· tenantId 由服务端按当前登录租户写入；\n· 从 `jsonText` 里**自动提取 `flowKey` / `bgFlow`**；\n· 展平 `jsonText.widgets` 并**重建字段索引表**（SX_FORM_FIELD）；\n· 写一条历史版本（SX_FORM_HISTORY）。\n\n**改表单必须走这个接口**：用通用 /dynamic/save 直接改 SX_FORM 只会更新 JSON，不会同步 SX_FORM_FIELD 索引表，导致「JSON 已改、字段表还是旧的」这种不一致。\n\n⚠️ 平台对必填项**只校验非空、不校验是否真实存在** —— 实测传一个不存在的 modelId 也能保存成功并留下脏数据。调用前请先确认 modelId 有效（用 sx_model {scope:\"all\"} 核对）。\n\n**控件 type 请以平台为准**：用 `sx_form_widget {action:\"list\"}` 取全部 91 个控件，用 `{action:\"props\"}` 查某个控件能配哪些属性。\n控件放进表格/查询时还有**扩展属性**（`parentForm`），由 `sx_form_widget {action:\"props\"}` 一并返回。\n\n━━━━ 新建表单：先读平台模板，不要自己拼默认值 ━━━━\n**适用范围：只针对「手工新建表单」（如新建看板）。**\n   · 用 `sx_form_save {action:\"auto_generate\"}` 自动生成的表单：**不用管本文规则** ——\n     平台自动生成时会按它自己的规则构造并保存，调用方不需要准备 jsonText。\n   · 手工拼 jsonText 调 `sx_form_save` 新建的表单：**按本节来**。\n\n**手工新建时，不要自己拼默认值，先读平台模板，在模板基础上改。**\n\n── formType 与模板的对应关系（源码 AutoFormEnum）──\n| formType | 含义           | 页面模板代码                      | 表单模板代码                   | 版本模板代码                     |\n|---|---|---|---|---|\n| \"1\" | 界面             | SX_FORM_TEMPLATE_PAGE             | SX_FORM_TEMPLATE_FORM          | —                                |\n| \"2\" | 含流程的界面     | SX_FORM_TEMPLATE_FLOW_PAGE        | SX_FORM_TEMPLATE_FLOW_FORM     | —                                |\n| \"3\" | 变更界面         | SX_FORM_TEMPLATE_PAGE_BG          | SX_FORM_TEMPLATE_FORM          | SX_FORM_TEMPLATE_VERSION         |\n| \"4\" | 含流程的变更界面 | SX_FORM_TEMPLATE_FLOW_PAGE_BG     | SX_FORM_TEMPLATE_FLOW_FORM_BG  | SX_FORM_TEMPLATE_FLOW_VERSION    |\n\n── SQL 数据源专用的两个模板（按数据源选，不是按 formType）──\n| 模板代码 | 名称 | 主控件 | 接口 apiType |\n|---|---|---|---|\n| SX_FORM_TEMPLATE_SQL_PAGE | SQL分页模板 | pagetable 且 props.pageTable=true | sqlPage |\n| SX_FORM_TEMPLATE_SQL_TABLE | SQL表格模板 | table 且 props.pageTable=false | sqlList |\n\n要点（实测）：\n  · 两者都只有 query + 表格 两个控件，api 都叫 page，initApi=true\n  · 没有 dataFormat —— SQL 数据源不需要字段命名风格\n  · 布局与普通模板一致：labelPlacement left / labelAlign right / labelWidth 100 / gap 4x4\n  · 区别只在主控件与接口类型：pagetable+sqlPage  vs  table+sqlList\n  · SQL_TABLE 的 table 默认 fullScreen=true；SQL_PAGE 的 pagetable 是 false\n\n  ✅ 用 sx_form_save {action:\"auto_generate_sql\"} 按 SQL 编码生成时，平台会自动选对模板。\n     只有手工拼 JSON 建 SQL 页面时才需要照这两个模板来。\n做法：\n  ① sx_form_get({ formCode: <对应模板代码> }) 读出模板的 jsonText\n  ② 改 formCode / formName / formType 为本表单的值\n  ③ 替换 widgets 为本模型的控件（控件本身见「新增控件的正确流程」）\n  ④ 需要时增补 api（模板已按场景配好 getOne / save 等，多数情况不用动）\n\n── 模板的布局配置（实测，9 个模板完全一致）──\n  labelPlacement: \"left\"      labelAlign: \"right\"\n  labelWidth:     100         suffix:     \":\"\n  gap:            {x:4, y:4}  dataFormat: \"UPPER\"\n\n  ✅ 上述值**原样沿用模板**，不要手改（包括 labelWidth 保持 100）。\n\n  ⚠️ 模板还带着各场景的 api 定义与控件骨架：\n     · PAGE / *_PAGE 类：query + pagetable 两个控件，3~6 个 api\n     · FORM 类：buttongroup 控件，2~6 个 api\n     沿用模板的 api 能让表单的增删改查链路开箱可用。\n\n⚠️ 改已有表单时**不要覆盖顶层布局字段** —— 读出来是什么就保持什么，只改 widgets。\n   否则会把用户在设计器里调过的布局重置掉。\n\n  · `widgets`        控件数组（见下面「新增控件的正确流程」）\n\n⚠️ 这是**项目约定值**，不是平台自动生成的默认值。平台自带表单向导生成的会是\n   `labelPlacement:\"top\" / labelAlign:\"left\" / labelWidth:100 / suffix:\"\" / gap:{x:10,y:10}`，\n   两套都合法，但**本项目统一用上面这套更紧凑的配置**，保持全租户表单风格一致。\n\n⚠️ 改已有表单时**不要手工覆盖这些顶层字段** —— 读出来是什么就保持什么，\n   只改 widgets。否则会把用户在设计器里调过的布局重置掉。\n\n━━━━ 新增控件的正确流程（用户明确要求）━━━━\n**不要凭印象拼控件 JSON。** 必须按下面三步来：\n\n**① 先读控件的基础配置（`widgetDefault`）**\n   调 `sx_form_widget({ action:\"props\", widgetCode: \"xxx\", withDefault: true })`，取到 `widgetDefault`，\n   那是平台给出的**完整控件结构骨架**。以它为模板，再改成你要的配置。\n   例（iframe 的 widgetDefault）：\n     { \"xId\": null, \"type\": \"iframe\", \"label\": \"嵌入页面\", \"prop\": null, \"modelField\": null,\n       \"span\": 24, \"display\": true, \"disable\": false, \"formDisplay\": [\"all\"],\n       \"formDisable\": [], \"required\": false,\n       \"props\": { \"border\": false, \"height\": \"450\", \"type\": \"2\", \"fullScreen\": true } }\n\n**② 若控件放在 query / table / pagetable 下，再合并扩展配置（`parentDefault`）**\n   这三个容器里的控件会多出一层列级属性（列宽/对齐/固定/排序/合计…），\n   由 `parentForm` 定义，默认值在 `parentDefault` 里。做法：\n     基础配置 ⊕ 扩展配置 → 得到该容器下的完整控件结构\n   实测只有 4 个控件有 parentForm：table/pagetable→SX_FORM_PARENT_TABLE、\n   query→SX_FORM_PARENT_QUERY、kanban→SX_FORM_PARENT_KANBAN。\n\n**③ 在合并结果上增删改你要的属性**，然后保存。\n\n⚠️ **漏字段的后果（实测）**：只写 `{type, label, props}` 会导致控件在页面上\n   「没值 / 不显示 / 栅格错乱」。iframe 控件曾因缺 `display`、`disable`、\n   `formDisplay`、`formDisable`、`required`、`span`、`xId` 而整块不渲染。\n   必填的顶层字段：xId / type / label / prop / modelField / span / display /\n   disable / formDisplay / formDisable / required / props / parentType / propPath。\n\n⚠️ **`xId` 自己生成即可，格式不限，只要求同一表单内唯一。**\n   平台自带的形如 `-gOvdq9ltygy3gan4d2l`（随机短串），但用什么格式都行——\n   纯数字、UUID、时间戳、自定义前缀都可以，没有格式校验。\n   唯一硬要求：\n     · 同一表单内**不能重复**（重复会导致控件串值/事件错乱）\n     · `propPath` 必须严格等于 `\"form.\" + xId`\n━━━━ 实测样例：按上面流程造一个 iframe 看板控件（已验证通过）━━━━\n这是完整走过一遍、页面上确认正常的样本，可作为模板：\n\n① 表单顶层沿用 SX_FORM_TEMPLATE_FORM：\n   { \"type\":\"form\", \"labelPlacement\":\"left\", \"labelAlign\":\"right\",\n     \"labelWidth\":100, \"suffix\":\":\", \"gap\":{\"x\":4,\"y\":4},\n     \"formCode\":\"<你的>\", \"formName\":\"<你的>\", \"formType\":\"1\",\n     \"dataFormat\":\"UPPER\", \"formTemplate\":null, \"widgets\":[ ... ] }\n\n② 控件：从 iframe 的 widgetDefault 出发，**只改这 6 项**，其余原样保留：\n   xId              → 自己生成，表单内唯一（如 \"-vdm5037se9\"）\n   label            → \"\"（iframe 不带标签）\n   props.html       → 你的 HTML\n   props.fullScreen → true（**iframe 看板默认必须全屏**；widgetDefault 里就是 true，别删）\n   **不要改 props.height** —— 保留 widgetDefault 原值（通常 \"450\"）；不要写 1000/1200/1400\n   propPath         → \"form.\" + xId\n   parentType       → \"form\"\n\n   保持默认不动：type / prop / modelField / span(24) / display(true) /\n                 disable(false) / formDisplay([\"all\"]) / formDisable([]) /\n                 required(false) / props.type(\"2\") / props.border\n\n③ 保存后**回读校验**：\n   sx_form_get 确认 14 个字段都在、span=24、propPath 与 xId 对应、html 长度正确。\n\n⚠️ 不要用 props.height 撑高看板。平台 Iframe.tsx 在 props.fullScreen=true 时，\n   会把 iframe absolute 定位铺满整个 form（高度 93vh / modalHeight），height 被忽略；\n   保留 widgetDefault 的 height 原值即可，不要写 1000/1200/1400，也不要把 450 改成别的值。\n\n━━━━ 修改表单的铁律（用户明确要求）━━━━\n**改表单只能「读出 → 改 → 带 id 回存」，禁止删除后重建！**\n· 正确：`sx_form_get` 读出完整 `jsonText` → 只改需要改的部分 → 本工具带 `id` 保存；\n· 错误：先 `sx_form_save {action:\"delete\"}` 再重新 save（不带 id）。\n\n━━━━ iframe 内嵌 HTML 的写法规范 ━━━━\n在 iframe 控件（`type:\"iframe\"`, `props.type:\"2\"`）的 `props.html` 里：\n· **不要使用 `${form.xxx}` 这类模板插值语法** —— 那是老式写法，已不推荐；\n· 看板/自建页面应当**自己调接口、自己处理数据**（`ctx.request` 打 `/api/dynamic/*`），\n  取数、过滤、聚合全部在 JS 里完成，不依赖父表单上下文；\n· 确实需要读父表单时，用 `await ctx.getForm('XXX')` 异步取值，不要写 `${form.XXX}`；\n· 打开平台既有表单用 `ctx.openFormByCode(code, { form: {...} }, opts)`；\n  传 `form` 可**预置查询条件**，例如只看失败：`{ form: { STATE: '2' } }`；\n  不需要带条件时传 `{ form: {} }` 即可，不必调 `getForm()`。\n\n━━━━ iframe 内 HTML 的强制实现规范 ━━━━\n· 图表必须用 `window.echarts`（平台已注入），禁止手写 SVG / canvas / CSS 图表；\n  不要从 CDN 引库；空数据不要 init ECharts，改为“暂无数据”空态；\n· 图标用内联 SVG fill 图标（按看板 skill）：`currentColor` 实心、24 网格；不要 Font Awesome 线稿图标、emoji 或外链图标库；白底块 + 卡片主色图标、半透明白底块 + 白图标都正常；纯白底 + 白图标禁止；图标要有 2–4 个内部结构，不能是一坨；\n· 拼接 SVG 时属性必须加双引号（stroke=\"#...\"），自闭合标签 `/>` 前留空格或显式闭合；禁止 `stroke=#...` / `stroke-width=15/`，否则会吞掉后续节点，出现白色空环；\n· 交互用 jQuery；业务逻辑包在 `sxIframe.ready((ctx) => {})` 内；\n· 页面必须自带细滚动条（浅灰 6–8px 圆角胶囊；深色页面用白色低透明度）：\n    html,body { scrollbar-width: thin; scrollbar-color: rgba(15,23,42,.22) transparent; }\n    ::-webkit-scrollbar { width: 6px; height: 6px; }\n    ::-webkit-scrollbar-thumb { background: rgba(15,23,42,.22); border-radius: 999px; border: 1px solid transparent; background-clip: padding-box; }\n    ::-webkit-scrollbar-track { background: transparent; }\n· 不要把 html,body 设成 overflow:hidden；body 用 overflow-y:auto；图表容器给显式高度，\n  监听 resize 调 chart.resize()；全屏切换后主动 dispatch resize，避免全屏后页面/图表锁死。\n\n**为什么不能删了重建**：\n· 表单 id 会变，别的对象（菜单、流程、按钮、外链）里引用的旧 id 全部失效；\n· 历史版本链（`SX_FORM_HISTORY`）断裂，无法回溯；\n· 表单字段索引、用户自定义布局、权限配置随之丢失；\n· 期间若有页面正在使用该表单，会出现短暂「表单不存在」。\n\n所以：**只要 `sx_form_get` 能查到 formCode 对应的表单，就必须走修改路径。**",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "save",
+              "delete",
+              "auto_generate",
+              "auto_generate_sql",
+              "save_user_layout",
+              "rebuild_fields"
+            ],
+            "description": "写操作类型，默认 save"
+          },
+          "id": {
+            "type": "string",
+            "description": "action=save：表单 ID。带它=修改，不带=新增"
+          },
+          "formType": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "description": "action=save 必填：1=界面 2=含流程的界面 3=变更界面 4=含流程的变更界面；auto_generate 时可省略（按模型字段推导）"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "action=save 必填：表单编码，当前租户内唯一，如 CUSTOMER_FORM。save_user_layout 也用它"
+          },
+          "formName": {
+            "type": "string",
+            "description": "action=save 必填：表单名称（中文）"
+          },
+          "modelId": {
+            "type": "string",
+            "description": "action=save 必填：主模型 ID；auto_generate 可与 modelName 二选一"
+          },
+          "appId": {
+            "type": "string",
+            "description": "save：所属应用 ID；auto_generate / auto_generate_sql 必填"
+          },
+          "formRemark": {
+            "type": "string",
+            "description": "action=save：表单描述"
+          },
+          "dataFormat": {
+            "type": "string",
+            "enum": [
+              "UPPER",
+              "LOWER",
+              "HUMP"
+            ],
+            "description": "action=save：字段命名风格，默认 UPPER"
+          },
+          "formTemplate": {
+            "type": "string",
+            "description": "action=save：表单模板标识"
+          },
+          "publicForm": {
+            "type": "string",
+            "description": "action=save：是否标记为公共表单（供其它租户读取，见 sx_form_get {detail:\"public\"}）"
+          },
+          "jsonText": {
+            "type": "string",
+            "description": "action=save / save_user_layout：设计 JSON（含 widgets）。保存时会提取 flowKey/bgFlow 并重建字段索引"
+          },
+          "flowKey": {
+            "type": "string",
+            "description": "action=save：**把表单绑定到审批流程**。写进 jsonText 顶层的 `flowKey`，平台会自动同步到表单头同名列 —— 之后用 `sx_flow_inst {action:\"start\"}` 带这份表单就能发起审批。\n取值是流程的 **FLOW_KEY**（形如 `CUSTOMER_FLOW_TEST`，平台给 flowAlias 自动加的租户后缀也要带上），可从 `sx_flow_config {action:\"list\"}` 的返回值里取。"
+          },
+          "bgFlow": {
+            "type": "string",
+            "description": "action=save：**变更流程**的绑定（非必填），写进 jsonText 顶层的 `bgFlow`。\n只有「变更场景」需要：模型开了变更留痕、对已有数据走变更审批时才配。普通新流程留空。\n**取值规则与 flowKey 完全一致** —— 同样是带租户后缀的完整 FLOW_KEY。"
+          },
+          "extra": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=save：其它要一并写入的字段（按平台 HUMP 命名），未知字段平台不校验"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "action=delete 必填：表单 ID（单个 / 逗号分隔 / 数组，支持批量）"
+          },
+          "modelName": {
+            "type": "string",
+            "description": "action=auto_generate：模型编码（与 modelId 二选一）"
+          },
+          "formCategory": {
+            "type": "string",
+            "description": "action=auto_generate：PAGE / FORM / VERSION，逗号拼接，默认 \"PAGE,FORM,VERSION\"。**不要传空字符串**"
+          },
+          "sqlCode": {
+            "type": "string",
+            "description": "action=auto_generate_sql 必填：SQL 编码"
+          },
+          "controlId": {
+            "type": "string",
+            "description": "action=save_user_layout 必填：控件 ID（要改布局的那个）"
+          },
+          "viewId": {
+            "type": "string",
+            "description": "action=save_user_layout：视图 ID；同一控件不同视图可有不同布局"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "delete / auto_generate / auto_generate_sql / rebuild_fields 必须显式传 true"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_flow_design",
+      "description": "创建一个审批流定义，并把流程图写进平台内置的 Flowable 设计器。\n\n**一次调用完成**：\n① 保存 `SX_FLOW_MODEL`（登记流程编码/名称/归属，平台自动补 FLOW_KEY 并创建 FLOW_ID）\n② 用 `/rest/models/{flowId}/editor/json` 写入 BPMN 图形（start → 环节链 → end）\n③ 回读确认图形真的写进去了\n\n📘 **动手前先读 `sx_flow_guide`** —— 里面有完整建模顺序（9 步）与五个高频坑。\n\n🔒 **仅管理员可用** —— 画流程图属于流程定义的设计工作。\n\n⚠️ **这一步只是「画好图」，还没部署** —— 部署与环节配置（审批人/自动处理）在\n`sx_flow_config {action:\"deploy\"}`，发起审批在 `sx_flow_inst {action:\"start\"}`。\n\n━━ 环节（nodes）━━\n默认两个环节：申请人 → 审批人。每个环节可配：\n· `nodeType` —— SP 审批 / HQ 会签 / CS 抄送；\n· `findUserType` —— 0 固定找人 / **1 动态找人（默认）** / 2 上一环节选择 / 3 审批矩阵 / 4 集成流；\n· `findUserMethod` —— 动态找人时怎么找：1000 发起人 / 1010 直接上级 / 1020 高二级 /\n  1030 部门负责人 / 1040 分管领导 / 1050 流程环节审批人 / 1055 表单变量 / 1060 流程变量；\n· `autoProcess` —— **默认 \"0\" 会自动跳过「审批人＝发起人」的环节**（详见参数说明），\n  想让环节必须有人点，显式传 \"2\"。\n\n━━ 条件分支（branches）━━\n给出 `after`（在哪个环节后分流）+ `paths`（≥2 条分支，每条带 Flowable 条件表达式）。\n⚠️ **必须同时声明 `variables`** —— 条件里用的变量名先在这里声明，否则 Flowable 报\n`Unknown property used in expression`。且 `valueLogic` **必须是 JSON 配置**（`{\"field\":\"X\"}`），\n写成 `${FORM_DATA.X}` 不报错但取值恒为 null，会静默走错分支。\n建议最后一条分支写兜底条件（如 `${true}`），否则都不满足时流程卡住。\n\n━━ 覆盖已有流程 ━━\n`flowAlias` 已存在时默认**不执行**，返回 `needsConfirm` 与现有流程信息，\n用户确认后传 `overwrite:true` 重新调用（会重新部署并生成新版本，历史版本保留）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "flowAlias": {
+            "type": "string",
+            "description": "流程编码：必填且唯一，只能字母开头、仅含字母/数字/下划线，不能有中文"
+          },
+          "name": {
+            "type": "string",
+            "description": "流程名称"
+          },
+          "mainModel": {
+            "type": "string",
+            "description": "主模型名（写入 SX_FLOW_CONFIG.MAIN_MODEL），如 CUSTOMER"
+          },
+          "appId": {
+            "type": "string",
+            "description": "所属应用 ID（写入 SX_FLOW_MODEL.APP_ID）"
+          },
+          "description": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "环节名称。**需与图上 UserTask 名一致** —— 部署后按名字回填环节配置"
+                },
+                "nodeType": {
+                  "type": "string",
+                  "enum": [
+                    "SP",
+                    "HQ",
+                    "CS"
+                  ],
+                  "description": "环节类型：SP 审批节点（默认）/ HQ 会签节点 / CS 抄送节点"
+                },
+                "findUserType": {
+                  "type": "string",
+                  "enum": [
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4"
+                  ],
+                  "description": "找人方式：0 固定找人 / 1 动态找人（默认）/ 2 上一环节选择人员 / 3 审批矩阵 / 4 集成流找人"
+                },
+                "findUserMethod": {
+                  "type": "string",
+                  "description": "动态找人方法（findUserType=1 时用）：\n1000 流程发起人 / 1010 直接上级 / 1020 高二级 / 1030 部门负责人 / 1040 分管领导 /\n1050 流程环节审批人 / 1055 表单变量审批人 / 1060 流程变量审批人"
+                },
+                "postSource": {
+                  "type": "string",
+                  "description": "岗位来源（1010/1020 用）：1 流程发起人 / 2 流程环节 / 3 表单变量岗位 / 4 流程发起岗位 / 5 表单变量用户"
+                },
+                "deptSource": {
+                  "type": "string",
+                  "description": "部门来源（1030/1040 用）：1 流程发起部门 / 2 选择部门 / 3 流程审批环节 / 4 表单变量部门"
+                },
+                "formField": {
+                  "type": "string",
+                  "description": "表单变量字段名（findUserMethod=1055 / deptSource=4 / postSource=3、5 用）"
+                },
+                "formFieldType": {
+                  "type": "string",
+                  "description": "表单变量类型：1 用 ID（默认）/ 2 用编码"
+                },
+                "flowNode": {
+                  "type": "string",
+                  "description": "来源环节 nodeCode（postSource=2 / deptSource=3 / findUserMethod=1050 用）"
+                },
+                "autoProcess": {
+                  "type": "string",
+                  "enum": [
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4"
+                  ],
+                  "description": "自动处理：0 相同审批人自动处理（**平台默认**）/ 1 相邻环节相同审批人自动处理 /\n2 不自动处理 / 3 必须保存 / 4 满足公式后自动处理\n\n⚠️ 默认 \"0\" 的含义是「**本环节审批人与流程发起人相同时，系统直接替他通过**」。\n用 admin 当固定审批人 + 用 admin 发起时，中间环节会被静默跳过（人看不到待办）。\n想让环节必须有人点，显式传 \"2\"。"
+                },
+                "autoProcessExpr": {
+                  "type": "string",
+                  "description": "autoProcess=4 时的自动处理条件公式"
+                },
+                "autoProcessMsg": {
+                  "type": "string",
+                  "description": "autoProcess=4 命中时写入的审批意见"
+                },
+                "userIds": {
+                  "type": "string",
+                  "description": "固定找人时的审批人（逗号分隔 userId）"
+                },
+                "roleIds": {
+                  "type": "string",
+                  "description": "固定找人：角色 ID（逗号分隔）"
+                },
+                "postIds": {
+                  "type": "string",
+                  "description": "固定找人：岗位 ID（逗号分隔）"
+                },
+                "deptIds": {
+                  "type": "string",
+                  "description": "固定找人：部门 ID（逗号分隔）"
+                },
+                "groupIds": {
+                  "type": "string",
+                  "description": "固定找人：用户组 ID（逗号分隔）"
+                },
+                "sendCondition": {
+                  "type": "string",
+                  "description": "条件参数（判断条件表达式），线性流程留空"
+                },
+                "allowCancel": {
+                  "type": "string",
+                  "description": "是否允许撤销"
+                },
+                "allowSign": {
+                  "type": "string",
+                  "description": "是否允许加签"
+                },
+                "allowBack": {
+                  "type": "string",
+                  "description": "是否允许退回"
+                },
+                "sendMess": {
+                  "type": "string",
+                  "description": "是否发送消息"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "description": "环节列表，默认 [申请人, 审批人]。**name 必须与图上 UserTask 名一致**"
+          },
+          "branches": {
+            "type": "object",
+            "properties": {
+              "after": {
+                "type": "string",
+                "description": "在哪个环节之后分流（必须是 nodes 里的环节名）"
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "type": "string",
+                      "description": "分支条件（Flowable UEL 表达式），如 `${AMOUNT > 10000}`。**必填**，否则分支无法判定"
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/nodes/items"
+                      },
+                      "description": "该分支上的环节（按顺序，至少 1 个）"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "nodes"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "两条及以上分支。**建议最后一条写兜底条件**"
+              },
+              "variables": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "变量名，分支条件里就用这个名字，如 AMOUNT"
+                    },
+                    "valueLogic": {
+                      "type": "string",
+                      "description": "取值公式。**必须是 JSON 配置**（不是 ${} 表达式）：{\"field\":\"TAX_RATE\"}\n⚠️ 写成 `${FORM_DATA.X}` 能保存也不报错，但**取值恒为 null** —— 条件恒不成立、会静默走错分支，极难排查。"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "String",
+                        "Integer",
+                        "BigDecimal",
+                        "Boolean"
+                      ],
+                      "description": "变量类型，默认 BigDecimal"
+                    },
+                    "remark": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "valueLogic"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "分支条件用到的流程变量。**必须配**，否则审批时报 Unknown property"
+              }
+            },
+            "required": [
+              "after",
+              "paths"
+            ],
+            "additionalProperties": false,
+            "description": "条件分支。给了就在 after 环节后插排他网关分流，各分支走完汇总到结束事件"
+          },
+          "release": {
+            "type": "boolean",
+            "description": "是否发布（RELEASE_FLAG=1），默认 true"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "flowAlias 已存在时是否覆盖重建（默认 false → 先返回 needsConfirm）"
+          }
+        },
+        "required": [
+          "flowAlias",
+          "name"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_flow_config",
+      "description": "审批流定义的**部署与配置**入口。用 `action` 选择（整体流程见 `sx_flow_guide`）：\n\n🔒 **权限**：`deploy` / `update_nodes` / `set_variables` **仅管理员**可用；`list` / `config` / `nodes` 普通用户可查（看流程、核对审批人都需要）。\n\n· **`list`** —— 列出全部流程定义（GET /api/flow/config/allFlowList）。含 flowAlias / flowKey / name / ver / 是否发布。**找流程编码时先用它。**\n· **`config`** —— 按 `flowKey` 取完整配置（GET /api/flow/config/getFlowConfig）：模型、发布状态、版本、全部环节（sxFlowNode）与变量。**改配置前先读它。**\n· **`nodes`** —— 引擎视角的环节与**实际解析出的审批人**（POST /api/flow/config/getAllFlowNodeList）。比 config 更权威：给出 findUserTypeText / nodeGetUserText（如「动态找人/流程发起部门」）。\n  ⚠️ 该接口返回**租户下所有流程**的环节（即便传了 flowKeys），本工具会自动按 flowKey 过滤。\n· **`deploy`** —— 部署流程定义（GET /api/flow/config/deploy?id=），生成 proDefId。\n  **`sx_flow_design` 画完图后必须调它**，否则流程不可发起。\n  可选同时配置环节（见 `update_nodes` 的参数）与发布状态。\n· **`update_nodes`** —— 改环节配置（审批人/自动处理/节点类型）。\n  可只按 `flowKey` 操作已部署的流程；环节按 **NODE_NAME 匹配**。\n  写完后**自动重存一次 SX_FLOW_CONFIG 清缓存** —— 平台的 FlowConfigCache 清缓存钩子只挂在 config 的 beforeSave 上，不重存的话发起流程仍用旧审批人。\n· **`set_variables`** —— 声明流程变量（SX_FLOW_VARIABLE），分支条件依赖它。\n  `valueLogic` **必须是 JSON 配置**（`{\"field\":\"X\"}`）；写成 `${FORM_DATA.X}` 不报错但取值恒为 null。\n\n━━ 关于 autoProcess（最容易踩的坑）━━\n平台默认 `AUTO_PROCESS=\"0\"` = **本环节审批人与流程发起人相同时，系统直接替他通过**。\n用 admin 当固定审批人 + 用 admin 发起时，中间环节会被静默跳过（只留一条「自动处理环节」记录，\n人看不到待办）。这不是配错了。想让环节必须有人点，显式传 `autoProcess:\"2\"`。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "deploy",
+              "list",
+              "config",
+              "nodes",
+              "update_nodes",
+              "set_variables"
+            ],
+            "description": "deploy / list / config / nodes / update_nodes / set_variables"
+          },
+          "flowKey": {
+            "type": "string",
+            "description": "流程编码（FLOW_KEY）。**除 action=\"list\" 外都必填**"
+          },
+          "flowRecordId": {
+            "type": "string",
+            "description": "流程记录 ID（SX_FLOW_MODEL.ID）；deploy 用"
+          },
+          "mainModel": {
+            "type": "string",
+            "description": "deploy：主模型名，写入 SX_FLOW_CONFIG.MAIN_MODEL"
+          },
+          "release": {
+            "type": "boolean",
+            "description": "deploy：是否置为已发布（RELEASE_FLAG=1），默认 true"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "环节名称，按 NODE_NAME 匹配 SX_FLOW_NODE"
+                },
+                "nodeType": {
+                  "type": "string",
+                  "enum": [
+                    "SP",
+                    "HQ",
+                    "CS"
+                  ],
+                  "description": "SP 审批（默认）/ HQ 会签 / CS 抄送"
+                },
+                "findUserType": {
+                  "type": "string",
+                  "enum": [
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4"
+                  ],
+                  "description": "0 固定找人 / 1 动态找人（默认）/ 2 上一环节选择 / 3 审批矩阵 / 4 集成流"
+                },
+                "findUserMethod": {
+                  "type": "string",
+                  "description": "动态找人方法：1000 发起人 / 1010 直接上级 / 1020 高二级 / 1030 部门负责人 / 1040 分管领导 / 1050 流程环节审批人 / 1055 表单变量 / 1060 流程变量"
+                },
+                "postSource": {
+                  "type": "string"
+                },
+                "deptSource": {
+                  "type": "string"
+                },
+                "formField": {
+                  "type": "string"
+                },
+                "formFieldType": {
+                  "type": "string"
+                },
+                "flowNode": {
+                  "type": "string"
+                },
+                "autoProcess": {
+                  "type": "string",
+                  "enum": [
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4"
+                  ],
+                  "description": "0 相同审批人自动处理（**平台默认，会静默跳过**）/ 1 相邻环节自动 / 2 不自动处理 / 3 必须保存 / 4 满足公式自动处理"
+                },
+                "autoProcessExpr": {
+                  "type": "string"
+                },
+                "autoProcessMsg": {
+                  "type": "string"
+                },
+                "userIds": {
+                  "type": "string",
+                  "description": "固定找人：审批人 ID，逗号分隔"
+                },
+                "roleIds": {
+                  "type": "string"
+                },
+                "postIds": {
+                  "type": "string"
+                },
+                "deptIds": {
+                  "type": "string"
+                },
+                "groupIds": {
+                  "type": "string"
+                },
+                "sendCondition": {
+                  "type": "string"
+                },
+                "allowCancel": {
+                  "type": "string"
+                },
+                "allowSign": {
+                  "type": "string"
+                },
+                "allowBack": {
+                  "type": "string"
+                },
+                "sendMess": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "description": "环节配置（deploy / update_nodes）。按 name 匹配，未匹配到的环节保持原配置"
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "变量名，分支条件里就用它，如 AMOUNT"
+                },
+                "valueLogic": {
+                  "type": "string",
+                  "description": "取值公式。**必须是 JSON 配置**：{\"field\":\"TAX_RATE\"}。写成 ${FORM_DATA.X} 取值恒为 null"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "String",
+                    "Integer",
+                    "BigDecimal",
+                    "Boolean"
+                  ]
+                },
+                "remark": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "valueLogic"
+              ],
+              "additionalProperties": false
+            },
+            "description": "流程变量（set_variables）。分支条件引用的名字必须先在这里声明"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_flow_inst",
+      "description": "审批流**实例运行**的统一入口。用 `action` 选择操作（发起参数/字段名见 `sx_flow_guide`）。\n\n━━ 发起 ━━\n· **`start`** —— 发起流程（POST /flow/inst/start）。\n  需要 `flowKey`（流程编码）+ `dataId`（业务数据主键 ID）+ `formCode`（表单编码，通常 `{模型名}_FORM`）。\n  ⚠️ 前提：业务模型必须**带流程字段**（`INST_ID`/`PRO_INST_ID`/`FLOW_STATUS`…），否则引擎无处回写状态；流程定义必须**已发布**（`RELEASE_FLAG=1`）。\n  返回里含 `proInstId` —— **后续所有操作都用它**。\n\n━━ 审批 ━━\n· **`complete`** —— 通过（POST /complete）。需 `proInstId` + 可选 `taskId`、`comment`。\n· **`reject`** —— 驳回（POST /reject）。需 `proInstId` + `comment`（驳回意见）。\n· **`delegate`** —— 转办给他人（POST /delegate）。需 `taskId` + `assignee`。\n· **`claim`** —— 认领任务（POST /claim）。需 `taskId`。\n· **`add_sign`** —— 加签（POST /addSignTask）。需 `taskId` + `assignee`。\n· **`back`**（需 confirm）—— 退回到指定环节（POST /backToTask）。需 `taskId` + `backTaskId`。\n  先用 `getBackNode`（本工具 action:\"back\" 不带 taskId 时自动调用）拿到可退回的环节。\n\n━━ 生命周期 ━━\n· **`stop`**（需 confirm）—— 终止流程（GET /stop）。需 `proInstId`。**不可撤销**。\n· **`retrieve`** —— 撤回（GET /retrieve）。需 `proInstId`，把流程撤回发起人。\n· **`urge`** —— 催办（GET /urging）。需 `proInstId`。\n· **`copy`** —— 抄送（POST /copyProcess）。需 `proInstId`。\n\n━━ 各种列表页（`list` + `kind`）━━\n全部是平台内置的 SQL 分页页，**按当前登录人自动过滤** ——\n换 token 就是换个人的数据，不用也不能指定「查谁」。\n· `kind:\"todo\"`        我的待办（默认）—— **「我该批哪些」的正规入口**，\n  带 taskId / proInstId，可直接喂给 complete / reject，不用先知道 proInstId\n· `kind:\"started\"`     我的发起 —— 我发的那笔到哪一步了\n· `kind:\"done\"`        我的已办 —— 我处理过的\n· `kind:\"copy\"`        我的抄送 —— 可看 readStatus（未读/已读）\n· `kind:\"copy_reply\"`  抄送回复\n· `kind:\"empower_me\"`  授权给我的 —— 别人授权我代办的\n· `kind:\"my_empower\"`  我的授权查看\n· `kind:\"admin\"`       流程监控中心 —— **仅管理员**\n支持 keyword（标题模糊）、queryList（精确过滤）、orderList、current / size 分页。\n\n⚠️ 已办页的 TASK_NAME **恒为空**（实测 20/20），要知道自己处理的是哪个环节，\n   看 currentNodeName（平台 DB_NODE_NAME）。\n⚠️ lastProcessTime（平台 FLOW_COMPLETED_TIME）是**最后处理时间**，\n   流程还在审批中时也有值；判断是否结束请看 instStatus。\n\n━━ 查看 ━━\n· **`detail`** —— 流程明细（GET /getFlowDetail）。需 `proInstId`（+ 可选 `taskId`）。含各环节审批记录、审批人、意见、时间。**查「谁批了、说了什么」用这个。**\n· **`tasks`** —— 当前待办环节（GET /getTasks）。需 `proInstId`。\n· **`image`** —— 流程图（GET /getImageByProInstId）。需 `proInstId`。\n\n🔒 **权限**：**实例运行一律限管理员**（start / complete / reject / delegate /\n   claim / add_sign / back / stop / retrieve / urge / copy）。\n   只有查类对普通用户开放：`detail` / `tasks` / `image`，以及\n   `list` 里除 `kind:\"admin\"`（流程监控中心）之外的各页面。\n\n⚠️ 写操作仍受 SX_ALLOW_WRITES 开关限制；`detail`/`tasks`/`image` 是纯读，不受影响。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "complete",
+              "reject",
+              "delegate",
+              "claim",
+              "add_sign",
+              "back",
+              "stop",
+              "retrieve",
+              "urge",
+              "copy",
+              "detail",
+              "tasks",
+              "image",
+              "list"
+            ],
+            "description": "list / start / complete / reject / delegate / claim / add_sign / back / stop / retrieve / urge / copy / detail / tasks / image"
+          },
+          "flowKey": {
+            "type": "string",
+            "description": "action=start 必填：流程编码（FLOW_KEY）"
+          },
+          "proInstId": {
+            "type": "string",
+            "description": "流程实例 ID。除 start 外多数操作都需要"
+          },
+          "taskId": {
+            "type": "string",
+            "description": "任务 ID（claim/complete/delegate/add_sign/back/detail 用）"
+          },
+          "backTaskId": {
+            "type": "string",
+            "description": "action=back：要退回到的目标环节任务 ID"
+          },
+          "dataId": {
+            "type": "string",
+            "description": "action=start 必填：**业务数据的主键 ID**（不是整条记录）。引擎据此把流程实例挂到该数据上"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "action=start 必填：表单编码（平台的 FlowStartDto.formCode）。通常是 `{模型名}_FORM`，可用 sx_form {action:\"list\"} 确认"
+          },
+          "title": {
+            "type": "string",
+            "description": "action=start：流程标题（省略时用流程配置里的标题规则）"
+          },
+          "comment": {
+            "type": "string",
+            "description": "审批意见（complete / reject 强烈建议给，驳回时必填）"
+          },
+          "assignee": {
+            "type": "string",
+            "description": "delegate / add_sign：目标处理人账号或 ID"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "complete：随本次审批提交的流程变量（分支条件可能依赖）"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "todo",
+              "started",
+              "done",
+              "copy",
+              "copy_reply",
+              "empower_me",
+              "my_empower",
+              "admin"
+            ],
+            "description": "action=list：查哪个列表页，默认 todo。\ntodo 我的待办 / started 我的发起 / done 我的已办 / copy 我的抄送 /\ncopy_reply 抄送回复 / empower_me 授权给我的 / my_empower 我的授权查看 /\nadmin 流程监控中心（**仅管理员**）"
+          },
+          "current": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "action=list：页码，默认 1"
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "action=list：每页条数，默认 20"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "action=list：按标题模糊过滤（落到平台表单的 search 字段），精确过滤用 queryList"
+          },
+          "queryList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "action=list：平台 page 的原生查询条件（项与项之间 AND）。常用列：\n  TITLE / INST_ID / FLOW_KEY / FLOW_NAME / USER_NAME / DEPT_ID\n  INST_STATUS（1 审批中 / 2 通过 / 3 作废 / 4 变更中）\n  TASK_NAME / TASK_CREATE_TIME（待办）、ASSIGN_TIME（已办）、READ_STATUS（抄送）\n形如 [{field:\"INST_STATUS\",controlType:\"multipleSelect\",list:[{lowerValue:[\"1\"]}]}]"
+          },
+          "orderList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "action=list：排序，如 [{prop:\"CREATE_TIME\",order:\"1\"}]（注意 \"1\"=倒序）"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "stop / back 必须显式传 true"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_flow_guide",
+      "description": "审批流（Flowable）的落地规则 —— **动手前先读这个**。\n\n全部结论来自 test2 环境的**完整端到端验证**：建模型 → 建流程（含条件分支）\n→ 部署 → 配审批人 → 绑表单 → 声明变量 → 发起 → 审批 → 结束，\n每一步的返回值和业务字段回写都核对过，不是读源码推测。\n\n━━ 什么时候用 ━━\n· 不知道该按什么顺序建 → 读 **overview**（含 9 步顺序）\n· 要做条件分支（金额多少走谁）→ 读 **branches**\n· 配了审批人却没人收到待办 → 读 **approvers**\n· 发起/审批/查轨迹的字段对不上 → 读 **lifecycle**\n· 流程字段没回写到业务表 → 读 overview 的「坑 C」\n\n━━ 五个最容易踩错的 ━━\n① `AUTO_PROCESS` 默认 \"0\" 会**静默跳过**「审批人==发起人」的环节，\n   只留一条自动处理记录，人看不到待办。要有人点就显式传 \"2\"。\n② 流程变量只声明不够 —— 还要清 FlowConfigCache，否则推进到网关报\n   `Unknown property used in expression`（`set_variables` 已内置处理）。\n③ 模型漏了主键 → 平台回写业务表的流程字段**静默失败**，不报错也不生效。\n   所以建模型必须走 `sx_model_save`，不能手工拼 /dynamic/save。\n④ flowKey 带租户后缀（`E2E_X` → `E2E_X_TEST`），一律用\n   `sx_flow_config {action:\"list\"}` 返回的值，别自己拼。\n⑤ 条件分支的 `valueLogic` 必须是 JSON（`{\"field\":\"X\"}`），\n   写 `${FORM_DATA.X}` 不报错但取值恒 null，会**静默走错分支**。\n\n可用 section：overview | branches | approvers | lifecycle（省略则返回全部）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string",
+            "description": "章节：overview | branches | approvers | lifecycle。省略返回全部。"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_sql",
+      "description": "SQL 设计的独立入口。SQL 存在 `SX_SQL`，作为**报表 / 集成流 / API 的数据源**。\n\n· **`list`** —— 列出本租户的 SQL 设计（编码 / 名称 / 归属应用 / 同步状态）。\n· **`get`** —— 取一条的完整配置（含 `SQL_EXPR` 语句与 `SQL_OTHER`）。\n· **`save`** —— 新建或更新（按 `sqlCode` 判断是否存在）。**更新时先读全量再合并**，不会把 `SQL_OTHER` 里的排序/附件配置抹掉。\n· **`preview`** —— 执行一次取数，用来验证语句是否可跑、字段名对不对。\n· **`delete`**（需 `confirm`）—— 逻辑删除。\n\n━━ 关键约束 ━━\n① **`sqlCode` 是唯一业务键**，租户内唯一。建议大写+下划线，如 `RPT_ORDER_LIST`。\n② 预览与查询**必须带 `formCode`**（平台要据此查表单配置）。按平台约定它等于 `sqlCode`，所以省略时工具自动用 `sqlCode` 兜底。\n③ 报表用 `sx_report_create` 生成时，**表单编码就是 sqlCode**，两者天然一致。\n④ 表名请写 `T${SYS.TENANT_ID}_模型名` 而不是写死租户，否则跨租户复制会失效。\n\n━━ SQL 里的可用变量 ━━\n`${SYS.TENANT_ID}` / `${SYS.USER_ID}` / `${SYS.USER_NAME}` / `${SYS.DEPT_ID}` 等，由平台在执行时注入。传 `params` 可额外注入自定义参数。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "save",
+              "preview",
+              "delete"
+            ],
+            "description": "list / get / save / preview / delete"
+          },
+          "sqlCode": {
+            "type": "string",
+            "description": "SQL 编码（唯一业务键），如 RPT_ORDER_LIST。get/save/preview/delete 必填"
+          },
+          "sqlName": {
+            "type": "string",
+            "description": "save：SQL 名称（中文）"
+          },
+          "sql": {
+            "type": "string",
+            "description": "save：SQL 语句（写入 SQL_EXPR）"
+          },
+          "appId": {
+            "type": "string",
+            "description": "save：归属应用 ID"
+          },
+          "sqlDatabase": {
+            "type": "string",
+            "description": "save：SQL 数据源 ID；省略用默认数据源"
+          },
+          "orderList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "prop": {
+                  "type": "string",
+                  "description": "排序字段（SQL 结果里的列名）"
+                },
+                "order": {
+                  "type": "string",
+                  "description": "\"1\"=倒序，其它=正序"
+                }
+              },
+              "required": [
+                "prop",
+                "order"
+              ],
+              "additionalProperties": false
+            },
+            "description": "save：默认排序，写入 SQL_OTHER.orderList"
+          },
+          "sqlFileList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "save：关联附件，写入 SQL_OTHER.sqlFileList。形如 [{fieldName:\"FILE1\", dataIdSource:\"ID\", modelField:\"MES_AFRU.AFRU_IMAGE\"}]"
+          },
+          "extra": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "save：其它要一并写入 SX_SQL 的字段（UPPER 列名），原样带上"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "list：按 SQL_CODE / SQL_NAME 模糊过滤"
+          },
+          "current": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：页码，默认 1"
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：每页条数，默认 20"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "preview：表单编码。按平台约定等于 sqlCode，省略时自动用 sqlCode"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "preview：SQL 里的自定义参数（平台会注入到 ${参数名}）"
+          },
+          "previewSize": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "preview：取多少行，默认 5"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "delete 必须显式传 true"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_connector",
+      "description": "连接器这一层的统一入口，覆盖三张表：\n  `SX_CONNECTOR`（外部系统）→ `SX_CONN_CONFIG`（连接配置）→ `SX_CONN_CONFIG_DETAIL`（参数明细）\n  `SX_CONNECTOR` 下还有 `SX_CONNECTOR_OPERATION`（可调用的接口/动作）\n\n━━ action ━━\n· `list` / `get` / `save` / `delete` —— 连接器本身\n· `config_list` / `config_get` / `config_save` —— **连接配置**（具体环境的参数）\n· `operation_list` / `operation_save` / `operation_delete` —— **连接器接口**\n\n━━ 关键字段 ━━\n· `connectorCode` 唯一业务键；`defaultProtocol` 取 HTTP / DATABASE / SAPJCO / EMAIL / LDAP\n· `oauthProtocol` 鉴权协议；`oauthTokenField` / `oauthExpiresField` 指定从响应里取哪个字段\n· `successJudgment` 成功判断表达式，如 `code == '0'`\n· 连接配置的参数是键值对，存在 `SX_CONN_CONFIG_DETAIL`（FIELD_NAME / FIELD_VALUE / PROP）\n\n━━ 安全 ━━\n连接配置里通常有密钥（appSecret / 私钥等）。`config_get` 读取明细时**默认打码**，需要明文必须显式传 `revealSecrets: true`。\n\n⚠️ 写操作受 SX_ALLOW_WRITES 与角色校验；`delete` / `operation_delete` 需 confirm。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "save",
+              "delete",
+              "config_list",
+              "config_get",
+              "config_save",
+              "operation_list",
+              "operation_save",
+              "operation_delete"
+            ],
+            "description": "list / get / save / delete（连接器）· config_list / config_get / config_save（连接配置）· operation_list / operation_save / operation_delete（接口）"
+          },
+          "connectorCode": {
+            "type": "string",
+            "description": "连接器编码（唯一业务键）"
+          },
+          "connectorId": {
+            "type": "string",
+            "description": "连接器 ID（SX_CONNECTOR.ID）"
+          },
+          "configCode": {
+            "type": "string",
+            "description": "连接配置编码（config_* 用）"
+          },
+          "operationCode": {
+            "type": "string",
+            "description": "接口编码（operation_* 用）"
+          },
+          "connectorName": {
+            "type": "string",
+            "description": "save：连接器名称"
+          },
+          "connectorRemark": {
+            "type": "string",
+            "description": "save：备注"
+          },
+          "defaultProtocol": {
+            "type": "string",
+            "enum": [
+              "HTTP",
+              "DATABASE",
+              "SAPJCO",
+              "EMAIL",
+              "LDAP"
+            ],
+            "description": "save：默认协议"
+          },
+          "oauthProtocol": {
+            "type": "string",
+            "description": "save：鉴权协议"
+          },
+          "oauthTokenField": {
+            "type": "string",
+            "description": "save：从响应取 token 的字段名"
+          },
+          "oauthExpiresField": {
+            "type": "string",
+            "description": "save：从响应取过期时间的字段名"
+          },
+          "oauthExpiresIn": {
+            "type": "integer",
+            "description": "save：超时秒数"
+          },
+          "successJudgment": {
+            "type": "string",
+            "description": "save：成功判断表达式，如 code == '0'"
+          },
+          "appId": {
+            "type": "string",
+            "description": "save：所属应用 ID"
+          },
+          "status": {
+            "type": "integer",
+            "description": "save：1 启用 / 0 停用"
+          },
+          "configName": {
+            "type": "string",
+            "description": "config_save：配置名称"
+          },
+          "isDefaultConfig": {
+            "type": "boolean",
+            "description": "config_save：是否默认配置"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "config_save：**参数键值对**，写进 SX_CONN_CONFIG_DETAIL。如 {baseUrl:\"https://api.x.com\", appId:\"xxx\", appSecret:\"yyy\"}"
+          },
+          "operationName": {
+            "type": "string",
+            "description": "operation_save：接口名称"
+          },
+          "operationGroup": {
+            "type": "string",
+            "description": "operation_save：接口分组"
+          },
+          "outputType": {
+            "type": "string",
+            "description": "operation_save：输出类型"
+          },
+          "params": {
+            "type": "string",
+            "description": "operation_save：参数配置（JSON 文本，原样存）"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "list：按编码 / 名称模糊过滤"
+          },
+          "current": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：页码，默认 1"
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：每页条数，默认 20"
+          },
+          "revealSecrets": {
+            "type": "boolean",
+            "description": "config_get：true 才返回密钥明文；默认打码"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "delete / operation_delete 必须显式传 true"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_flow_process",
+      "description": "集成流（`SX_PROCESS`）的统一入口。保存时**自动生成 CHAIN_DATA 并逐条写环节**（`SX_PROCESS_ACT`），调用方只需描述节点树。\n\n· `list` / `get` —— 清单与详情（get 附带环节数）\n· `save` —— 新建/更新流；`nodes` 给业务节点树（不用写 start/end，自动补）\n· `delete` —— 逻辑删除（需 confirm，连带删除环节）\n· `nodes` / `node_get` —— 查环节清单 / 单个环节的完整 config\n\n━━ nodes 怎么写 ━━\n每项 `{ type, tagRemark?, tag?, children?, ...该组件的配置 }`：\n· `type` 是组件名，如 setVariable / database / sx / switch / while / subflow\n· `children` 表达层级（**层级只存在于 children 嵌套里**）\n· `switch` 的 children 放若干 `{type:\"cd\"}`，每个 cd 是一条分支，分支内步骤放 cd.children\n· `tag` 省略时自动按 `o1 / o2 / o2_1` 命名\n· start / end **不用手写**，save 会自动补（1001 / 1004）\n\n━━ 平台硬约束（实测）━━\n① `CHAIN_DATA` 与 `JSON_TEXT` 是同一张图的两种表示，**必须同时给** —— 本工具自动生成。\n② `SX_PROCESS_ACT` **平台不会自动生成**，不写的话环节列表是空的 —— 本工具自动逐条写。\n③ 环节用 **`PROC_ID`** 关联（不是 PROCESS_ID，后者恒为 null）。\n④ `PARENT_TAG` 留空：层级只存在于 JSON_TEXT 的 children 里。\n⑤ 业务逻辑多在环节的 Groovy 脚本里 —— 载体是 `NODE_PARAM.valueLogic.calculate`。\n\n⚠️ 写操作受 SX_ALLOW_WRITES 与角色校验；`delete` 需 confirm。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "save",
+              "delete",
+              "nodes",
+              "node_get",
+              "run",
+              "run_logs",
+              "run_detail"
+            ],
+            "description": "list / get / save / delete / nodes / node_get"
+          },
+          "chainCode": {
+            "type": "string",
+            "description": "集成流编码（唯一业务键）。除 list 外都必填"
+          },
+          "chainName": {
+            "type": "string",
+            "description": "save：流名称"
+          },
+          "appId": {
+            "type": "string",
+            "description": "save：所属应用 ID"
+          },
+          "status": {
+            "type": "integer",
+            "description": "save：1 启用 / 0 停用"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "description": "save：业务节点树。每项 {type, tagRemark?, tag?, children?, ...组件配置}。start/end 自动补，不用传"
+          },
+          "noLog": {
+            "type": "boolean",
+            "description": "save：true=不记录日志"
+          },
+          "runQueue": {
+            "type": "boolean",
+            "description": "save：true=开启队列执行"
+          },
+          "queueName": {
+            "type": "string",
+            "description": "save：队列名（runQueue=true 时用）"
+          },
+          "logDays": {
+            "type": "integer",
+            "description": "save：日志保留天数"
+          },
+          "tag": {
+            "type": "string",
+            "description": "node_get：环节标记（如 o1）"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "run：传给流的 params"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "run：传给流的 headers"
+          },
+          "body": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "run：传给流的 body"
+          },
+          "state": {
+            "type": "string",
+            "description": "run_logs：按执行状态过滤。实测 1=成功、2=失败"
+          },
+          "instId": {
+            "type": "string",
+            "description": "run_detail：执行日志 ID（SX_PROCESS_INSTANCE.ID）"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "list：按编码 / 名称模糊过滤"
+          },
+          "current": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：页码，默认 1"
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：每页条数，默认 20"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "delete 必须显式传 true"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_api",
+      "description": "对外 API（`SX_API`）的统一入口。API 是一层对外入口，按 `apiType` 转发到不同后端。\n\n· `list` / `get` / `save` / `delete`（需 confirm）\n· `sql_preview` —— `apiType=\"database\"` 时先验证 SQL 能否跑通再保存\n\n━━ 5 种 apiType 各自必填 ━━\n· `flow`      触发集成流    → **flowId**\n· `operation` 调连接器接口  → **operationId** + **connId**\n· `database`  直接查 SQL    → **querySql**\n· `http`      直连 HTTP 连接配置 → **connId**\n· `sapjco`    直连 SAP 连接配置  → **connId**\n\n**实测分布（test2，189 条）**：flow 181（95.8%）/ database 5 / operation 3，http 与 sapjco 没有实例 —— 日常基本只用 flow 和 database。\n\n━━ 常用字段 ━━\n· `apiCode` 唯一业务键；`apiName` 中文名\n· `noAuth` —— 免鉴权（对外开放时要谨慎）\n· `noLog` / `logDays` / `logSize` / `logField1..6` —— 日志配置\n· `returnSource` —— 返回内容来源\n· database 类型的 SQL 建议写 `T${SYS.TENANT_ID}_模型名`，跨租户复制才有效\n\n⚠️ 写操作受 SX_ALLOW_WRITES 与角色校验；`delete` 需 confirm。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "save",
+              "delete",
+              "sql_preview"
+            ],
+            "description": "list / get / save / delete / sql_preview"
+          },
+          "apiCode": {
+            "type": "string",
+            "description": "API 编码（唯一业务键）。除 list 外都必填"
+          },
+          "apiName": {
+            "type": "string",
+            "description": "save：API 名称"
+          },
+          "apiType": {
+            "type": "string",
+            "enum": [
+              "flow",
+              "operation",
+              "database",
+              "http",
+              "sapjco"
+            ],
+            "description": "save：flow / operation / database / http / sapjco"
+          },
+          "apiRemark": {
+            "type": "string",
+            "description": "save：备注"
+          },
+          "flowId": {
+            "type": "string",
+            "description": "save：apiType=flow 必填，集成流 ID"
+          },
+          "operationId": {
+            "type": "string",
+            "description": "save：apiType=operation 必填，连接器接口 ID"
+          },
+          "connId": {
+            "type": "string",
+            "description": "save：apiType=operation/http/sapjco 必填，连接配置 ID"
+          },
+          "querySql": {
+            "type": "string",
+            "description": "save：apiType=database 必填，查询 SQL"
+          },
+          "sqlCode": {
+            "type": "string",
+            "description": "sql_preview：已存在的 SQL 设计编码。平台没有「直接预览裸 SQL」的接口，要先用 sx_sql {action:\"save\"} 落库"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "sql_preview：表单编码，默认等于 sqlCode"
+          },
+          "returnSource": {
+            "type": "string",
+            "description": "save：返回内容来源"
+          },
+          "noAuth": {
+            "type": "boolean",
+            "description": "save：是否免鉴权（对外开放要谨慎）"
+          },
+          "noLog": {
+            "type": "boolean",
+            "description": "save：是否不记日志"
+          },
+          "logDays": {
+            "type": "integer",
+            "description": "save：日志保留天数"
+          },
+          "logSize": {
+            "type": "integer",
+            "description": "save：日志大小上限"
+          },
+          "appId": {
+            "type": "string",
+            "description": "save：所属应用 ID"
+          },
+          "status": {
+            "type": "integer",
+            "description": "save：1 启用 / 0 停用"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "list：按编码 / 名称模糊过滤"
+          },
+          "filterType": {
+            "type": "string",
+            "enum": [
+              "flow",
+              "operation",
+              "database",
+              "http",
+              "sapjco"
+            ],
+            "description": "list：只看某个 apiType"
+          },
+          "current": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：页码，默认 1"
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：每页条数，默认 20"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "delete 必须显式传 true"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_report_create",
+      "description": "用 SQL 作为数据源新建一张报表页面（查询条件 + 表格）。\n\n**两种形态**（`kind`）：\n  · `\"page\"` 分页报表 —— 模板 `SX_FORM_TEMPLATE_SQL_PAGE`，接口 `sqlPage`，控件 `pagetable`\n  · `\"table\"` 列表报表 —— 模板 `SX_FORM_TEMPLATE_SQL_TABLE`，接口 `sqlList`，控件 `table`\n\n⚠️ **SQL 里表名的写法（跨租户复制的前提）**：\n  模型若没有配置独立数据源（`SX_MODEL_TABLE.DATASOURCE` 为 null），\n  物理表名规律是 `T{租户}_模型名`，如 `TMES_MES_BARCODE`。\n  **写 SQL 时用 `T${SYS.TENANT_ID}_模型名` 而不是写死租户**，这样同一份 SQL\n  复制到其它租户能直接跑：\n    FROM T${SYS.TENANT_ID}_MES_BARCODE b\n    LEFT JOIN T${SYS.TENANT_ID}_MES_MARA m ON ...\n  同时 WHERE 里带上 `b.TENANT_ID = '${SYS.TENANT_ID}'`。\n  若模型配了独立数据源，则按该数据源的实际表名写。\n\n**SQL 设计的完整配置**（写入 SX_SQL，源码 SxSql + SqlOtherConfig）：\n  · `sql`          SQL 语句（必填，编码已存在则更新而非报错）\n  · `orderList`    默认排序 [{prop, order}]，order \"1\"=倒序 ✓ 易错\n  · `sqlFileList`  关联附件 [{fieldName, dataIdSource, modelField}]\n                   把图片/文件带出来，modelField 形如 MES_AFRU.AFRU_IMAGE\n  · `sqlDatabase`  SQL 数据源 ID，不传用默认数据源\n  · 工具自动写入 SQL_CHECK=\"2\"、STATUS=1、APP_ID=appId\n\n⚠️ **数据权限不在 SQL 设计里配**，是调用查询接口时传 `dataAuth`（\"2\"=SQL权限）\n   才生效，见 `sx_dashboard_guide` 的 params 章节。\n\n**两步走**（`sqlCode` 已存在时只做第二步）：\n  1. 传 `sql` 先建 SQL 设计（`sqlCode` + `sqlName` + `sql` 三段 SQL）\n  2. 不传 `sql` 则直接用已有 `sqlCode` 生成报表\n\n**列由 `columns` 指定**（顺序即列顺序）：\n  `[{ prop:\"WERKS\", label:\"所属工厂\", type:\"select\", width:\"110\", query:true }, ...]`\n  · `prop` 必须与 SQL 查询结果的列名一致（区分大小写）\n  · `type` 省略时按 `input`；数值用 `inputnumber`，枚举用 `select`\n  · 省略 `columns` 时按 SQL 执行结果的字段自动生成，标题用字段名\n\n**查询条件**（顶部筛选栏，缺省为空）：\n  在列上标 `query: true`，该字段就会出现在查询区。\n  · `queryType:\"1\"` 模糊匹配（文本类默认）  `queryType:\"2\"` 精确/区间（日期、编号）\n  · `querySpan` 控制栅格宽度，默认 \"8\"（一行三个）\n  例：`{ prop:\"BARCODE\", label:\"条码\", query:true, queryType:\"1\" }`\n\n**字典下拉**（`select` 类型必须配，否则下拉没有选项）：\n  ✅ **统一写在表单级的 `dicts` 里**，key 是字段名，查询区和表格列自动共用：\n     `dicts: { STATE: { dictCode: \"MES_BARCODE_STATE\" } }`\n  · `dictCode`  业务字典（租户维护，如条码状态 `MES_BARCODE_STATE`）→ dicType:\"dictBiz\"\n  · `dictTable` 系统字典（平台内置，如 `status`/`sex`）→ dicType:\"dict\"\n  两者二选一，优先 dictCode。也支持在单列上写 dictCode 覆盖表单级配置。\n  不确定字典编码时，先调 `sx_dict_biz` {action:\"codes\"} 看业务字典清单。\n\n**挂靠模型：统一使用占位模型 `SYS_REPORT_PLACEHOLDER`**\n  报表数据来自 SQL，widgets 不绑定模型字段，modelId 只是必填项的形式要求。\n  占位模型不存在会自动创建，本租户共用一个。**不需要也不建议传业务模型。**\n\n💬 **创建前先问用户**：「这张报表要不要挂到某个应用下？」\n   · 要 → 问清应用（`sx_app {action:\"list\"}` 可查），把其 ID 传给 `appId`\n   · 不要 / 暂时不定 → 仍必须给 `appId`（平台必填），可用经营看板类应用兜底\n\n⚠️ **会新建 SQL 设计和表单**（若不传 modelName/modelId 还可能新建占位模型），\n   需要 `confirm: true`。\n⚠️ 列 `prop` 写错不会报错，只是该列为空 —— 建议先调 `sx_dynamic_sql_preview` 确认字段名。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "formCode": {
+            "type": "string",
+            "description": "报表表单编码。**按平台约定等于 sqlCode**，省略时自动取 sqlCode。显式传则以此为准（仅在你需要与 SQL 编码不同的表单编码时才用）"
+          },
+          "formName": {
+            "type": "string",
+            "description": "报表名称，如「条码库报表」"
+          },
+          "appId": {
+            "type": "string",
+            "description": "所属应用 ID"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "page",
+              "table"
+            ],
+            "description": "报表形态：page=分页（默认） table=列表"
+          },
+          "sqlCode": {
+            "type": "string",
+            "description": "SQL 编码，报表的数据源"
+          },
+          "sqlName": {
+            "type": "string",
+            "description": "SQL 名称（建 SQL 时用，省略同 formName）"
+          },
+          "sql": {
+            "type": "string",
+            "description": "SQL 语句。传了就先建/更新 SQL 设计，不传则用已有 sqlCode"
+          },
+          "orderList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "prop": {
+                  "type": "string",
+                  "description": "排序字段（SQL 结果里的列名）"
+                },
+                "order": {
+                  "type": "string",
+                  "description": "排序方式：\"1\"=倒序，其它（含 \"0\"）=正序"
+                }
+              },
+              "required": [
+                "prop",
+                "order"
+              ],
+              "additionalProperties": false
+            },
+            "description": "**默认排序**（写入 sqlOther.orderList）。不传则无排序，注意 order \"1\" 是倒序，与直觉相反。"
+          },
+          "sqlFileList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fieldName": {
+                  "type": "string",
+                  "description": "输出字段名（SQL 结果里用于存放附件 ID 的列）"
+                },
+                "dataIdSource": {
+                  "type": "string",
+                  "description": "主键数据来源（SQL 结果里的字段名）"
+                },
+                "modelField": {
+                  "type": "string",
+                  "description": "附件所在模型.字段，如 MES_AFRU.AFRU_IMAGE"
+                }
+              },
+              "required": [
+                "fieldName",
+                "dataIdSource",
+                "modelField"
+              ],
+              "additionalProperties": false
+            },
+            "description": "**关联附件**（写入 sqlOther.sqlFileList），用于把图片/文件带出来"
+          },
+          "sqlDatabase": {
+            "type": "string",
+            "description": "SQL 数据源 ID。不传用默认数据源（绝大多数情况不传）"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "prop": {
+                  "type": "string",
+                  "description": "字段名，须与 SQL 结果列名一致"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "列标题"
+                },
+                "type": {
+                  "type": "string",
+                  "description": "控件类型：input / select / inputnumber / date …"
+                },
+                "width": {
+                  "type": "string",
+                  "description": "列宽（字符串，如 \"120\"）"
+                },
+                "query": {
+                  "type": "boolean",
+                  "description": "是否同时作为查询条件（放进 query 区）。true 时该字段会出现在顶部筛选栏。"
+                },
+                "queryType": {
+                  "type": "string",
+                  "enum": [
+                    "1",
+                    "2"
+                  ],
+                  "description": "查询匹配方式：1=模糊匹配（文本常用）  2=精确/区间（日期、编号常用）"
+                },
+                "querySpan": {
+                  "type": "string",
+                  "description": "查询字段的栅格宽度，默认 \"8\"（一行三个）"
+                },
+                "colorful": {
+                  "type": "boolean",
+                  "description": "表格列里的业务字典是否显示彩色标签，默认 true。仅对业务字典（dictCode）生效；系统字典与查询条件不受影响。"
+                },
+                "multiple": {
+                  "type": "boolean",
+                  "description": "仅对**查询条件**生效：下拉框是否多选，默认 true（便于一次筛多个值）。**表格列不受影响，固定单选显示。** 设 false 可让查询也单选。"
+                },
+                "dictCode": {
+                  "type": "string",
+                  "description": "业务字典编码（SX_DICT 里租户维护的字典），如条码状态 MES_BARCODE_STATE。type 为 select 时强烈建议配上，否则下拉没有选项。"
+                },
+                "dictTable": {
+                  "type": "string",
+                  "description": "系统字典编码（平台内置，如 status/sex）。与 dictCode 二选一，优先 dictCode。"
+                }
+              },
+              "required": [
+                "prop",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            "description": "列定义，顺序即列顺序；省略时按 SQL 结果自动生成。任意列的 query=true 即可生成查询条件。"
+          },
+          "dicts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "dictCode": {
+                  "type": "string",
+                  "description": "业务字典编码"
+                },
+                "dictTable": {
+                  "type": "string",
+                  "description": "系统字典编码"
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "**表单级字典配置**，key 是字段名，如 { STATE: { dictCode: \"MES_BARCODE_STATE\" } }。统一写在这里，查询条件和表格列都会自动套用，不用逐列重复。"
+          },
+          "formType": {
+            "type": "string",
+            "description": "表单类型，默认取模板的 formType（SQL_PAGE 为 2，SQL_TABLE 为 1）"
+          },
+          "formRemark": {
+            "type": "string",
+            "description": "报表说明"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "必须为 true 才会执行"
+          }
+        },
+        "required": [
+          "formName",
+          "appId",
+          "sqlCode",
+          "confirm"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_report_guide",
+      "description": "用 SQL 数据源建设报表（查询条件 + 表格）的规则沉淀，全部来自实际落地案例。\n\n**普通用户（非 administrator）调用时自动切换为「单文件原生 HTML + 国内 CDN（BootCDN） + 数据静态内联」方案**（普通用户没有建报表权限）。\n\n⚠️ **新建报表优先用 `sx_report_create` 工具**，它已内置以下所有规则，一次调用即可完成。本指南用于手工建、或排查问题时对照。\n\n可用 section：overview | sql | model | query | dict | columns | pitfalls | checklist（省略则返回全部）。\n\n核心要点：\n· SQL 表名写 `T${SYS.TENANT_ID}_模型名`，否则跨租户复制失效\n· modelId 统一用占位模型 SYS_REPORT_PLACEHOLDER\n· 查询字段 span=8、quickSpan=16\n· 下拉框 queryType 固定 \"1\"；查询条件多选(multiple=true)、表格列单选(false)\n· 业务字典的表格列默认 colorful=true（顶层字段，不在 props 里）\n· props 不能是 null，没值写 {}（否则查询组件会崩）\n· 字典统一写在表单级 dicts 里",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string",
+            "description": "章节：overview | sql | model | query | dict | columns | pitfalls | checklist。省略返回全部。"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_cdn_check",
+      "description": "写静态页面（看板/报表/单文件 HTML）之前，用它确认要用到的 JS 库能在**中国境内 CDN** 真实取到，然后把返回的可用 URL 写进 HTML。\n\n为什么必须自检：国外 CDN（jsDelivr/unpkg/cdnjs）在部分网络下不可达且无显式报错，页面会白屏；镜像对 404 也可能返回 200+HTML，只有真实请求才能发现。\n\n行为：按 BootCDN → 360(baomitu) → staticfile → bootcss 的顺序逐个探测；校验状态码、响应体不是 HTML、长度非空；指定版本失败时自动尝试降级版本。\n\n返回：可用地址 + 尝试记录；全部失败时建议降版本或改用内联实现（表格用原生 DOM）。\n\n只读操作，不需要平台令牌。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "libraries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "库名，如 echarts / dayjs / jquery"
+                },
+                "version": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "版本号，如 5.5.1；省略时用常见稳定版"
+                },
+                "file": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "入口文件名，默认 `<库名>.min.js`"
+                },
+                "fallbackVersions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "首选版本不可用时的降级版本列表"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "description": "要加载的库列表"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20000,
+            "description": "单个 URL 的超时，默认 5000ms"
+          }
+        },
+        "required": [
+          "libraries"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_form_guide",
+      "description": "表单 JSON 的结构规则 —— **手工拼 jsonText 前先读这个**。\n\n全部结论来自 **5 个系统全量归档**（000000 / MES / ERP / TEST / DONGHUA）\n共 3114 个表单的实际 JSON 统计，不是推测。\n\n━━ 什么时候用 ━━\n· **表单业务逻辑主要在 JS 脚本里**（实测 1545 处）→ 读 script\n· 不知道表单该怎么搭骨架 → 读 **paradigms**（4 类主流骨架 + 可用样例）\n· 要手工新建表单 / 修改表单控件 → 至少读 overview + widgets\n· 配下拉框、单选选项不显示 → 读 dictionary\n· 表格列不显示 → 读 containers（列放 column 不是 children）\n· 按钮点了没反应 → 读 buttons（trigger / api / actions 要配套）\n· 交付前 → 读 checklist 逐项过\n\n━━ 三条最容易踩错的 ━━\n① 表格的列放 `column`，不是 `children`（3114 个表单中 0 例外）；查询条件放 `query.children`\n② `select` / `radio` 的字典要 dicUrl 与 dicData **两处都配**，缺一个就会空显或无法搜索\n③ 控件 `props.api` 引用的是 **apiCode**，必须在表单 `api` 数组里真实存在\n④ 主子表用 `group` 容器（实测 1574 个），prop 填子模型名\n⑤ **modelId 必须是本租户的模型**（用 sx_model {scope:\"tenant\"} 取，不是 scope:\"all\"）——\n   跨租户模型能保存成功但绑定静默失效\n⑥ 表单脚本用 `form.字段名` 读写数据；表单里**允许** ${} 模板字符串\n   （与 iframe 看板相反，别混淆）\n\n可用 section：overview | api | widgets | containers | dictionary | script | buttons | paradigms | checklist（省略则返回全部）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string",
+            "description": "章节：overview | api | widgets | containers | dictionary | script | buttons | paradigms | checklist。省略返回全部。"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_integration_guide",
+      "description": "连接器、集成流、API 三者的关系与排查方法 —— **排查集成问题前先读这个**。\n\n全部结论来自 **5 个系统全量归档**（62 连接器 / 1057 集成流 / 9539 环节 / 994 API），\n由 scripts/archive-assets.mjs 采集统计，不是推测。\n\n━━ 什么时候用 ━━\n· **集成流逻辑主要在 Groovy 脚本里**（实测 1510 处）→ 读 groovy\n· 搞清楚「连接器 / 集成流 / API 谁是谁」→ overview\n· 查字段含义 → models\n· 读一个集成流在干什么 → flow（重点：用 PARENT_TAG 建树）\n· API 调不通 → api + checklist\n· 明明成功却报失败 / 队列积压 → states\n\n━━ 四条最容易踩错的 ━━\n① API_TYPE 共 5 种，关联字段各不同：\n   flow→FLOW_ID | operation→OPERATION_ID+CONN_ID | http/sapjco→CONN_ID | database→QUERY_SQL\n② 运行状态 STATE：**\"0\"=执行中、\"1\"=成功、\"2\"=失败**（不是 0=失败）\n③ 队列积压要看 PROCESS_STATUS=\"1\"，不能数总行数（已处理的不会删）\n④ 环节层级靠 PARENT_TAG 建树，ORDER_NUM 只表示同级执行顺序\n⑤ Groovy 脚本在 `NODE_PARAM.valueLogic.calculate`，不展开看不到任何逻辑\n\n可用 section：overview | models | flow | groovy | states | api | pitfalls | checklist（省略则返回全部）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string",
+            "description": "章节：overview | models | flow | groovy | states | api | pitfalls | checklist。省略返回全部。"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_app",
+      "description": "应用包（package）与应用（app）的统一入口。用 `action` 选择操作。\n\n**读**\n· `packages` —— 全部应用包，可配 `keyword` 过滤。返回 **camelCase**（packageCode / packageName / icon / color / orderNum / id）。\n· `package_detail` —— 按 `id` 取应用包详情。\n· `list` —— 全部应用，可配 `keyword` 过滤。返回 **camelCase**（applicationCode / applicationName / packageId / icon / orderNum）。\n· `list_by_package` —— 某应用包下的应用（需 `packageId`）。用于「这个包里有哪些应用」以及删除应用包前的检查。\n· `detail` —— 按 `id` 取应用详情。\n\n**写**（`mutating`，受写开关与角色限制）\n· `package_save` —— 保存应用包。带 `id` 为修改，不带为新增。必填 `packageCode` / `packageName`。走 `/dynamic/save`（**会回传新 id**），字段名用大写下划线（PACKAGE_CODE / PACKAGE_NAME…）。新增时自动补齐 ORDER_NUM / ICON / COLOR。\n· `save` —— 保存应用。带 `id` 为修改，不带为新增。**新增必填 `applicationCode` / `applicationName` / `packageId`**（应用必须归属一个应用包，平台不校验、由本工具强制）。会校验 `packageId` 真实存在，避免建出悬空归属。新增时自动补齐 ORDER_NUM / ICON。\n· `add_relation` —— 把元素（**实测只有模型 M**）挂到应用。需 `appIds` / `elementIds` / `elementType`，**幂等**，重复调用安全。表单不走这里（表单通过自身 appId 字段归属应用）。\n\n**危险操作**（必须 `confirm=true`）\n· `package_delete` —— 删应用包，需 `ids`（单值 / 逗号分隔 / 数组）。⚠️ **不会连带删除其下的应用**，只留下悬空的 packageId。\n· `delete` —— 删应用，需 `ids`。**不会连带删除其下的模型与表单**，只解除归属关系。\n\n⚠️ 唯一性：packageCode / applicationCode 在**租户内**唯一。\n⚠️ 两个域遵循**同一套** action 命名：应用包的读取操作是 `packages`（复数），单个应用包详情/保存/删除才带 `package_` 前缀。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "packages",
+              "package_detail",
+              "package_save",
+              "package_delete",
+              "list",
+              "list_by_package",
+              "detail",
+              "save",
+              "delete",
+              "add_relation"
+            ],
+            "description": "要执行的操作：packages / package_detail / package_save / package_delete / list / list_by_package / detail / save / delete / add_relation"
+          },
+          "id": {
+            "type": "string",
+            "description": "package_detail / detail 必填；package_save / save 传它表示修改"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "package_delete / delete 必填：ID 单值、逗号分隔、或数组（支持批量）"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "packages / list 的本地模糊过滤"
+          },
+          "packageId": {
+            "type": "string",
+            "description": "list_by_package 必填；save 新增时必填（所属应用包 ID）"
+          },
+          "packageCode": {
+            "type": "string",
+            "description": "package_save 必填：应用包编码，租户内唯一"
+          },
+          "packageName": {
+            "type": "string",
+            "description": "package_save 必填：应用包名称。**用于自动匹配图标与配色，请写中文业务名**"
+          },
+          "packageRemark": {
+            "type": "string",
+            "description": "package_save：描述"
+          },
+          "color": {
+            "type": "string",
+            "description": "package_save：主题色，如 #3366FF。省略时自动取色"
+          },
+          "applicationCode": {
+            "type": "string",
+            "description": "save 必填：应用编码，租户内唯一"
+          },
+          "applicationName": {
+            "type": "string",
+            "description": "save 必填：应用名称。**用于自动匹配图标**"
+          },
+          "applicationRemark": {
+            "type": "string",
+            "description": "save：描述"
+          },
+          "icon": {
+            "type": "string",
+            "description": "图标名，如 i-lucide-package。package_save / save 省略时按名称自动匹配"
+          },
+          "orderNum": {
+            "type": "integer",
+            "description": "排序码。package_save / save 省略时自动取「最大值对齐到 10 的倍数后 +10」"
+          },
+          "appIds": {
+            "type": "string",
+            "description": "add_relation 必填：应用 ID，多个用逗号分隔"
+          },
+          "elementIds": {
+            "type": "string",
+            "description": "add_relation 必填：元素 ID，多个用逗号分隔（**不能为空**）"
+          },
+          "elementType": {
+            "type": "string",
+            "enum": [
+              "M"
+            ],
+            "description": "add_relation：元素类型。**实测线上关系表里只有 M（模型）**，共 235 条全是 M"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "package_delete / delete 必须显式传 true 才会执行。这是删除类操作的安全闸门。"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_user",
+      "description": "用户相关的统一入口，用 `action` 选择。\n\n· `list`            —— 查询用户，一个工具覆盖后端的多种查法\n· `current`         —— 当前 token 对应的用户档案（我是谁、我的 deptId / roleCodes）\n· `name_to_account` —— 中文姓名批量转登录账号\n· `lock`            —— 锁定 / 解锁用户（**写操作**，需 confirm）\n\n━━ action=\"list\" 的查询维度 ━━\n按维度用对应参数（可组合，多个维度之间是 AND）：\n· `keyword`：模糊搜索（匹配账号/姓名/拼音/用户编码/部门编码/部门名称），最多 200 条；\n· `deptIds` / `deptCodes`：按部门\n· `postIds` / `postCodes`：按岗位\n· `roleIds` / `roleCodes`：按角色\n· `groupIds` / `groupCodes`：按用户组\n· `userIds` / `accounts`：按用户 ID / 账号精确取\n\n不传任何维度时返回**前 200 个**用户（安全上限，不是全部）。\n`allUser=\"1\"` 时包含离职/停用用户，否则只返回在职启用用户。\n\n**常见错误**：ID 与 Code 混用不会报错，只会返回空数组。\n分不清时先用 sx_dept_list / sx_role_list 确认真实取值。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "current",
+              "name_to_account",
+              "lock"
+            ],
+            "description": "list 查用户 / current 当前登录用户 / name_to_account 姓名转账号 / lock 锁定解锁"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "action=list：模糊搜索 账号/姓名/拼音/编码/部门名"
+          },
+          "userIds": {
+            "type": "string",
+            "description": "action=list / lock：用户 ID，逗号分隔"
+          },
+          "accounts": {
+            "type": "string",
+            "description": "action=list：账号列表，逗号分隔"
+          },
+          "deptIds": {
+            "type": "string",
+            "description": "action=list：部门 ID 列表，逗号分隔"
+          },
+          "deptCodes": {
+            "type": "string",
+            "description": "action=list：部门编码列表，逗号分隔"
+          },
+          "postIds": {
+            "type": "string",
+            "description": "action=list：岗位 ID 列表，逗号分隔"
+          },
+          "postCodes": {
+            "type": "string",
+            "description": "action=list：岗位编码列表，逗号分隔"
+          },
+          "roleIds": {
+            "type": "string",
+            "description": "action=list：角色 ID 列表，逗号分隔"
+          },
+          "roleCodes": {
+            "type": "string",
+            "description": "action=list：角色编码（roleAlias）列表，逗号分隔"
+          },
+          "groupIds": {
+            "type": "string",
+            "description": "action=list：用户组 ID 列表，逗号分隔"
+          },
+          "groupCodes": {
+            "type": "string",
+            "description": "action=list：用户组编码列表，逗号分隔"
+          },
+          "allUser": {
+            "type": "string",
+            "description": "action=list：传 \"1\" 包含离职/停用用户"
+          },
+          "names": {
+            "type": "string",
+            "description": "action=name_to_account：姓名，多个用逗号分隔"
+          },
+          "lock": {
+            "type": "boolean",
+            "description": "action=lock：true=锁定，false=解锁"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "action=lock：必须显式传 true 才会执行"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_dept_list",
+      "description": "查询部门。**一个工具覆盖后端的多种查法**：\n· `tree`：返回嵌套树（`/getDeptTree` 或 `/getEnableDeptTree`）\n· `companyTree`：公司维度树（`/getCompanyTree`）\n· `deptCode`：查某部门及其下级（`/getEnableDeptTree` 带 code）\n· `childrenOf`：查直接子部门（`/getChildren`）\n· `allParentsOf`：查某部门的所有上级（`/getAllParentDept`）\n· `byUserId`：查某用户所属部门（`/getDeptByUserId`）\n· 默认：平铺列表（`/getAllDept`）\n\n`enabledOnly=true` 只返回启用部门。不传任何参数时返回全部部门（含停用）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tree": {
+            "type": "boolean",
+            "description": "true=返回嵌套树"
+          },
+          "companyTree": {
+            "type": "boolean",
+            "description": "true=返回公司维度的树"
+          },
+          "deptCode": {
+            "type": "string",
+            "description": "限定该部门及其下级"
+          },
+          "childrenOf": {
+            "type": "string",
+            "description": "查该部门的直接子部门（传部门 ID）"
+          },
+          "allParentsOf": {
+            "type": "string",
+            "description": "查该部门的所有上级（传部门 ID）"
+          },
+          "byUserId": {
+            "type": "string",
+            "description": "查该用户所属部门"
+          },
+          "enabledOnly": {
+            "type": "boolean",
+            "description": "true=只返回启用部门"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_role_list",
+      "description": "查询角色。**一个工具覆盖多种查法**：\n· `tree`：返回嵌套树；\n· `roleAlias`：按角色别名（业务编码）查；\n· `byUserId`：查某用户拥有的角色（`/getUserRole`，不含继承）；\n· `childrenOf`：查子角色；\n· 默认：平铺列表。\n\n`enabledOnly=true` 只返回启用角色。\n**注意**：角色的业务编码字段叫 `roleAlias`，不是 roleCode —— 传错不报错、只返回空。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tree": {
+            "type": "boolean",
+            "description": "true=返回嵌套树"
+          },
+          "roleAlias": {
+            "type": "string",
+            "description": "角色别名（业务编码）"
+          },
+          "byUserId": {
+            "type": "string",
+            "description": "查该用户拥有的角色"
+          },
+          "childrenOf": {
+            "type": "string",
+            "description": "查子角色（传角色 ID）"
+          },
+          "enabledOnly": {
+            "type": "boolean",
+            "description": "true=只返回启用角色"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_post_list",
+      "description": "查询岗位。`byUserId` 查某用户的岗位，`postCode` 按编码查，`enabledOnly` 只看启用。\n默认返回平铺列表。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "byUserId": {
+            "type": "string",
+            "description": "查该用户的岗位"
+          },
+          "postCode": {
+            "type": "string",
+            "description": "岗位编码"
+          },
+          "childrenOf": {
+            "type": "string",
+            "description": "查子岗位（传岗位 ID）"
+          },
+          "enabledOnly": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_group_list",
+      "description": "查询用户组。`byUserId` 查某用户所属的用户组，`enabledOnly` 只看启用。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "byUserId": {
+            "type": "string",
+            "description": "查该用户所属的用户组"
+          },
+          "enabledOnly": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_region_list",
+      "description": "查询行政区划。`parentId` 查下级（不传则返回国家层级）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "country": {
+            "type": "boolean",
+            "description": "true=只取国家层级"
+          },
+          "parentId": {
+            "type": "string",
+            "description": "查该区域的下级"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_data_org",
+      "description": "查询数据权限的组织范围。`byUserId` 查某用户的数据权限范围，否则返回全部数据权限组织。\n用于理解「这个用户能看到哪些部门的数据」。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "byUserId": {
+            "type": "string",
+            "description": "查该用户的数据权限组织范围"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_auth_object",
+      "description": "查询平台的权限对象（受控资源）。`code` 按编码查单个，否则返回全部。\n用于了解「哪些资源可以配数据权限」。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "权限对象编码"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_dict_resolve",
+      "description": "给定字典编码与一个或多个值，**自动在两个字典里找**并返回可读文案。\n\n这是最省事的入口：不确定某个 code 属于系统字典还是业务字典时直接用它，不必自己先判断再选 `sx_dict` 还是 `sx_dict_biz`。\n\n返回里会标明 `source`（system / biz），以及未能解析的值。\n批量翻译多个字段时，逐个调用即可。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "字典编码，如 status / CUSTOMER_LEVEL"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "要翻译的存储值，单个或数组。如 \"1\" 或 [\"1\",\"0\"]"
+          }
+        },
+        "required": [
+          "code",
+          "values"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_dict",
+      "description": "查询**平台内置**字典（实测约 80 个 code，覆盖状态、类型、格式等通用编码）。\n\n**用于把存储码翻译成展示文案** —— 平台很多字段存的是编码（STATUS=1），直接展示编码是错的。\n\n用 `action` 选择要做的事：\n· `codes` —— 列出全部编码。**不知道字段对应哪个 code 时先调这个**，可配 keyword 搜索。\n· `list` —— 按 code 取取值，返回精简的 `{编码: 文案}` 映射；`raw=true` 给原始结构，`all=true` 含停用项。\n· `tree` —— 按 code 取树形结构（层级字典，如行政区划）。\n· `children` —— 按 code + key 取下级项，用于逐级下钻。\n\n与 `sx_dict_biz` 的区别：这里是平台内置、全租户共用；那边是租户自建的业务字典。**同一个 code 在两处含义可能不同，业务场景优先用 sx_dict_biz。**\n拿不准该用哪个时，直接用 `sx_dict_resolve` —— 它会自动两边都找。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "codes",
+              "list",
+              "tree",
+              "children"
+            ],
+            "description": "要做的事：\n· codes —— 列出全部字典编码（不知道 code 写什么时用，可配 keyword 过滤）\n· list —— 按 code 取取值；再配 all / raw 控制是否含停用项、是否返回原始结构\n· tree —— 按 code 取树形结构\n· children —— 按 code + key 取下级项（逐级下钻用）"
+          },
+          "code": {
+            "type": "string",
+            "description": "字典编码，如 status / sex / model_type。action=list/tree/children 时必填"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "action=codes 时按编码/名称本地模糊过滤"
+          },
+          "key": {
+            "type": "string",
+            "description": "action=children 的父级字典键，顶层通常传 \"-1\" 或 \"0\""
+          },
+          "all": {
+            "type": "boolean",
+            "description": "action=list：true=包含停用项"
+          },
+          "raw": {
+            "type": "boolean",
+            "description": "action=list：true=返回平台原始结构（字段很多）"
+          },
+          "fieldType": {
+            "type": "string",
+            "description": "控件类型过滤（通常省略）"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_dict_biz",
+      "description": "查询**业务字典**（租户自己维护，实测约 11 个，如 CUSTOMER_LEVEL / SETTLEMENT_TYPE）。\n与 `sx_dict` 的区别：那边是平台内置（80 个），这里是租户维护、按租户隔离。\n\n**同一个 code 在两个字典里含义可能不同，业务场景优先用本工具。**\n\n用 `action` 选择要做的事：\n· `codes` —— 列出本租户的全部业务字典编码，可配 keyword 过滤。**不确定 code 时先调这个。**\n· `list` —— 按 code 取取值，返回精简映射；`raw=true` 给原始结构，`all=true` 含停用项。\n· `tree` —— 按 code 取树形结构。\n· `children` —— 按 code + key 取下级项。\n\n写业务字典用 `sx_dynamic_save` 写 SX_DICT 表。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "codes",
+              "list",
+              "tree",
+              "children"
+            ],
+            "description": "要做的事：\n· codes —— 列出全部字典编码（不知道 code 写什么时用，可配 keyword 过滤）\n· list —— 按 code 取取值；再配 all / raw 控制是否含停用项、是否返回原始结构\n· tree —— 按 code 取树形结构\n· children —— 按 code + key 取下级项（逐级下钻用）"
+          },
+          "code": {
+            "type": "string",
+            "description": "字典编码，如 status / sex / model_type。action=list/tree/children 时必填"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "action=codes 时按编码/名称本地模糊过滤"
+          },
+          "key": {
+            "type": "string",
+            "description": "action=children 的父级字典键，顶层通常传 \"-1\" 或 \"0\""
+          },
+          "all": {
+            "type": "boolean",
+            "description": "action=list：true=包含停用项"
+          },
+          "raw": {
+            "type": "boolean",
+            "description": "action=list：true=返回平台原始结构（字段很多）"
+          },
+          "fieldType": {
+            "type": "string",
+            "description": "控件类型过滤（通常省略）"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_menu_user",
+      "description": "返回**当前登录用户**可见的菜单/功能路由树（GET /api/system/menu/getUserMenu），移动端与 PC 端路由都在内。\n结果由登录用户的角色权限决定 —— 换个人调用结果不同。\n用于发现「这个用户能访问哪些功能/表单入口」。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "withLast": {
+            "type": "boolean",
+            "description": "true=额外包含「最近使用」的功能（走 getUserMenuHasLast）"
+          },
+          "displayTerminal": {
+            "type": "string",
+            "description": "终端类型过滤（withLast 时生效）"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_menu_list",
+      "description": "返回当前租户的**全部**菜单（GET /api/system/menu/getAllMenu），不按用户权限过滤。\n`showTop=\"1\"` 会加一个虚拟根节点；`menuType` 可按菜单类型过滤。\n要「某用户能看什么」请用 sx_menu_user。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "showTop": {
+            "type": "string",
+            "description": "传 \"1\" 时用虚拟根节点包裹结果"
+          },
+          "menuType": {
+            "type": "string",
+            "description": "菜单类型过滤"
+          },
+          "tree": {
+            "type": "boolean",
+            "description": "true=走 getMenuTree 返回树"
+          },
+          "enabledOnly": {
+            "type": "boolean",
+            "description": "true=只返回启用的菜单"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_param_list",
+      "description": "按 key 获取租户的业务参数（GET /api/system/system/getParamList）。\n用于读取平台配置项，例如字典、开关等运行期参数。\n不传 key 时返回该租户的全部参数。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "参数键；省略则返回全部"
+          },
+          "biz": {
+            "type": "boolean",
+            "description": "true=走 getParamBiz"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_param_save",
+      "description": "保存租户业务参数（POST /api/system/system/saveParamBiz）。\n**属于配置写入**，会影响运行期行为，需要 confirm=true。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "params": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "参数键值对"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "必须显式传 true 才会执行"
+          }
+        },
+        "required": [
+          "params"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_cache_clear",
+      "description": "清平台缓存。走 `GET /api/cache/clearCache?systemCacheName=&tenantCacheName=`。\n\n━━ 两个参数（按 **key 前缀** 删，不是按名字精确匹配）━━\n· `systemCacheName` —— 全局缓存前缀。传 **all** 清全部全局缓存。\n· `tenantCacheName` —— 租户缓存。实际前缀是 `SIXU_CACHE:{租户}:{值}`；传 **ALL** 时清掉**当前租户的全部缓存**。\n  两个都可以填逗号分隔的多个前缀。\n\n━━ 什么时候用 ━━\n· 改了模型 / 表单 / 流程定义后，别处仍读到旧结构 → 清**租户**缓存（tenantCacheName=\"ALL\"）\n· 看不到刚建的集成流、或流程环节配置不生效 → 同上\n· 常规 `/dynamic/save`、`/dynamic/remove` **会自动清相关缓存**，一般不需要本工具\n\n⚠️ 需要 confirm=true。清租户缓存只影响当前租户，相对安全；`systemCacheName=\"all\"` 影响**所有租户**，慎用。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "systemCacheName": {
+            "type": "string",
+            "description": "全局缓存前缀；传 \"all\" 清全部全局缓存（**影响所有租户**）。可逗号分隔"
+          },
+          "tenantCacheName": {
+            "type": "string",
+            "description": "租户缓存前缀；传 \"ALL\" 清当前租户全部缓存（常用）。可逗号分隔"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "必须显式传 true 才会执行"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_job",
+      "description": "定时任务的统一入口，存储表 `SX_JOB_CONFIG`。用 `action` 选择。\n\n· **`list`** —— 本租户的任务清单（描述 / 类型 / cron / 状态）。\n· **`get`** —— 一条的完整配置。\n· **`save`** —— 新建或更新（给 `jobId` 即更新）。**更新时先读全量再合并**。\n· **`delete`**（需 confirm）—— 逻辑删除。\n· **`run`**（需 confirm）—— **立即执行一次**（可能读写业务数据）。\n· **`next_time`** —— 只查下次触发时间，不执行。\n\n━━ 三种任务类型（JOB_TYPE，平台 JobEnum）各自要填的字段 ━━\n· `FLOW` —— 执行集成流，填 **flowId**\n· `API`  —— 调用平台 API，填 **apiId**\n· `HTTP` —— 直接发请求，填 **url** + **method**（+ headers / body / params）\n填错字段不会报错，只是跑不出东西 —— 按类型给对应字段。\n\n━━ 关键字段 ━━\n· `scheduleConf` —— **cron 表达式，7 段**（秒 分 时 日 月 周 年），如 `0 1/10 * * * ? *` 表示每 10 分钟的第 1 分钟。注意是 Quartz 风格（日/周位常用 `?`），不是 Linux 的 5 段。\n· `appId` —— 所属应用，平台按它归属任务\n· `misfireStrategy` —— 错过触发后的策略（DO_NOTHING / FIRE_ONCE_NOW）\n· `executorBlockStrategy` —— 并发阻塞策略（SERIAL_EXECUTION / DISCARD_LATER / COVER_EARLY）\n· `executorTimeout` —— 超时秒数\n· `status` —— 1 启用 / 0 停用\n\n⚠️ 写操作受 SX_ALLOW_WRITES 与角色校验限制；`list` / `get` / `next_time` 是纯读。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "save",
+              "delete",
+              "run",
+              "next_time"
+            ],
+            "description": "list / get / save / delete / run / next_time"
+          },
+          "jobId": {
+            "type": "string",
+            "description": "任务 ID（SX_JOB_CONFIG.ID）。get/save 更新/delete/run 用"
+          },
+          "jobName": {
+            "type": "string",
+            "description": "任务描述（JOB_DESC）。run / next_time 可用它代替 jobId"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "list：按任务描述模糊过滤"
+          },
+          "current": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：页码，默认 1"
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "list：每页条数，默认 20"
+          },
+          "jobDesc": {
+            "type": "string",
+            "description": "save：任务描述（也是 run 时的 jobName）"
+          },
+          "jobType": {
+            "type": "string",
+            "enum": [
+              "API",
+              "FLOW",
+              "HTTP"
+            ],
+            "description": "save：任务类型 FLOW / API / HTTP"
+          },
+          "flowId": {
+            "type": "string",
+            "description": "save：JOB_TYPE=FLOW 时的集成流 ID"
+          },
+          "apiId": {
+            "type": "string",
+            "description": "save：JOB_TYPE=API 时的 API ID"
+          },
+          "url": {
+            "type": "string",
+            "description": "save：JOB_TYPE=HTTP 时的请求地址"
+          },
+          "method": {
+            "type": "string",
+            "description": "save：JOB_TYPE=HTTP 时的请求方式（GET/POST…）"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "save：请求参数"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "save：请求头"
+          },
+          "body": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "save：请求体"
+          },
+          "scheduleConf": {
+            "type": "string",
+            "description": "save：**cron 表达式，7 段 Quartz 风格**，如 `0 1/10 * * * ? *`"
+          },
+          "misfireStrategy": {
+            "type": "string",
+            "enum": [
+              "DO_NOTHING",
+              "FIRE_ONCE_NOW"
+            ],
+            "description": "save：错过触发策略"
+          },
+          "executorBlockStrategy": {
+            "type": "string",
+            "enum": [
+              "SERIAL_EXECUTION",
+              "DISCARD_LATER",
+              "COVER_EARLY"
+            ],
+            "description": "save：并发阻塞策略"
+          },
+          "executorTimeout": {
+            "type": "integer",
+            "description": "save：超时秒数"
+          },
+          "executorFailRetryCount": {
+            "type": "integer",
+            "description": "save：失败重试次数"
+          },
+          "appId": {
+            "type": "string",
+            "description": "save：所属应用 ID"
+          },
+          "status": {
+            "type": "integer",
+            "description": "save：1 启用 / 0 停用"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "delete / run 必须显式传 true"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "sx-platform-mcp",
+    "version": "1.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": "━━━━ sx-platform 低代码平台 · 通用操作规则 ━━━━\n\n【铁律 1】凡是「修改」，一律：先查出来 → 在完整数据上调属性 → 再保存。\n\n  绝不可以用「只传要改的字段」的方式去改已有记录。\n  写接口（sx_dynamic_save / sx_form_save / sx_model_save 等）是**整条记录覆盖保存**，\n  不是字段级 patch：没传的字段会按默认值落库，**等价于把旧值清空**。\n\n  ✅ 正确流程：\n     1. 查出完整记录：\n          · 表单   → sx_form_get（detail:\"raw\" 可拿到最新）\n          · 模型   → sx_model_config（模型头 + 字段 + 引用 + 验证 + 排序 + 索引 + 关系）\n          · 任意数据 → sx_dynamic {action:\"get\"}（或 {action:\"list\"} 取整行）\n     2. 在查出来的完整数据上，只改需要改的属性，其余字段**原样保留**；\n     3. 带回主键（ID / 原 id）保存；\n     4. 回读校验：关键字段与预期一致，且未改字段没有被清空。\n\n  ⚠️ 真实事故：给菜单改名时只传 { ID, NAME }，结果 PARENT_ID 变成 \"0\"、\n     ANCESTORS 变成 \"0\"，菜单直接从「系统配置」下掉到顶层 —— 接口照样返回「保存成功」。\n     任何「局部字段一把梭」的写法都有同样的风险。\n\n【铁律 2】不允许「删除后重建」已有对象。\n\n  表单 / 模型 / 菜单凡是已存在，就必须走「读出 → 改 → 带原 id 回存」。\n  删除重建会让 id 变化，导致引用它的菜单、按钮、外链、流程全部失效，\n  历史版本链断裂，用户自定义布局与权限一并丢失。\n\n【铁律 3】「保存成功」不等于「写进去了」，必须回读断言。\n\n  以下情况都出现过，且接口都返回 200 / 保存成功：\n    · 未传 jsonText → 平台建出空壳表单（jsonText=null、fieldList=[]），打开一片空白；\n    · token 失效 / 未登录 → 写入被静默丢弃，内容根本没变；\n    · 只传部分字段 → 其余字段被清空（见铁律 1）。\n\n  ✅ 回读时用**语义断言**，不要只比长度或看有没有报错：\n     · 断言目标内容真的存在（如标题文字、某个字段值）；\n     · 断言 id 未变、updateTime 已更新；\n     · 断言未改字段仍然是原值。\n     长度对比只能发现「内容变了」，等长替换（如改一个字）会漏判。\n\n【铁律 4】写操作前先确认身份与环境。\n\n    · 先调 sx_status 看 hasToken / baseUrl / tenantId / allowWrites；\n    · hasToken=false 时任何写操作都会被静默丢弃或返回 401，先补凭据再动手；\n    · 成片 401 先怀疑「没登录 / 凭据丢失」，不要误判成权限或数据问题。\n\n【铁律 4.1】写权限由**角色**决定，不是所有人都能改数据。\n\n    · 只有令牌里 isAdmin=true（或角色含 administrator）的账号是管理员；\n    · 管理员：可建/改/删模型、表单、数据等全部写操作；\n    · 普通用户：**只有读取权限**，所有 mutating 工具会被直接拒绝；\n    · 被拒时的提示是「当前身份为普通用户」—— 这不是 bug，也不是权限配置错误，\n      换具备 administrator 角色的账号即可，不要去改 SX_ALLOW_WRITES；\n    · 两个开关都要满足才放行：角色是「这个人能否写」，SX_ALLOW_WRITES 是「这台服务能否写」。\n\n【铁律 5】先查事实，再下结论。\n\n    · 字段含义、状态取值必须先查证（拉一条真实数据 / 查字典），不要凭字段名猜；\n    · 遇到「工具报 unknown tool」或「schema 与文档不一致」→ 先怀疑连到了旧构建，\n      核对 DSH 的 MCP 配置里 args / cwd 指向的 dist 是否真实存在；\n    · 不要把自己的实现错误归因于平台或文档。\n\n【补充】做看板 / 报表前，先读 sx_dashboard_guide / sx_report_guide。\n  里面记录了 14 类实测坑（空壳表单、层级清空、趋势聚合取数、失败显示成 0 等）。",
+  "durationMs": 1101,
+  "stderr": "▲ warn   未初始身份：可设置 SX_ACCOUNT + SX_PASSWORD，或在会话里调用 sx_local_login\n  ______  __  __  __  ____ ____  \n / ___\\ \\/ / |  \\/  |/ ___|  _ \\ \n \\___ \\\\  /  | |\\/| | |   | |_) |\n  ___) /  \\  | |  | | |___|  __/ \n |____/_/\\_\\ |_|  |_|\\____|_|    \n                                 \n\n  sx-platform 集成平台 · MCP 工具服务  v1.0.0\n\n  stdio 传输（stdout 为协议通道，日志走 stderr）\n\n  平台 http://127.0.0.1:8000\n\n› info   已注册 44 个工具，写操作 已开启\n› info   stdio 传输已就绪\n"
+}
