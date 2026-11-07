@@ -1,0 +1,2667 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@dwlf/mcp-server",
+  "version": "0.61.0",
+  "integrity": {
+    "dist": "sha512-vaaCkhFqAqMoDeK3ECTbuphIDxnFEW7PjffpXubXqKZxsHdSDhxj8MnWIB0fuQI3JxrGFi2OEkuvuvy8afQQQA==",
+    "installed": "sha512-vaaCkhFqAqMoDeK3ECTbuphIDxnFEW7PjffpXubXqKZxsHdSDhxj8MnWIB0fuQI3JxrGFi2OEkuvuvy8afQQQA=="
+  },
+  "bin": "node_modules/@dwlf/mcp-server/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-06T12:12:44.613Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "dwlf_get_market_data",
+      "description": "Get OHLCV candle data (open, high, low, close, volume) for a trading symbol at a chosen timeframe. Reach for this when you need ACTUAL BARS — sweeps, ranges, exact intraday highs/lows, \"did price touch $X on date D\", the close on a specific bar — rather than the pivot-based reconstruction from `dwlf_get_price_picture` / `dwlf_get_events`. Timeframes: `daily`, `weekly`, `hourly` (hourly is available only for symbols that have 1h data). Gated to the owner account; other API keys get a 403 with a pivot-based fallback hint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers like AAPL, TSLA"
+          },
+          "timeframe": {
+            "description": "Candle timeframe (default: daily). Hourly is available only for symbols with 1h data.",
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "hourly"
+            ]
+          },
+          "limit": {
+            "description": "Number of most-recent candles to return (default: 50; the API caps it per timeframe)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_quote",
+      "description": "Get the latest price (close + date) for one or more symbols. Lightweight and API-key-accessible — works for ANY tracked symbol, including off-watchlist ones the daily briefing does not cover. Returns ONLY the current level (no OHLCV, no history) — for bar data use dwlf_get_market_data (owner-account only) or dwlf_get_price_picture for a pivot narrative. Ideal for marking a trade/skip to current price or pricing an arbitrary symbol. Unknown symbols come back with found:false (not an error).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbols": {
+            "description": "Symbols to quote, e.g. [\"CAT\",\"BTC-USD\"]. Accepts BTC / BTC-USD / BTC/USD / stock-ticker shapes. Max 50.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "symbol": {
+            "description": "Single-symbol shorthand. Use `symbols` for multiple.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_symbols",
+      "description": "List all available trading symbols with metadata. Use this to discover what symbols are available on DWLF.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_support_resistance",
+      "description": "Get the current key levels (support and resistance) for a trading symbol, from daily candles, recomputed nightly. Each level is a zone (`zone.lower`/`zone.upper`, ATR-wide) built from confirmed cycle pivots (daily and weekly) and the previous week, month and year high/low and year open; round numbers only add confluence. `sources` lists what built it, `score`/`scoreParts` rank it (touches × reaction × recency × timeframe × confluence), `distanceAtr` is how far it sits from the close, and `id` is stable across nights. Up to 5 per side, nearest first. Interactions with these levels are daily events: dwlf_get_events with type `keyLevel.<kind>` (formed, approached, tested, rejected, broken, retested, flipped, reclaimed, expired), each with a `keyLevel` block (levelId, kind, direction, role, levelPrice, zone edges).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers like AAPL, TSLA"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_events",
+      "description": "Get indicator events (cycle lows/highs, crossovers, breakouts, divergences, etc.). Filter by a single `symbol` or a `symbols` watchlist, by `type` (e.g. `cycle.low.confirmed`), by `timeframe` (1d / 4h / 1h — without this the response is dominated by hourly noise), and by time window via `days` or explicit `fromDate` / `toDate`. 📑 PAGINATION: results are paged. When scoped by `customEventId` or `eventName`, this tool AUTO-FOLLOWS the cursor and returns the event’s COMPLETE history in one call (`filtersApplied.autoPaginated` / `pagesFetched` report what happened) — but you must still pass a wide `days` (e.g. 2000) or `fromDate`/`toDate`, or the 7-day default caps how far back it looks. For non-scoped queries a `cursor` in the response means there are MORE pages: follow it (or use a tight `fromDate`/`toDate`) before trusting any count or “oldest” date — page 1 holds only the most-recent matches. 💡 For accounts without raw OHLC access (most API-key callers), this is the canonical way to reconstruct price action: cycle pivots, swing points, MA/EMA crosses and trendline breaks each carry the price at the event date; for a single-call summary across those types, use `dwlf_get_price_picture` instead. RSI(14): `rsi.exit.overbought` / `rsi.exit.oversold` (back inside 70 / 30), `rsi.midline.bullish` / `rsi.midline.bearish` (a close across 50). Divergence: `rsi.divergence.*` and `dss.divergence.*`, each `{regular,hidden}.{bullish,bearish}` (e.g. `rsi.divergence.regular.bullish`), compare price with RSI(14) or DSS at consecutive confirmed daily cycle lows (bullish) or highs (bearish). Each row carries a `divergence` block (both pivots' prices, both oscillator readings, barsBetween); it is dated by the later pivot and knowable at `eventTimestamp`. SMA reclaim / loss (daily): `sma.reclaimed` / `sma.lost` on the 50, 100 and 200-day SMA (`length` on the row): two closes in a row on the other side, each at least half an ATR beyond the average, so a one-day poke through it (`sma.cross.*`) is not one. ADX / DMI (daily, Wilder 14): `adx.trend.started.bullish` / `.bearish` (ADX rises to 25; side from the DIs), `adx.trend.faded` (ADX falls below 20: ranging again), `adx.di.cross.bullish` / `.bearish` (DIs cross while ADX >= 20); each row carries an `adx` block (adx, previousAdx, plusDI, minusDI, threshold). Context (trending vs ranging), not an entry trigger, and events only: not builder nodes. Trend starts and fades fire a few times a year per symbol, so pass a wide `days` (e.g. 365) for them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "description": "Filter by a single trading symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers",
+            "type": "string"
+          },
+          "symbols": {
+            "description": "Filter by multiple symbols at once. Each accepts the same shapes as `symbol`. Use this for watchlist queries (e.g. \"what cycle lows fired across my watchlist today\").",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "type": {
+            "description": "Filter by event type (e.g. `cycle.low.confirmed`, `cycle.high.confirmed`, `bullish_reversal`, `dss_breakout`).",
+            "type": "string"
+          },
+          "timeframe": {
+            "description": "Filter by candle timeframe. Strongly recommended — without it the API returns mostly hourly events and daily-bar fires get truncated past the limit. Use `1w` to query weekly cycle events (e.g. for multi-timeframe DCL analysis).",
+            "type": "string",
+            "enum": [
+              "1w",
+              "1d",
+              "4h",
+              "1h"
+            ]
+          },
+          "days": {
+            "description": "Restrict to events fired in the last N days (e.g. `5` for the last 5 days). ⚠️ DEFAULT IS 7 DAYS if omitted — anything older is silently hidden. For historical lookups (verifying old cycle pivots, debugging \"where did that signal go\") pass an explicit larger value like `days: 120` or use `fromDate`/`toDate` for a precise window. Hit this footgun multiple times across sessions; documenting loudly.",
+            "type": "number"
+          },
+          "fromDate": {
+            "description": "Inclusive lower bound on event date, ISO `YYYY-MM-DD`. Mutually useful with `toDate`.",
+            "type": "string"
+          },
+          "toDate": {
+            "description": "Inclusive upper bound on event date, ISO `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "uniquePerSymbol": {
+            "description": "If true, return only the most recent event per symbol (useful for \"latest fire\" snapshots).",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Number of events to return (default: 20).",
+            "type": "number"
+          },
+          "customEventId": {
+            "description": "Filter to fires of a specific custom event by its event definition ID. Only honoured when `type` is `custom_event` (the tool defaults `type` to `custom_event` when you set this and leave `type` unset). The tool auto-follows pagination for this scoped query and returns the event’s COMPLETE set — but pass a wide `days` (e.g. 2000) or `fromDate`/`toDate`, or the 7-day default caps how far back it looks. Combine with `symbol` / `symbols` to scope to a single asset, or omit to see fires across the watchlist.",
+            "type": "string"
+          },
+          "eventName": {
+            "description": "Filter custom event fires by their human-readable name (e.g. `bullish_reversal_1`). Only honoured when `type` is `custom_event`. Useful when you know the name but not the ID.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_price_picture",
+      "description": "Aggregate the price-meaningful indicator events for a symbol into a chronological narrative — cycle pivots, swing points (HH/HL/LH/LL, breaks, sweeps), MA/EMA crosses, SMA 50/100/200 reclaims and losses (`sma.reclaimed` / `sma.lost`), trendline breaks and breaches, bollinger breaks, key level breaks / flips / reclaims. The levels themselves are not included (use dwlf_get_support_resistance), nor SMC, VWAP, fib or DSS events (use dwlf_get_events). Each row carries date + price (or level) + a human-readable label. Use this when you need structural price context for a symbol but do not have raw OHLC access, or when you want a clean one-call summary instead of stitching together multiple `dwlf_get_events` queries. Returns events sorted newest-first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers like AAPL, TSLA"
+          },
+          "days": {
+            "description": "How many days back to include (default: 90). Smaller = tighter narrative; larger = longer-term structural view.",
+            "type": "number"
+          },
+          "timeframe": {
+            "description": "Timeframe of events to include (default: 1d). 1d carries every type listed; 1w carries cycle pivots and trendline breaks; 1h carries cycle events only; 4h has no events today.",
+            "type": "string",
+            "enum": [
+              "1w",
+              "1d",
+              "4h",
+              "1h"
+            ]
+          },
+          "limit": {
+            "description": "Max events to return (default: 50). Most useful narratives fit in 20-40 rows.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_cycle_setups",
+      "description": "The Cycle Setup Screener: universe-wide cross-reference of the WEEKLY cycle timing window with DAILY cycle confirmation, both sides, ranked best-first. Stages: `confirmed_setup` (weekly window open AND daily pivot confirmed fresh <=15d — the multi-timeframe trigger has fired), `awaiting_confirmation` (daily pivot provisional, confidence % included), `window_open` (timing window open, no daily signal yet). Each row: weekly window position (early/mid/late + days-since-pivot), `weekly.timing`, daily pivot price/confidence/freshness, last close and % from pivot (the entry-freshness number — fresher entries pay less confirmation tax). Start daily market reviews here: the long/short counts alone summarise the universe regime (e.g. 9 long vs 33 short = late-cycle topping). `weekly.timing` is the STORED weekly window, the same edges the chart draws: `earliest`, `opens`, `closes`, `hardMax` (dated edges), `phase` (upcoming | open | overdue | missed), `n` (gaps behind the edges), `calibration`, `verification` (always `unverified` while the detection gate stands failed), `rulerAgreesWithState`, `generation` and `projectionHash`; null when the store holds no window for the series. Reads the persistent cycle FSM state — exactly what the cycle engine itself sees — and the window store for timing; no window is computed here. ⚠️ A symbol whose weekly window is not yet open is ABSENT from every list, not suppressed — for its window dates call `dwlf_get_cycle_windows`. DEPTH (`depth: true`, DWLF-416): each row also carries `depth`, its weekly window's derived price band (the same object `dwlf_get_cycle_windows` returns; long rows = the fall into the weekly low, short rows = the rise into the weekly high), and `depth.reading.position` places the last weekly close: `in-zone` (inside the p25–p75 of past cycles' moves — call it out), `shallow` / `deep` / `beyond`, or `not-reached` (short of the smallest move on record — not worth raising). Context, NOT a gate or target: it does not change the stage or ranking. A missing band says why in `depthUnavailable` (incl. `ruler-mismatch` when the band's window is not the setup's). UI equivalent: https://www.dwlf.co.uk/screener",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "depth": {
+            "description": "Add each setup's weekly depth band and where the last close sits in it (`depth`, DWLF-416). Historical context, not a target.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_ranges",
+      "description": "Range / support-resistance CONTEXT derived from cycle pivots — answers \"where in a range are we?\". Pass a `symbol` for that symbol's current daily + weekly ranges, or OMIT it to list every symbol currently in a range (optionally filtered by `timeframe` / `state`). Each range carries: bounds (floor/ceiling/touches/since); a `live` block — livePosition (0 = floor, 1 = ceiling) and liveState (near_floor | mid_range | near_ceiling | above | below), recomputed from the latest price = WHERE PRICE IS NOW; and a `snapshot` block — the weekly lifecycle narrative (state broke_out_up / broke_down / retesting_* + brokeDaysAgo + ageDays), which can be up to a week old. Use it for the classic reads: \"at the BOTTOM of a range\" (near_floor — significant alongside a daily cycle low), \"at the TOP of the range — think twice about entering here\", \"broke out of the range\", \"retesting an edge\". IMPORTANT: \"not in a range\" is a first-class, common answer — a symbol with no clear current range simply is not returned in the list, or returns inRange:false. Prefer `live` for current location and `snapshot` for the lifecycle narrative. NOTE: this is context, not a trade signal.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "description": "A symbol to get that symbol's current ranges (daily + weekly). Accepts BTC, BTC/USD, BTC-USD, or stock tickers like AAPL. Omit to LIST every symbol currently in a range.",
+            "type": "string"
+          },
+          "timeframe": {
+            "description": "List mode only (no symbol): restrict to one timeframe.",
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly"
+            ]
+          },
+          "state": {
+            "description": "List mode only (no symbol): filter by LIVE position state. NB this is the live location, not the stored lifecycle state (broke_out_up etc.).",
+            "type": "string",
+            "enum": [
+              "near_floor",
+              "mid_range",
+              "near_ceiling",
+              "above",
+              "below"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_setup_transitions",
+      "description": "Cycle Setup Screener stage transitions in ONE call — the five `cycle.setup.*` event types merged and pre-grouped into `entered` / `downgraded` / `left`, newest first. Use this instead of five separate `dwlf_get_events` calls (that endpoint filters one `type` per request). 💡 This is the delta feed: what CHANGED stage, not what currently sits in the screener — for the current standing list use `dwlf_get_cycle_setups`. ⚠️ SEEDED ROWS ARE EXCLUDED BY DEFAULT. The first live run of the transitions job seeds the entire current state as `seeded: true` rows (≈34 of them on 27-Aug-2026); they are bookkeeping, not news, and SPT’s dispatcher does not deliver them either. Counting them as transitions would report a flood of false “new setups”. `suppressedSeeded` tells you how many were hidden. Pass `includeSeeded: true` only when auditing the seed itself. 📅 Transitions are written by the 04:12 UTC job, so the freshest data appears after that. 📑 Each type is paginated to completeness (cursor-followed, 10-page cap). If a type hits the cap the response carries `truncated: true` + `truncatedTypes` and the counts are PARTIAL — narrow with a smaller `days` or a `symbol`. A per-type fetch failure sets `partial: true` + `failedTypes` rather than failing the whole call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "description": "Look-back window in days. Defaults to 7. The transitions job runs once daily, so `days: 1` may return nothing if today’s 04:12 run has not happened yet — prefer 2+ for \"what changed recently\".",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "symbol": {
+            "description": "Restrict to one symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers.",
+            "type": "string"
+          },
+          "side": {
+            "description": "Restrict to one side. Omit for both.",
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ]
+          },
+          "maxRows": {
+            "description": "Max rows returned PER bucket (default 200). `counts` are always complete — this caps only what is rendered, newest first, and reports `rowsOmitted`.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "includeSeeded": {
+            "description": "Include first-run seed rows (`seeded: true`). Defaults to FALSE — they are current-state bookkeeping, not stage changes. Set true only to audit what the seed wrote.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_cycle_windows",
+      "description": "When is this symbol's next cycle LOW (or HIGH) due? Returns the STORED cycle timing window per side — the same edges the chart draws and the screener reads — for ONE symbol, whether or not the window is open yet. Use it for \"when does X's next weekly-low window open?\", \"when is X's next DAILY low due?\" and \"how many weeks since X's last weekly low, against its usual gap?\". Unlike `dwlf_get_cycle_setups`, which only lists symbols whose weekly window is already open (and adds `phase` / early-mid-late for them), this answers for any symbol but carries NO phase: to say whether a window is open, overdue or missed, compare today with the dated edges below.\n\nSHAPE: `{ symbol, timeframe, generation, generationSource, verification, low, high }`. Each side is `null` when the store holds nothing for it, otherwise `{ symbolUsed, current, retiredAbove, history }`. `current` is the live window: `ruler` (the confirmed pivot the window counts from — `pivotDate`, `price`); dated edges in order `earliest` (the shortest gap on record; weekly and daily — a daily one is always an estimate, `extrapolated: true`; null when there is none) → `opens` (early bound) → `centre` (typical) → `closes` (late bound) → `hardMax` (the last bar by which the pivot must arrive or the window is a miss), each with `bars` counted from the ruler and `extrapolated: true` when it lies beyond the last candle; `gaps` (the gap statistics the band was drawn from, incl. `used` = the inter-pivot gaps in bars, `n`, `spreadPct`); `status` (the store row lifecycle: projected | closed — NOT the screener's phase); `calibration` (calibrated = the gap chain is long enough to mean anything); `provenance.projectionHash` — the versioned definition of how the edges are drawn; when it changes, the edges mean something new. Closed windows in `history` carry an `outcome` — where the pivot actually landed (`landedInside`, `daysFromOpen`, …) — which is how to judge how reliable THIS symbol's windows have been.\n\n⚠️ Read `verification`: while it says `unverified` (it does for every window as long as the detection gate stands failed), treat the edges as rough timing, not a forecast. ⚠️ The store covers WEEKLY and DAILY (daily folded from the ledger's daily lows/highs); `timeframe: \"1h\"` answers with null sides rather than a computed substitute. On daily, `bars` are trading candles, and an extrapolated edge's date is an estimate from average bar spacing (it can fall on a non-trading day until real bars exist).\n\nPRICE ZONE (`depth: true`, DWLF-416): each window also carries `depth`, DERIVED at read time: how far price MOVED into this side's past pivots (`pct` min/p25/median/p75/max, a fall into a low or a rise into a high, over the trailing `n` completed cycles; `thin` when few) and `zone` = that band as prices from the current cycle's `anchor`: the confirmed opposite pivot (`anchor.source: confirmed-pivot`, `pivotDate`; the highest high after a low ruler, the lowest low after a high ruler) or, when none has confirmed or price has gone beyond it, the cycle's extreme SO FAR (`running-extreme`, `barDate`, not yet a confirmed pivot). `zone` is null when there is no anchor (a pivots-only band — `anchorBasis: pivots`, e.g. candles not licensed or unavailable — before the opposite pivot confirms) or no completed cycles to measure (`pct` null). The CURRENT window also carries `reading`: `position` of the last weekly close in the band — `not-reached` (short of the smallest move on record: the band does not apply yet) | `shallow` | `in-zone` (inside p25–p75: the one to call out) | `deep` | `beyond` — plus `movePct`, `price` and `closeDate`. An API key without raw-candle rights gets `price`/`movePct` null (`priceWithheld: true`), the position kept, and a pivots-only band (`candlesUnavailable: not-licensed`). ⚠️ `depth.verification.state` is `context-only`: a distribution of past moves, NOT a target or forecast. Use it for \"has X fallen far enough for a typical weekly low?\", never as an entry level. A missing band says why in `depthUnavailable`. For many symbols at once, `dwlf_get_cycle_setups` with `depth: true` carries the same band on each open-window setup.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Trading symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or tickers like PHAU, SPY"
+          },
+          "timeframe": {
+            "description": "Cycle timeframe (default 1w). Weekly and daily windows are stored; hourly is not.",
+            "type": "string",
+            "enum": [
+              "1w",
+              "1d",
+              "1h"
+            ]
+          },
+          "side": {
+            "description": "Omit for both sides. `low` = next cycle-low window (the entry timing); `high` = next top.",
+            "type": "string",
+            "enum": [
+              "low",
+              "high"
+            ]
+          },
+          "history": {
+            "description": "How many windows OLDER than `current` to return, newest first (0-20, default 0). Use ~10 to see past outcomes and judge how often this symbol's lows landed inside the window.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "depth": {
+            "description": "Add each window's derived price zone (`depth`, DWLF-416): the typical move into this side's pivots, and as prices from the current cycle's anchor. Historical context, not a target.",
+            "type": "boolean"
+          },
+          "generation": {
+            "description": "Detector generation to read. Omit — the API defaults to the one it stands behind (`generationSource` says which was used).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_stage",
+      "description": "What stage of its market cycle is this symbol (or sector) in, on the WEEKLY chart? Returns the Weinstein stage — 1 base, 2 advance, 3 top, 4 decline — derived from the 30-week average, with `weeksInStage`, `since` (when the stage became knowable) and the recent transitions. Use it for \"is X basing or advancing?\", \"how long has X been in Stage 2?\" and, with `group` or several `symbols`, for sector breadth (\"what share of metals are in Stage 2?\"). This is the platform's market-cycle read: dwlf_get_regime carries no cycle phase, and dwlf_get_intelligence returns this same stage as `stage`.\n\nSHAPE (one symbol): `{ symbol, stage, stageName, weeksInStage, since, rulesVersion, verification, history: [{ to, from, baseline, knowableFrom, close }] }`. `stage: null` with `reason: \"no-stage\"` = too little weekly history. SHAPE (many): `{ verification, stages: { SYM: … }, unavailable: [{ symbol, reason }], breadth: { counted, withoutStage, share: { base, advance, top, decline } } }` — shares are over symbols WITH a stage.\n\nWith no arguments, returns every staged symbol plus universe breadth (a large response).\n\n⚠️ Stages are CONTEXT, not a trading signal: report the response's `verification` (state + reason) with the stage rather than presenting it as a buy/sell call. Like any trend read a stage confirms late — much of a move has happened by the time a stage changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "description": "One symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or tickers like PHAU, SPY",
+            "type": "string",
+            "minLength": 1
+          },
+          "symbols": {
+            "description": "Several symbols: returns each stage plus breadth over them",
+            "minItems": 1,
+            "maxItems": 150,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "group": {
+            "description": "A named group, e.g. metals, gold_miners, mag7, crypto_spot, btc_mining — stages plus breadth",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_conditions",
+      "description": "What are an asset's conditions right now? Bitcoin today (`asset: \"btc\"`). ONE call returning: the regime (daily and weekly trend, momentum, volatility; the Weinstein weekly stage; and the on-chain bands: MVRV below 1 / above 3.5, supply in profit below 50 %, 7-day STH-SOPR below 1); the COST-BASIS LADDER (price above or below the realised, short-term-holder and long-term-holder realised price, and since when); the stored weekly and daily cycle windows with today's `position` against their dates; every event on the symbol in the last `days` (price, cycle, CFTC positioning `cot.*`, on-chain `onchain.*`); and provenance. For BITCOIN, call this first, instead of stitching dwlf_get_regime, dwlf_get_stage, dwlf_get_cycle_windows and dwlf_get_events together. It carries what dwlf_get_intelligence does not: the on-chain cost basis, the on-chain bands, the cycle windows and CFTC positioning. Use dwlf_get_intelligence for any other symbol, and for BTC's S/R levels, FSM state and signal quality.\n\nSHAPE (responseVersion 1; the response carries `responseVersion`, so check it): `{ kind: \"conditions\", asset, responseVersion, framing, symbol, asOf, price, regime: { daily, weekly, stage, onchain: { status, bands[] } }, costBasisLadder: { status, onchainSymbol, sideBasis, levelsPending, rungs: [{ key, side, level, distancePct, since }], counts }, cycleWindows: { weekly, daily }, recentEvents: { days, truncated, events: [{ eventType, date, family, onchain?, cot? }] }, provenance: { sources, methodVersions, brkVersion, scoring, unavailable } }`. A rung's `side` comes from its latest on-chain cross event; `level`/`distancePct` need the stored on-chain day (`levelsPending: true` until then). On-chain readings are read from the own-data BTC symbol (`onchainSymbol`), whose price is DWLF's own BRK oracle close.\n\n⚠️ Read before you report:\n- `framing`: these are CONDITIONS, NOT CALLS. Describe the state (\"price is below the STH realised price since 20-Oct\"); never turn it into a buy/sell/hold recommendation. `provenance.scoring` is `unscored`: no reading is a validated predictor.\n- `status: \"pending\"` means the on-chain events are not ingested yet, not that the market is neutral. Say so rather than inferring a side.\n- `provenance.unavailable` lists legs that failed or timed out (those fields are null). Never fill them from memory.\n- `asOf` holds the price bar date and the on-chain day, block height and `confirmedAt`. Quote them, so staleness is visible.\n- `price.withheld: true` means this API key may not receive the vendor's raw close (data licensing). Sides and states are unaffected; do not ask for the close another way.\n- Cycle windows carry `verification` (currently unverified): treat them as rough timing, not a forecast.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "asset": {
+            "description": "The asset (default btc; the only one today).",
+            "type": "string",
+            "enum": [
+              "btc"
+            ]
+          },
+          "symbol": {
+            "description": "BTC/USD (default; the exchange price) or BTCOC/USD (DWLF's own on-chain BTC price). Any spelling: BTC, BTCUSD, BTC-USD, BTCOC, BTCOCUSD, BTCOC-USD.",
+            "type": "string"
+          },
+          "days": {
+            "description": "Recent-events window in days (default 14).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_indicators",
+      "description": "Get the stored DAILY moving averages for a symbol: SMA and EMA at 10, 20, 50, 100 and 200 periods (computed nightly from daily closes). `latest` holds the most recent value of each, with its date; `missing` lists any average with no stored value. The backend response (`indicators`: rows grouped by average, each with its daily `data` points) is returned as is, with `latest` and `missing` added. This is the only indicator data stored as values: there is no RSI, MACD or Bollinger value series, and there is no 4h/1h data. For momentum, band and cross signals use dwlf_get_events (e.g. `dss.cross.*`, `bollinger.break.*`, `ema.cross.*`, `sma.reclaimed` / `sma.lost` for a confirmed reclaim or loss of the 50/100/200-day SMA, `atr.regime.*` for volatility expansion/contraction, `adx.trend.*` / `adx.di.cross.*` for ADX/DMI trend strength (trending vs ranging), `rsi.exit.*` / `rsi.midline.*` for RSI(14), `rsi.divergence.*` / `dss.divergence.*` for price vs oscillator at confirmed cycle pivots), or dwlf_get_regime for the trend/momentum/volatility read. `atr.regime.*`, `adx.trend.*` and the divergences are daily and fire rarely (ATR once when an episode starts), so pass a wide `days` for those.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers like AAPL, TSLA"
+          },
+          "days": {
+            "description": "Daily values to return per average (default 1 = latest only; max 250).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_trendlines",
+      "description": "Get the automatically detected trendlines for a symbol on one timeframe (daily by default; weekly; hourly only for symbols with 1h data). Each line carries its type (support/resistance), its two anchors (date + price), slope and whether it is still active. Breaks of these lines are the `trendline_break_*` / `trendline_breach_*` events in dwlf_get_events.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers like AAPL, TSLA"
+          },
+          "timeframe": {
+            "description": "Which trendlines (default: daily). Hourly exists only for symbols with 1h data.",
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "hourly"
+            ]
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_active_signals",
+      "description": "Get currently active trade signals. These are open positions or pending entries that DWLF is tracking.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_recent_signals",
+      "description": "Get user trade signals — strategy fires recorded by the daily evaluator. Shows signal history with entry/exit prices, R-multiple targets, contextHash, current P&L if filled. Filters compose: `symbol` (single), `strategy` (full strategy field, e.g. `visual_strategy_X`), and `fromDate`/`toDate` (ISO YYYY-MM-DD) OR `days` (last N). Without any filter the default cutoff is the most-recent N signals up to `limit`. Use this rather than the older `/recent` endpoint variant — that one has a hard-coded 5-day window that silently hides older fires.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "description": "Filter to a single trading symbol (e.g. BTC-USD, IREN). Slashes and hyphens both accepted.",
+            "type": "string"
+          },
+          "strategy": {
+            "description": "Filter to a single strategy. Pass the full strategy field as stored — usually `visual_strategy_<id>` (note the visual_ prefix that the cron writes).",
+            "type": "string"
+          },
+          "fromDate": {
+            "description": "Inclusive lower bound on signal date, ISO YYYY-MM-DD. Pair with toDate for a precise window.",
+            "type": "string"
+          },
+          "toDate": {
+            "description": "Inclusive upper bound on signal date, ISO YYYY-MM-DD.",
+            "type": "string"
+          },
+          "days": {
+            "description": "Convenience: signals from the last N days. Combine with `symbol`/`strategy` to scope tightly.",
+            "type": "number"
+          },
+          "limit": {
+            "description": "Max signals to return (default: 50, max ~500). Returned newest-first.",
+            "type": "number"
+          },
+          "sortOrder": {
+            "description": "Date sort order (default: desc → newest first).",
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_signal_stats",
+      "description": "Get signal performance statistics — win rate, average P&L, total signals, and performance breakdown.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_watchlist",
+      "description": "Get the user's watchlist — symbols they're actively monitoring.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_add_to_watchlist",
+      "description": "Add a trading symbol to the user's watchlist for monitoring.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol to add — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers like AAPL, TSLA"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_briefing_list",
+      "description": "Get the user's BRIEFING LIST — symbols they want in the daily briefing but are NOT actively watching (Mag7, macro/dollar like UUP, sector bellwethers). Distinct from the watchlist: the daily briefing (dwlf_get_daily_briefing) covers watchlist UNION briefing list, while the watchlist alone drives the active/Today views. An empty briefing list means the briefing is just the watchlist. The whole-universe layer is the cycle screener (dwlf_get_cycle_setups); the briefing list is the curated middle tier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_add_to_briefing_list",
+      "description": "Add a symbol to the BRIEFING LIST — briefed daily but not actively watched. Use for wider-universe context the user wants the structural read on without cluttering their watchlist (e.g. UUP for the dollar, AAPL/AVGO/NVDA for Mag7).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol to add — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers like AAPL, TSLA"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_remove_from_briefing_list",
+      "description": "Remove a symbol from the user's briefing list.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol to remove — accepts BTC/USD, BTC-USD, or stock tickers"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_symbol_tags",
+      "description": "List every distinct symbol TAG. Tags are the groups the markets chart's right-hand panel organises symbols into (e.g. crypto, metals, tech, macro); an untagged symbol falls into the catch-all \"Others\" bucket. Call this FIRST to see the existing group names before adding a symbol to one (reuse a name to drop it in that group).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_symbol_tags",
+      "description": "Get the tags currently assigned to one symbol — i.e. which chart group(s) it belongs to (empty ⇒ it shows under \"Others\"). Handy to verify before/after (re)tagging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers like AAPL, TSLA"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_add_symbol_tag",
+      "description": "Tag a symbol so it lands in the right group on the markets chart's right-hand panel instead of \"Others\". Reuse an existing tag (from dwlf_list_symbol_tags) to add it to that group, or pass a new tag name to create a group. A symbol can carry multiple tags. Example: tag STRC as \"crypto\", GDX as \"metals\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol to tag — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers"
+          },
+          "tag": {
+            "type": "string",
+            "description": "The tag / group name, e.g. \"crypto\", \"metals\", \"tech\", \"macro\""
+          }
+        },
+        "required": [
+          "symbol",
+          "tag"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_remove_symbol_tag",
+      "description": "Remove a tag from a symbol — re-categorise it, or (if it has no other tags) drop it back to the \"Others\" bucket.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol — accepts BTC, BTC/USD, BTC-USD, BTCUSD, or stock tickers"
+          },
+          "tag": {
+            "type": "string",
+            "description": "The tag / group name to remove"
+          }
+        },
+        "required": [
+          "symbol",
+          "tag"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_describe_strategy_nodes",
+      "description": "Describe the visual-strategy node types and their (currently-implicit) runtime parameters. Use this to understand what an SL/TP/logic node will actually do at backtest/live time, including the engine defaults that are NOT visible in the visual graph today. Optional `nodeType` filters to a single node (e.g. `sl_below_recent_low`); optional `category` filters to a class (`stopLoss` / `takeProfit` / `signal` / `logic` / `cancellation` / `condition` / `exit`). When `honoredByExecutor: false` on a param, the listed `default` is the only value the engine uses today regardless of what the visual node's data field says — this is what the SL-resolver bug in PR#220 exposed. `honoredByExecutor: null` means not verified (catalogue parameters reach the compiled strategy; their effect on the run is not checked here). Indicator/event condition nodes come from the platform's node catalogue (GET /v2/node-types, cached up to 15 minutes; an unfiltered call lists them by name, ask by nodeType or category \"condition\" for detail), the same list the strategy builder offers, marked `source: \"catalogue\"` with `label`, `direction`, `timeframes` (the only ones the node fires on) and `catalogueCategory`. A node with `engineIgnored` is one the engine cannot evaluate: do not use it. `engineIgnores` is the raw rule list ({ id } or { prefix }, with a reason). `catalogueError` means the catalogue could not be read and only the static nodes are listed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodeType": {
+            "description": "Return only this one node (e.g. `sl_below_recent_low`).",
+            "type": "string"
+          },
+          "category": {
+            "description": "Return only nodes in this category.",
+            "type": "string",
+            "enum": [
+              "signal",
+              "stopLoss",
+              "takeProfit",
+              "logic",
+              "cancellation",
+              "condition",
+              "exit"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_strategies",
+      "description": "List the user's visual trading strategies with names, descriptions, and associated symbols.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_strategy",
+      "description": "Get full details of a specific strategy including signal definitions, nodes, and edges.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "strategyId": {
+            "type": "string",
+            "description": "Strategy ID"
+          }
+        },
+        "required": [
+          "strategyId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_create_strategy",
+      "description": "⚠️ Create a new strategy. CRITICAL WORKFLOW: 1) Create strategy → 2) Compile → 3) MUST call dwlf_activate_strategy_symbols (or strategy will NEVER generate signals!) → 4) Run backtest. Without step 3, backtests return 0 trades. The strategy exists but is invisible to the evaluation engine until symbols are activated. Always activate symbols immediately after creation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Strategy name"
+          },
+          "description": {
+            "description": "Strategy description",
+            "type": "string"
+          },
+          "bodyJson": {
+            "description": "Full strategy body as JSON string (nodes, edges, signals). Parse before sending.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_update_strategy",
+      "description": "Update an existing visual trading strategy. Provide the strategy ID and updated fields.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "strategyId": {
+            "type": "string",
+            "description": "Strategy ID to update"
+          },
+          "name": {
+            "description": "Updated strategy name",
+            "type": "string"
+          },
+          "description": {
+            "description": "Updated description",
+            "type": "string"
+          },
+          "bodyJson": {
+            "description": "Updated strategy body as JSON string (nodes, edges, metadata). Parse before sending.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategyId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_compile_strategy",
+      "description": "Compile a visual strategy into an executable trade signal. Must be called after creating or updating a strategy before it can be evaluated or generate signals.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "strategyId": {
+            "type": "string",
+            "description": "Strategy ID to compile"
+          }
+        },
+        "required": [
+          "strategyId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_delete_strategy",
+      "description": "Permanently delete a visual strategy. Hard delete — also removes the compiled executable and symbol activations. ⚠️ Past UserTradeSignal rows that referenced this strategy are NOT scrubbed (they remain as historical record), but they will be filtered out of the chart's strategy dropdown going forward because the chart filters by current live strategies. If you have an active subscription on this strategy, the subscription will keep consuming events but the dispatcher's strategy lookup will fail — disable the subscription first via `dwlf_update_subscription({ enabled: false })` or delete it via `dwlf_delete_subscription` to keep state clean.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "strategyId": {
+            "type": "string",
+            "description": "Strategy ID to delete"
+          }
+        },
+        "required": [
+          "strategyId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_public_strategies",
+      "description": "List community-shared public strategies that can be used as inspiration or cloned.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_run_backtest",
+      "description": "⚠️ Run a strategy backtest (async). Returns requestId → poll with dwlf_get_backtest_results. PREREQUISITES: 1) Strategy MUST have symbols activated (dwlf_activate_strategy_symbols) or backtest returns 0 trades. 2) Requires 200+ daily candles: startDate must be 10+ months before endDate. If backtest returns 0 trades, check: a) Are symbols activated? b) Is date range long enough? c) Do event conditions actually match historical data? Optional capital/risk params (initialCapital, riskPerTrade, maxConcurrentTrades, portfolioMode, allowSymbolPyramiding) override backend defaults — set portfolioMode=true together with maxConcurrentTrades to model shared-capital concurrency across symbols; set allowSymbolPyramiding=true to permit more than one concurrent open position per symbol, and maxPositionsPerSymbol to bound that (e.g. 3) so per-symbol concentration stays capped. Set disableTakeProfit=true for exit-signal-only strategies (no tp node) so the backend does NOT force a fallback take-profit that would exit early.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "strategyId": {
+            "type": "string",
+            "description": "Strategy ID to backtest"
+          },
+          "symbols": {
+            "description": "Symbols to backtest against (e.g. [\"BTC\", \"TSLA\"]). Defaults to strategy assets.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "symbol": {
+            "description": "Single symbol shorthand (e.g. BTC, TSLA). Use \"symbols\" for multiple.",
+            "type": "string"
+          },
+          "startDate": {
+            "description": "Start date (YYYY-MM-DD)",
+            "type": "string"
+          },
+          "endDate": {
+            "description": "End date (YYYY-MM-DD)",
+            "type": "string"
+          },
+          "initialCapital": {
+            "description": "Starting account size in USD (default 10000).",
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "riskPerTrade": {
+            "description": "Risk per trade as a decimal, e.g. 0.005 = 0.5% (default 0.02).",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "maxConcurrentTrades": {
+            "description": "Concurrency cap for portfolio mode (default 3). Pair with portfolioMode=true.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "portfolioMode": {
+            "description": "Opt into shared-capital simulation across symbols (default false). Combine with maxConcurrentTrades to cap simultaneous open positions.",
+            "type": "boolean"
+          },
+          "allowSymbolPyramiding": {
+            "description": "Opt into >1 concurrent open position per symbol in portfolio mode (default false = one position per symbol). Note: global maxConcurrentTrades still caps total positions, but per-symbol concentration is unbounded unless maxPositionsPerSymbol is set.",
+            "type": "boolean"
+          },
+          "maxPositionsPerSymbol": {
+            "description": "Bound concurrent open positions per symbol when allowSymbolPyramiding=true (e.g. 3). Default unlimited. No effect when allowSymbolPyramiding is false (cap is 1 then).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "disableTakeProfit": {
+            "description": "Suppress the implicit fallback take-profit (default false). When a strategy has NO take-profit node the backend otherwise force-applies a 3xATR fallback TP, which exits exit-signal-only strategies early. Set true to truly ride the exit graph (e.g. exit on cycle high / trendline break).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "strategyId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_backtest_results",
+      "description": "Get results for a backtest by requestId. If status is not \"complete\", poll again shortly. DEFAULTS TO SUMMARY MODE: returns DDB-level per-symbol stats (totalReturn, totalTrades, winningTrades, sharpe, maxDrawdown, finalEquity) and the portfolio-level aggregate metrics object, with all bulky fields stripped (per-symbol trades, equityCurve, signals, monthlyReturns; request-level portfolioEquityCurve, portfolioTrades, portfolioRejectedSignals). Summary is ~1-3 KB vs ~1-3 MB full — use it for headline metric checks, leaderboard-style comparisons, and \"did it work\" sanity passes. Pass `summary: false` to get the full payload (per-trade rows, equity curves, signals) — needed for plotting, per-trade analysis, or feeding into another tool. ⚠️ When summary=false, the MCP transport will dump the response to disk and ask you to extract via subagent — budget for that. 📡 For background polling without burning context window: the REST URL is `GET https://api.dwlf.co.uk/v2/backtests/{requestId}/results?summary=true`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "description": "Backtest request ID"
+          },
+          "summary": {
+            "description": "Default true — return the lightweight summary view. Set false to pull the full S3-merged payload (~1-3 MB).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_backtests",
+      "description": "List your backtests (most recent first) with their status and config. DEFAULTS TO SUMMARY MODE: strips the bulky `strategyDefinition` (visual-builder node graph) from each item while keeping all metadata (requestId, strategyId/Name, symbols, timeframe, start/end dates, initialCapital, riskPerTrade, status, createdAt). PAGED: returns the 15 most recent by default plus a `cursor`; even summarised, a large account overflows in one shot. To see more: raise `limit`, pass the returned `cursor` for the next page, or narrow with `status`. Use the summary to pick a requestId, then drill in: dwlf_get_backtest_results for the run's metrics/trades. Pass `summary: false` only if you specifically need each row's full strategy graph (keep `limit` small when you do — full records are ~8 KB each).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "description": "Default true — strip the per-item strategyDefinition graph. Set false to include the full visual-builder node graph on every backtest (much larger).",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Max backtests to return, most recent first (default 15). Raise to see more, but mind the context cost.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "description": "Filter to a single request status, matched exactly. Known values: pending, processing or running (in-progress — both occur, depending on which backtest worker ran), completed, failed, cancelled. Pass the status string exactly as it appears in a prior list response.",
+            "type": "string"
+          },
+          "cursor": {
+            "description": "Opaque pagination cursor from a previous response's `cursor` field — pass it to fetch the next page of older runs.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_delete_backtest",
+      "description": "Permanently delete a backtest request and its associated result data by requestId. Use to clean up stale or invalid runs (e.g. results computed before an engine bug was fixed). Idempotent — deleting an already-deleted requestId returns success.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "description": "Backtest request ID to delete"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_cancel_backtest",
+      "description": "Cancel a queued or running backtest by requestId. Pending requests cancel cleanly (worker skips). Running requests get a best-effort cancel — result is marked cancelled but mid-run computation isn't interrupted; the response's `bestEffort: true` flag indicates this. Terminal states (completed / failed / already-cancelled) return 409 with the actual status. Use this rather than `dwlf_delete_backtest` when you want to halt without scrubbing the audit trail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "description": "Backtest request ID to cancel"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_backtest_summary",
+      "description": "Get a summary of all backtests — aggregated performance stats.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_portfolios",
+      "description": "List the user's portfolios.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_portfolio",
+      "description": "Get portfolio details including holdings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "portfolioId": {
+            "type": "string",
+            "description": "Portfolio ID"
+          }
+        },
+        "required": [
+          "portfolioId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_holdings",
+      "description": "Get detailed holdings for a portfolio with current values and P&L.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "portfolioId": {
+            "type": "string",
+            "description": "Portfolio ID"
+          }
+        },
+        "required": [
+          "portfolioId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_portfolio_snapshots",
+      "description": "Get historical snapshots for a portfolio — shows value over time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "portfolioId": {
+            "type": "string",
+            "description": "Portfolio ID"
+          }
+        },
+        "required": [
+          "portfolioId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_trades",
+      "description": "List trades from the trade journal. Filter by status or symbol. Statuses: `open` (live position), `closed` (exited, has P&L), `planned` (confirm-mode signal awaiting confirm/skip), `skipped` (passed signal — carries skipReasons[]/skipNote). Omit `status` to get ALL statuses. Use `status: \"skipped\"` to review the skip journal (which signals you passed and why).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Filter by trade status. Omit for all. planned/skipped are served from the base table (they lack entryAt so aren't in the StatusIndex GSI).",
+            "type": "string",
+            "enum": [
+              "open",
+              "closed",
+              "planned",
+              "skipped"
+            ]
+          },
+          "symbol": {
+            "description": "Filter by symbol (e.g. BTC, TSLA)",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_trade",
+      "description": "Get full details for a specific trade including notes, executions, and events.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tradeId": {
+            "type": "string",
+            "description": "Trade ID"
+          }
+        },
+        "required": [
+          "tradeId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_create_trade",
+      "description": "Log a new trade in the journal. Specify symbol, direction, entry price, and optional stop loss / take profit. STRONGLY RECOMMENDED: pass confirmReasons[] — WHY the trade is being taken, in the same structured vocabulary dwlf_confirm_trade uses, so a directly-logged trade feeds the byConfirmReason decision analytics exactly like a confirmed planned one. Valid confirmReasons: fresh_cycle_entry, trendline_break_confirmed, cluster_confluence, regime_aligned, risk_reward_attractive, adding_to_winner, other. confirmNote is required when a reason is \"other\". Reasons are optional (untagged trades still log) but every untagged entry is decision-analytics data lost — and unlike a skip, it cannot be reconstructed later. reasonText is the free-text thesis and does NOT substitute: no rollup can read it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol (e.g. BTC, TSLA, RIOT)"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ],
+            "description": "Trade direction"
+          },
+          "entryPrice": {
+            "type": "number",
+            "description": "Entry price"
+          },
+          "positionSize": {
+            "description": "Position size (quantity)",
+            "type": "number"
+          },
+          "initialStop": {
+            "description": "Stop loss price",
+            "type": "number"
+          },
+          "initialTakeProfit": {
+            "description": "Take profit price",
+            "type": "number"
+          },
+          "timeframe": {
+            "description": "Timeframe (e.g. 1d, 4h, 1h)",
+            "type": "string"
+          },
+          "reasonText": {
+            "description": "Free-text trade reasoning / thesis. Not machine-readable — use confirmReasons for analytics.",
+            "type": "string"
+          },
+          "confirmReasons": {
+            "description": "WHY this trade is being taken. Valid: fresh_cycle_entry, trendline_break_confirmed, cluster_confluence, regime_aligned, risk_reward_attractive, adding_to_winner, other.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirmNote": {
+            "description": "Free-text detail on the entry rationale. REQUIRED when a reason is \"other\". Max 2000 chars.",
+            "type": "string"
+          },
+          "isPaperTrade": {
+            "description": "Whether this is a paper trade (default: false)",
+            "type": "boolean"
+          },
+          "assetType": {
+            "description": "Asset type",
+            "type": "string",
+            "enum": [
+              "crypto",
+              "equity",
+              "forex"
+            ]
+          }
+        },
+        "required": [
+          "symbol",
+          "direction",
+          "entryPrice"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_close_trade",
+      "description": "Close an open trade by specifying the exit price.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tradeId": {
+            "type": "string",
+            "description": "Trade ID to close"
+          },
+          "exitPrice": {
+            "type": "number",
+            "description": "Exit price"
+          },
+          "exitAt": {
+            "description": "Exit timestamp (ISO 8601, defaults to now)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tradeId",
+          "exitPrice"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_add_trade_note",
+      "description": "Add a note to an existing trade — observations, adjustments, lessons learned.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tradeId": {
+            "type": "string",
+            "description": "Trade ID"
+          },
+          "content": {
+            "type": "string",
+            "description": "Note content"
+          }
+        },
+        "required": [
+          "tradeId",
+          "content"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_trade_notes",
+      "description": "Get all notes for a trade — observations, updates, and lessons recorded during the trade.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tradeId": {
+            "type": "string",
+            "description": "Trade ID"
+          }
+        },
+        "required": [
+          "tradeId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_trade_plans",
+      "description": "List trade plan templates — reusable frameworks for entering trades.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_update_trade",
+      "description": "Update an existing trade by ID. All fields except tradeId are optional (partial update). Parameter names match dwlf_create_trade / dwlf_confirm_trade: initialStop / initialTakeProfit / positionSize (formerly stopLoss / takeProfit / quantity — the old names are no longer accepted). symbol and tags are NOT editable — the backend has never accepted them, and offering them meant a caller could set one and be told 200 while nothing changed. To change the levels on an OPEN trade use this; to set them as the trade is taken, pass them to dwlf_confirm_trade instead so it is one call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tradeId": {
+            "type": "string",
+            "description": "Trade ID"
+          },
+          "direction": {
+            "description": "Trade direction",
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ]
+          },
+          "entryPrice": {
+            "description": "Entry price",
+            "type": "number"
+          },
+          "initialStop": {
+            "description": "Stop loss price (formerly stopLoss). ⚠️ This rewrites the R BASELINE: every R-multiple is computed from |entryPrice - initialStop|, and a numeric change also clears the stopAnchor provenance. Correct when the stop was WRONG and is being fixed. NOT for trailing a stop up behind price — that silently shrinks the R denominator and reports an inflated R on a winner. Trailing needs a separate field, not this one.",
+            "type": "number"
+          },
+          "initialTakeProfit": {
+            "description": "Take profit price (formerly takeProfit)",
+            "type": "number"
+          },
+          "positionSize": {
+            "description": "Position size / quantity (formerly quantity)",
+            "type": "number"
+          },
+          "notes": {
+            "description": "Trade notes",
+            "type": "string"
+          },
+          "isPaperTrade": {
+            "description": "Whether this is a paper trade",
+            "type": "boolean"
+          },
+          "stopLoss": {
+            "description": "DEPRECATED — renamed to initialStop. Rejected with an error."
+          },
+          "takeProfit": {
+            "description": "DEPRECATED — renamed to initialTakeProfit. Rejected with an error."
+          },
+          "quantity": {
+            "description": "DEPRECATED — renamed to positionSize. Rejected with an error."
+          },
+          "symbol": {
+            "description": "REMOVED — not editable, the backend has never accepted it. Rejected with an error."
+          },
+          "tags": {
+            "description": "REMOVED — not editable, the backend has never accepted it. Rejected with an error."
+          }
+        },
+        "required": [
+          "tradeId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_delete_trade",
+      "description": "Delete a trade by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tradeId": {
+            "type": "string",
+            "description": "Trade ID"
+          }
+        },
+        "required": [
+          "tradeId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_position_size",
+      "description": "Calculate recommended position size based on account size, risk percentage, entry price, and stop loss.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "accountSize": {
+            "type": "number",
+            "description": "Total account size in currency"
+          },
+          "riskPercent": {
+            "type": "number",
+            "description": "Risk percentage (e.g. 1 for 1%)"
+          },
+          "entryPrice": {
+            "type": "number",
+            "description": "Planned entry price"
+          },
+          "stopLoss": {
+            "type": "number",
+            "description": "Stop loss price"
+          },
+          "symbol": {
+            "description": "Trading symbol for context",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountSize",
+          "riskPercent",
+          "entryPrice",
+          "stopLoss"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_trade_state",
+      "description": "Get the current state of a trade — including execution history and adjustments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tradeId": {
+            "type": "string",
+            "description": "Trade ID"
+          }
+        },
+        "required": [
+          "tradeId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_skip_outcomes",
+      "description": "The Counterfactual scorecard: what would have happened had each SKIPPED trade been taken. Every skip is replayed against daily candles from its signal date using the decision-time-frozen entry/SL/TP (pre-registered — no hindsight bias). Per outcome: status (`would_be_stopped` capped at exactly -1R / `would_hit_target` / `running` = open mark), `counterfactualR`, `savedR` (= -R: positive means the skip SAVED money), move %, MFE/MAE in R, skip reasons + note. Aggregates: per-skip-reason and per-strategy rollups plus the cumulative saved-R series (\"is the discretionary overlay adding edge\"). Assumes MECHANICAL execution of the planned levels — no discretionary management; same-bar stop+target counts the stop first (flagged `ambiguousBar`). Pairs with dwlf_list_trades(status:\"skipped\") and dwlf_skip_trade. UI equivalent: https://www.dwlf.co.uk/trades/counterfactual",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_decision_stats",
+      "description": "The decision-quality ledger: TAKES (confirmed trades, judged by actual outcomes — closed realized R, open marks vs initial risk) and SKIPS (judged by the counterfactual replay) joined into one record. Returns: the 2x2 decision `matrix` (tookRight/tookWrong/skipRight/skipWrong, with open takes and running skips as unjudged open counts), `byStrategy` records (W/L, net realized R, net open R, skips + saved R), and per-reason hit rates for BOTH vocabularies (`byConfirmReason`, `bySkipReason`) — use these to tell the user which of their stated reasons carry alpha (e.g. \"your regime_risk_off skips are 3-for-3, +3R saved\"). Honesty: only resolved outcomes are judged; paper trades excluded; legacy trades without a genuine numeric R are judged by P&L sign and counted in `rUnknown` (they contribute no R magnitude). UI equivalent: https://www.dwlf.co.uk/trades/decisions. Optional recent-window scope — `months` (last N months) or `fromDate` (YYYY-MM-DD); omit for all-time. A growing skip history dilutes the current-form read, so scope to e.g. months=12 for \"recent\" decisions. `meta.window` echoes the applied scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "months": {
+            "description": "Scope the ledger to the last N months (recent-form read). Omit = all-time.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "fromDate": {
+            "description": "Scope to decisions on/after this date (YYYY-MM-DD). Takes precedence over months. Omit = all-time.",
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_confirm_trade",
+      "description": "Confirm (take) a confirm-mode PLANNED trade — turns it into an OPEN position. Only trades with status \"planned\" can be confirmed. By default it opens at the planned entryPrice / positionSize / stop and stamps entryAt=now; override any of them to reflect what you actually did. ⚠️ OVERRIDING THE STOP IS THE COMMON CASE, not an exception: the engine derives its stop from regular-session candles, so it routinely sits inside the broker's wider range and has to be moved before the take. Overriding initialStop does NOT re-derive positionSize — pass both to keep risk constant. STRONGLY RECOMMENDED: pass confirmReasons[] — WHY the trade is being taken (the symmetric twin of skip reasons; feeds the Counterfactual scorecard / 2x2 decision analytics). Valid confirmReasons: fresh_cycle_entry, trendline_break_confirmed, cluster_confluence, regime_aligned, risk_reward_attractive, adding_to_winner, other. confirmNote is required when a reason is \"other\". Reasons are optional (untagged confirms still work) but every untagged confirm is decision-analytics data lost. Pair with dwlf_skip_trade to pass instead. Find planned trades via dwlf_list_trades(status: \"planned\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tradeId": {
+            "type": "string",
+            "description": "Planned trade ID to confirm/take"
+          },
+          "entryPrice": {
+            "description": "Actual entry/fill price (defaults to the planned entryPrice)",
+            "type": "number"
+          },
+          "positionSize": {
+            "description": "Actual position size / quantity (defaults to the planned size)",
+            "type": "number"
+          },
+          "initialStop": {
+            "description": "Actual stop the trade opens with (defaults to the planned stop). ⚠️ Overriding this does NOT re-derive positionSize — the planned size was computed from the PLANNED stop, so a wider stop means proportionally more money at risk. Pass positionSize in the same call to hold risk constant.",
+            "type": "number"
+          },
+          "initialTakeProfit": {
+            "description": "Actual take-profit the trade opens with (defaults to the planned target)",
+            "type": "number"
+          },
+          "entryAt": {
+            "description": "Entry timestamp, ISO 8601 (defaults to now)",
+            "type": "string"
+          },
+          "confirmReasons": {
+            "description": "WHY the trade is taken (multi-select; see tool description for the valid set). First = primary.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirmNote": {
+            "description": "Entry rationale note (max 500 chars). Required when a reason is \"other\".",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tradeId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_skip_trade",
+      "description": "Skip (pass on) a confirm-mode PLANNED trade, recording WHY. Moves it to status \"skipped\" with skipReasons[] + an optional skipNote — this feeds the skip journal / scorecard (dwlf_list_trades(status: \"skipped\")). Only planned trades can be skipped. Valid skipReasons: entry_extended_from_anchor, risk_reward_poor, thesis_already_played_out, low_conviction_signal, regime_risk_off, correlated_exposure, account_drawdown_pause, broker_access, other. skipNote is REQUIRED when a reason is \"other\". The first reason is treated as primary. Pair with dwlf_confirm_trade to take it instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tradeId": {
+            "type": "string",
+            "description": "Planned trade ID to skip"
+          },
+          "skipReasons": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "One or more skip reason codes (see tool description for the valid set). First = primary."
+          },
+          "skipNote": {
+            "description": "Free-text rationale (max 500 chars). Required when a reason is \"other\".",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tradeId",
+          "skipReasons"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_custom_events",
+      "description": "List the user's custom event definitions — user-created indicator-based events.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_custom_event_notifications",
+      "description": "Get all recently fired custom events where the user has notifications enabled. Returns fires across ALL symbols in one call — the most efficient way to check what custom events have triggered. The eventName field contains the human-readable name (e.g. \"wcl_confirmed\"). The eventType field is always \"custom_event\" — use eventName to distinguish events.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "default": 7,
+            "description": "How many days back to look (default 7)",
+            "type": "number"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_custom_event",
+      "description": "Get details of a specific custom event including conditions and trigger history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "Custom event ID"
+          }
+        },
+        "required": [
+          "eventId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_compile_custom_event",
+      "description": "Compile a custom event into an executable event definition. Must be called after creating or updating a custom event.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "Custom event ID to compile"
+          }
+        },
+        "required": [
+          "eventId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_preflight_custom_event",
+      "description": "Validate a custom event graph WITHOUT saving it. Returns execution tier (fast/async/reject), complexity score with breakdown, graph metrics, plan policy limits, errors, warnings, and suggested fixes. Call this BEFORE creating or updating a complex event to check whether it will be accepted and which execution tier it will land in.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bodyJson": {
+            "type": "string",
+            "description": "Full event body as JSON string with name, visual (nodes + edges), and optionally description, metadata, version"
+          }
+        },
+        "required": [
+          "bodyJson"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_create_custom_event",
+      "description": "⚠️ Create a new custom event. CRITICAL WORKFLOW: 1) Create event → 2) Compile → 3) MUST call dwlf_activate_event_symbols (or event will NEVER fire!) → 4) Trigger evaluation. Without step 3, backtests return 0 trades. The event exists but is invisible to the evaluation engine until symbols are activated. Always activate symbols immediately after creation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Event name"
+          },
+          "bodyJson": {
+            "type": "string",
+            "description": "Full event definition body as JSON string (conditions, parameters). Parse before sending."
+          }
+        },
+        "required": [
+          "name",
+          "bodyJson"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_update_custom_event",
+      "description": "Update an existing custom event. Accepts any subset of {name, description, visual, metadata, version, notifyOnFire} via bodyJson. Most common use: flip notifyOnFire to true after creation so future fires surface in dwlf_get_custom_event_notifications. If you change `visual` or any condition shape, re-call dwlf_compile_custom_event afterwards to regenerate the executable.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "Custom event ID to update"
+          },
+          "bodyJson": {
+            "type": "string",
+            "description": "Partial update body as JSON string. Any subset of name, description, visual, metadata, version, notifyOnFire."
+          }
+        },
+        "required": [
+          "eventId",
+          "bodyJson"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_delete_custom_event",
+      "description": "Delete a custom event permanently. Hard delete — also removes the compiled executable, symbol activations, and watermark state. Past fires already written to EventsTable are NOT deleted (they remain as historical record).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "Custom event ID to delete"
+          }
+        },
+        "required": [
+          "eventId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_evaluate_custom_event",
+      "description": "⚠️ Trigger an on-demand evaluation run for a specific custom event. This is the workflow step BETWEEN activating symbols and querying fires — without it, the custom event only evaluates on the daily cron and historical data is not backfilled until then. Returns { requestId, status: \"pending\" } — poll dwlf_get_evaluation_status(requestId) until status is \"completed\", then query fires via dwlf_get_events(type: \"custom_event\"). Consumes one EVALUATION quota. IMPORTANT: by default only the most recent ~400 candles (~14 months of daily data) are backfilled; older history produces NO fires and any backtest spanning it silently sees zero entries before that window. To backfill the full history a backtest needs, pass lookbackDays covering the whole backtest range (e.g. 2200 for a ~5-6yr window).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "Custom event ID to evaluate"
+          },
+          "lookbackDays": {
+            "description": "How many days of history to (re)evaluate, overriding the default ~400-candle (~14-month) backfill window. Set this to at least the span of any backtest that gates on this event (e.g. 2200 ≈ 6 years) or its early period will have zero fires. Larger-than-history values are safe — evaluation just starts from the earliest available candle.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "idempotencyKey": {
+            "description": "Optional client-supplied idempotency key — if a request with this key already exists for this account, the existing requestId is returned instead of creating a new one",
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_evaluate_strategy",
+      "description": "Trigger an on-demand evaluation run for a specific visual strategy. Parallels dwlf_evaluate_custom_event but for strategies. Returns { requestId, status: \"pending\" } — poll dwlf_get_evaluation_status until completed. Consumes one EVALUATION quota. Same backfill caveat as dwlf_evaluate_custom_event: defaults to ~400 candles (~14 months); pass lookbackDays to cover a longer history. ⚠️ IMPORTANT — this DOES NOT emit `strategy.entry.triggered` events to the dispatcher. Those events are only emitted by the daily cron (`dailyTradeSignalJob`, ~04:00 UTC) when entry conditions match on the *latest bar*. On-demand evaluation populates the signal/event tables for analytical queries (`dwlf_get_recent_signals`, `dwlf_get_events`) but will NOT trigger Telegrams or planned-Trade rows even if it finds matches on historical bars. To get a fresh Telegram fire on a historical signal you need a manual replay through the dispatcher, not this tool. Got bitten by this twice while debugging WULF on 2026-05-27 — documenting so future-me does not re-discover.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "strategyId": {
+            "type": "string",
+            "description": "Visual strategy ID to evaluate"
+          },
+          "lookbackDays": {
+            "description": "How many days of history to (re)evaluate, overriding the default ~400-candle (~14-month) window. Set to at least the span of any dependent backtest. Larger-than-history values are safe.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "idempotencyKey": {
+            "description": "Optional client-supplied idempotency key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategyId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_evaluation_status",
+      "description": "Get the status and result summary of a specific evaluation by requestId. Poll this after calling dwlf_evaluate_custom_event or dwlf_evaluate_strategy until status === \"completed\". ⚠️ IMPORTANT — `summary.totalItems` / `summary.processedItems` count the eval-JOB items (one per strategy or one per custom event), NOT the per-symbol fan-out inside the job. A strategy eval across 37 symbols will show `totalItems: 1, processedItems: 1` when done — that just means \"the strategy job finished,\" NOT \"37 symbols were processed.\" For the per-symbol count: the request body itself carries `symbols: [...]` (or empty = all activated). When the symbols array is present this tool surfaces `symbolsRequested: <count>` next to summary so you can see both numbers; otherwise inspect the request shape directly. When status is \"completed\", query the fires it produced via dwlf_get_events(type: \"custom_event\") or dwlf_get_recent_signals (for strategies) — if you see fewer fires than expected across many symbols, that confirms the eval reached all of them (worker would not have written status=completed without finishing the loop).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "description": "Evaluation request ID returned by dwlf_evaluate_custom_event / dwlf_evaluate_strategy"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_evaluations",
+      "description": "List recent evaluation requests for the account with their status and summary. Useful for finding the requestId of a previous evaluation, or for checking whether one is already in-flight before triggering another.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "description": "Maximum number of evaluations to return (server default applies if omitted)",
+            "type": "number"
+          },
+          "status": {
+            "description": "Filter by status",
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_annotations",
+      "description": "List annotations for a symbol. Optionally filter by timeframe (e.g. daily, weekly, hourly). Returns each annotation with its annotationId, type, timeframe and full data — copy a data shape from here when you are unsure how to build a new one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol (e.g. BTC, TSLA)"
+          },
+          "timeframe": {
+            "description": "Timeframe filter (e.g. \"daily\", \"weekly\", \"hourly\")",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_create_annotation",
+      "description": "Create a chart annotation. `type` selects the shape; `data` carries the type-specific fields documented below. Note `arrow` is the callout/bubble-with-pointer and `text` is a plain text box — for commentary that points at a level, use `arrow`.\n\nDATA SHAPES BY TYPE (times = unix-ms, prices = chart price):\n• hline — {price, color, lineStyle, lineWidth, showPrice, label?}: horizontal price level.\n• vline — {time, color, lineStyle, lineWidth, showTime, label?}: vertical time marker.\n• text — {time, price, text, fontSize, color, backgroundColor?}: free text box anchored at a point. Use \\n inside `text` for multi-line — long single-line text renders too wide to read, so break it up.\n• arrow — {time1, price1, time2, price2, text, fontSize, color, lineStyle, lineWidth}: callout/speech-bubble. The text box sits at (time1,price1); the arrowhead points to (time2,price2). Use this to label a level or zone with a pointer.\n• trendline — {time1, price1, time2, price2, color, lineStyle, lineWidth, label?, extendLeft?, extendRight?}: line through two points.\n• ray — {time1, price1, time2, price2, color, lineStyle, lineWidth, label?}: half-line from point 1 through point 2.\n• rectangle — {time1, price1, time2, price2, color, fillOpacity, lineStyle, lineWidth, label?}: shaded zone between two opposite corners.\n• channel — {time1, price1, time2, price2, priceOffset, color, lineStyle, lineWidth, fillOpacity, label?, extendLeft?, extendRight?}: parallel channel; the second rail runs priceOffset above (+) / below (−) the base line.\n• crossline — {time, price, color, lineStyle, lineWidth, showPrice, showTime, label?}: crosshair marker at one point.\n• emoji — {time, price, emoji, size}: emoji marker (e.g. emoji \"🦊\").\n• timerange — {time1, time2, color, fillOpacity, lineStyle, lineWidth, label?}: vertical time band.\n• fibRetracement / measure — {time1, price1, time2, price2, levels:number[], showExtensions, extendRight, color, lineStyle, lineWidth, fillOpacity, label?}: fib/measure between two swing points.\n• fib_extension — {time1, price1, time2, price2, color, lineStyle, lineWidth, label?}: extension projection.\n• alert_line — {price, color, lineStyle, lineWidth, showPrice, direction:\"above\"|\"below\", label?}: a DRAWING of a price-alert line. Creating one here does NOT arm a price alert: nothing will fire, and the web chart shows it as \"Alert not armed\" until the user arms it there. Deleting an armed line disarms its alert.\n• long_position / short_position — {time1, time2, entryPrice, stopPrice, targetPrice, label?}: renders an entry line, stop+target zones and a live R:R badge.\nALIASES (same storage — prefer the first of each pair): text over note; emoji over icon; alert_line over price_alert; fibRetracement over fib_retracement.\nTIP: copy an existing shape via dwlf_list_annotations if unsure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol (e.g. BTC, TSLA)"
+          },
+          "timeframe": {
+            "type": "string",
+            "description": "Timeframe (e.g. \"daily\", \"weekly\", \"hourly\")"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "hline",
+              "text",
+              "vline",
+              "ray",
+              "trendline",
+              "channel",
+              "rectangle",
+              "fib_retracement",
+              "fib_extension",
+              "pitchfork",
+              "measure",
+              "arrow",
+              "brush",
+              "icon",
+              "note",
+              "price_alert",
+              "crossline",
+              "timerange",
+              "emoji",
+              "fibRetracement",
+              "alert_line",
+              "long_position",
+              "short_position"
+            ],
+            "description": "Annotation type — see the data-shape reference in the tool description for the fields each one needs."
+          },
+          "data": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Type-specific fields. See DATA SHAPES BY TYPE in the tool description. Max 4KB serialized."
+          },
+          "origin": {
+            "description": "Who created it: \"user\" (default), \"ai\" (agent-generated — use this for your own annotations), or \"system\".",
+            "type": "string",
+            "enum": [
+              "user",
+              "ai",
+              "system"
+            ]
+          }
+        },
+        "required": [
+          "symbol",
+          "timeframe",
+          "type",
+          "data"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_update_annotation",
+      "description": "Update an existing annotation. symbol + timeframe are REQUIRED (the backend needs them to locate the row). `data` is merged field-by-field into the existing data — pass only the fields you want to change (e.g. {label: \"...\"} or {price: 56}); sibling fields are preserved. visible/locked/zIndex/groupId can also be patched.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "annotationId": {
+            "type": "string",
+            "description": "Annotation ID (e.g. ann_d604ba96a697)"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol the annotation belongs to — required to address the row"
+          },
+          "timeframe": {
+            "type": "string",
+            "description": "Annotation timeframe (e.g. \"daily\", \"weekly\", \"hourly\") — required to address the row"
+          },
+          "data": {
+            "description": "Partial data fields to merge (not a full replacement). E.g. {label: \"Reclaim ~56\"} or {color: \"#ef4444\"}.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "visible": {
+            "description": "Show/hide the annotation",
+            "type": "boolean"
+          },
+          "locked": {
+            "description": "Lock the annotation against edits",
+            "type": "boolean"
+          },
+          "zIndex": {
+            "description": "Stacking order",
+            "type": "number"
+          },
+          "groupId": {
+            "description": "Annotation group/workspace id",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "annotationId",
+          "symbol",
+          "timeframe"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_delete_annotation",
+      "description": "Delete an annotation by ID. symbol + timeframe are required (the backend needs them to locate the row). Deleting an armed alert_line also cancels its live price alert.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "annotationId": {
+            "type": "string",
+            "description": "Annotation ID"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol the annotation belongs to (e.g. BTC, TSLA, GDXJ)"
+          },
+          "timeframe": {
+            "type": "string",
+            "description": "Annotation timeframe (e.g. \"daily\", \"weekly\", \"hourly\")"
+          }
+        },
+        "required": [
+          "annotationId",
+          "symbol",
+          "timeframe"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_bulk_create_annotations",
+      "description": "Create multiple annotations in one call (max 25). Each entry follows the same shape as dwlf_create_annotation — see its data-shape reference. Returns a per-item results array; an individual item can fail without aborting the rest.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "annotations": {
+            "minItems": 1,
+            "maxItems": 25,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "symbol": {
+                  "type": "string",
+                  "description": "Trading symbol"
+                },
+                "timeframe": {
+                  "type": "string",
+                  "description": "Timeframe"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "hline",
+                    "text",
+                    "vline",
+                    "ray",
+                    "trendline",
+                    "channel",
+                    "rectangle",
+                    "fib_retracement",
+                    "fib_extension",
+                    "pitchfork",
+                    "measure",
+                    "arrow",
+                    "brush",
+                    "icon",
+                    "note",
+                    "price_alert",
+                    "crossline",
+                    "timerange",
+                    "emoji",
+                    "fibRetracement",
+                    "alert_line",
+                    "long_position",
+                    "short_position"
+                  ],
+                  "description": "Annotation type"
+                },
+                "data": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {},
+                  "description": "Type-specific fields — see dwlf_create_annotation"
+                },
+                "origin": {
+                  "description": "Origin (default \"user\")",
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "ai",
+                    "system"
+                  ]
+                }
+              },
+              "required": [
+                "symbol",
+                "timeframe",
+                "type",
+                "data"
+              ]
+            },
+            "description": "Annotations to create (1-25)"
+          }
+        },
+        "required": [
+          "annotations"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_trade_plan",
+      "description": "Get full details for a specific trade plan by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "description": "Trade plan ID"
+          }
+        },
+        "required": [
+          "planId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_create_trade_plan",
+      "description": "Create a new trade plan with entry, stop loss, and take profit levels.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Trading symbol (e.g. BTC, TSLA)"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ],
+            "description": "Trade direction"
+          },
+          "entryPrice": {
+            "type": "number",
+            "description": "Planned entry price"
+          },
+          "stopLoss": {
+            "type": "number",
+            "description": "Stop loss price"
+          },
+          "takeProfit": {
+            "type": "number",
+            "description": "Take profit price"
+          },
+          "strategy": {
+            "description": "Strategy name or description",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Additional notes",
+            "type": "string"
+          },
+          "quantity": {
+            "description": "Planned position size",
+            "type": "number"
+          },
+          "timeframe": {
+            "description": "Timeframe (e.g. 1d, 4h, 1h)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "direction",
+          "entryPrice",
+          "stopLoss",
+          "takeProfit"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_update_trade_plan",
+      "description": "Update an existing trade plan by ID. All fields except planId are optional (partial update).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "description": "Trade plan ID"
+          },
+          "symbol": {
+            "description": "Trading symbol",
+            "type": "string"
+          },
+          "direction": {
+            "description": "Trade direction",
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ]
+          },
+          "entryPrice": {
+            "description": "Planned entry price",
+            "type": "number"
+          },
+          "stopLoss": {
+            "description": "Stop loss price",
+            "type": "number"
+          },
+          "takeProfit": {
+            "description": "Take profit price",
+            "type": "number"
+          },
+          "strategy": {
+            "description": "Strategy name or description",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Additional notes",
+            "type": "string"
+          },
+          "quantity": {
+            "description": "Planned position size",
+            "type": "number"
+          },
+          "timeframe": {
+            "description": "Timeframe",
+            "type": "string"
+          },
+          "status": {
+            "description": "Plan status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "planId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_delete_trade_plan",
+      "description": "Delete a trade plan by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "description": "Trade plan ID"
+          }
+        },
+        "required": [
+          "planId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_activate_event_symbols",
+      "description": "⚠️ REQUIRED STEP after creating custom events! Activate (enable) symbols for an event. Events do NOT evaluate automatically — they are invisible to backtests and the daily pipeline until activated. If backtests return 0 trades, you likely forgot this step. Call immediately after compiling an event.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "Custom event ID"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of symbols to activate (e.g. [\"BTC-USD\", \"ETH-USD\", \"NVDA\"])"
+          }
+        },
+        "required": [
+          "eventId",
+          "symbols"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_event_symbols",
+      "description": "Get the list of symbols currently activated for a custom event.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "Custom event ID"
+          }
+        },
+        "required": [
+          "eventId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_deactivate_event_symbols",
+      "description": "Deactivate (disable) one or more symbols for a custom event. The event will stop firing for these symbols.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "Custom event ID"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of symbols to deactivate"
+          }
+        },
+        "required": [
+          "eventId",
+          "symbols"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_activate_strategy_symbols",
+      "description": "⚠️ REQUIRED STEP after creating strategies! Activate symbols for a strategy. Strategies do NOT generate signals automatically — they are invisible to backtests until symbols are activated. If backtests return 0 trades, you likely forgot this step. Call immediately after compiling a strategy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "strategyId": {
+            "type": "string",
+            "description": "Strategy ID"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of symbols to activate (e.g. [\"BTC-USD\", \"ETH-USD\", \"NVDA\"])"
+          }
+        },
+        "required": [
+          "strategyId",
+          "symbols"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_strategy_symbols",
+      "description": "Get the list of symbols currently activated for a strategy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "strategyId": {
+            "type": "string",
+            "description": "Strategy ID"
+          }
+        },
+        "required": [
+          "strategyId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_deactivate_strategy_symbols",
+      "description": "Deactivate (disable) one or more symbols for a strategy. The strategy will stop generating signals for these symbols.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "strategyId": {
+            "type": "string",
+            "description": "Strategy ID"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of symbols to deactivate"
+          }
+        },
+        "required": [
+          "strategyId",
+          "symbols"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_all_symbol_activations",
+      "description": "List all the user's symbol activations across both custom events and strategies. Shows which symbols are active for which events/strategies.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "activeOnly": {
+            "description": "If true, only return active associations (default: true)",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_ai_dashboard",
+      "description": "Get a complete account overview in a single call: watchlist with prices, active signals, open trades, portfolios, strategies, and recent events. Ideal for \"what's going on?\" queries. Requires markets:read permission; other sections degrade gracefully based on permissions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_ai_symbol_brief",
+      "description": "Get a condensed single-symbol view: latest price with change, recent candles, key indicators, S/R levels, recent events, and active signals. Perfect for \"how's BTC doing?\" queries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Symbol to get brief for (e.g. BTC, TSLA, NVDA)"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_ai_strategy_performance",
+      "description": "Get all strategies with signal stats and performance metrics in a single call: total signals, active signals, win rate, avg R/R, total P&L, and per-strategy breakdowns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_academy_tracks",
+      "description": "List all DWLF Academy tracks and lessons. Use this to discover educational content about DWLF concepts — indicators, events, strategies, charting, and more.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_academy_lesson",
+      "description": "Get the full content of a DWLF Academy lesson by slug. Returns markdown. Use dwlf_list_academy_tracks first to find available lessons.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Lesson slug from the academy manifest (e.g. \"intro-to-indicators\")"
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_search_academy",
+      "description": "Search DWLF Academy content by keyword. Searches track and lesson titles. Returns matching lessons with their track context.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search term to match against track/lesson titles and descriptions"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_regime",
+      "description": "Get the market regime classification for a symbol on one timeframe (daily by default) — trend, momentum, volatility and a confidence score, plus `insufficientHistory` (true when the symbol has too little history on that timeframe: the fields are then placeholders, not a reading). With `history`, returns a dated regime series, newest first. It carries no cycle phase: for where an asset is in its market cycle, use dwlf_get_stage (weekly Weinstein stage).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Symbol to query (e.g. BTC, ETH, AAPL)"
+          },
+          "timeframe": {
+            "description": "Candle timeframe to classify (default: daily). Hourly only for symbols with 1h data.",
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "hourly"
+            ]
+          },
+          "history": {
+            "description": "If true, return the dated regime series (newest first) instead of just the current regime",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "History entries to return when `history` is true (default 90).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_intelligence",
+      "description": "Get the full semantic snapshot for a symbol — current price, active events, FSM state, market regime, the weekly Weinstein `stage` object (`stage`, `stageName`, `weeksInStage`, `since`, `verification`; context, not a signal — see dwlf_get_stage), support/resistance levels, and signal quality. This is the preferred single-call way to get structured market context for a symbol. For BITCOIN's on-chain cost basis, cycle windows and positioning in one call, use dwlf_get_conditions first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Symbol to query (e.g. BTC, ETH, AAPL)"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_daily_briefing",
+      "description": "Get the cross-asset daily briefing (covers the watchlist UNION the briefing list). Returns a TOP-LEVEL OVERVIEW by default: one headline line per symbol (price/%chg/ribbon, regime trend + `cycle`, the weekly cycle FSM's setup state (bottoming/rising/topping/declining; not the cycle read — that is `stage`), weekly Weinstein `stage` number + `stageWeeks` (weeks in stage; context, not a signal), cycleAlignment composite, active-signal count, openTrade, and `flags`) plus the full cross-asset block (sectorSentiment + triggerThemes + alignmentThemes) and a `drilldown` block. The overview is sized to stay within a single response across a large watchlist + briefing list — START HERE for the universe-wide read, then drill into symbols that matter. Three tiers: view:\"overview\" (default, one-glance) → view:\"summary\" (compact per-symbol: nearest S/R, trendline state, truncated events, SMC digest) → view:\"full\" (every field — pivots, trendline touch-points, fibLevels, annotations). summary/full across the whole watchlist can exceed response limits, so SCOPE them with `symbols`. `drilldown.flaggedSymbols` and per-symbol `flags` mark notable structure — drill those proactively (view:\"summary\"/\"full\" scoped, or dwlf_get_price_picture / dwlf_get_trendlines / dwlf_get_support_resistance / dwlf_get_events). Use `symbols` to extend coverage beyond your watchlist + briefing list. Pass depth:true for crossAsset.depth: each symbol's weekly cycle window depth band (where the last close sits in the move past cycles made; lead with in-zone).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbols": {
+            "description": "Optional additional symbols to include alongside your watchlist + briefing list for this call only. Useful when Telegram alerts fire for symbols outside your curated lists and you want the structural read on them. Each accepts BTC / BTC/USD / BTC-USD / stock-ticker shapes. Does NOT modify your stored lists.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "view": {
+            "description": "'overview' (default) = one headline line per symbol + full crossAsset; fits one response across a large watchlist. 'summary' = compact per-symbol detail (heavier; scope with `symbols`). 'full' = every per-symbol field (heaviest — scope with `symbols`). Drill into flagged symbols with summary/full or the per-symbol tools.",
+            "type": "string",
+            "enum": [
+              "overview",
+              "summary",
+              "full"
+            ]
+          },
+          "depth": {
+            "description": "true adds crossAsset.depth = {readings, read, failed, failedSymbols, symbolLimit, omitted, omittedSymbols}: each symbol's current weekly low and high window depth reading, for the watchlist + briefing list (+ symbols). read/failed count windows (symbol x side); failedSymbols lists the symbols with a failed window. Only the first symbolLimit symbols are read; omitted counts the rest and omittedSymbols lists them. Read a failed or omitted symbol with dwlf_get_cycle_windows depth:true, one symbol per call. In overview/summary each reading is compact {symbol, side, position, movePct, price, anchor, typical: {p25, p75}, n, ...} with not-reached left out; view:\"full\" carries the whole band as dwlf_get_cycle_windows depth:true does. position: shallow / in-zone (25th-75th percentile of past cycles) / deep / beyond. Costs 10 compute units. Historical context, not a target.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_register_agent",
+      "description": "Programmatically register a new DWLF account — no browser or Google OAuth required. Returns an API key immediately. Email verification unlocks compute features (backtests, evaluations). Useful for onboarding flows where an agent registers itself.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "description": "Email address for the new account"
+          },
+          "agentId": {
+            "description": "Optional agent identifier to associate with this account",
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Optional description of what this account will be used for",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_get_quotas",
+      "description": "Get the current user's plan tier, resource usage (custom events, strategies, FSMs, on-demand evals), limits, and custom event policy limits including fast/async path constraints (max nodes, max OR fanout, max nesting depth, etc.). Use this to understand what the user's plan allows before building complex events.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_list_subscriptions",
+      "description": "List all subscriptions on the account, including their enabled state, event source, channels, and filters. Use to verify what's wired up before creating duplicates, or to find a subscriptionId for update/delete.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_create_subscription",
+      "description": "Create a new subscription. Four shapes are supported, distinguished by `eventTypeId`:\n  - `strategy.entry.triggered` — requires `strategyId`; pair with `mode: 'confirm'` or `'auto'`. Confirm-mode creates a planned Trade for review; auto-mode opens it directly.\n  - `strategy.exit.triggered` — requires `strategyId`. Fires when the strategy's exit graph matches, and also delivers that strategy's stop alerts: every live stop-out (fixed or trailing) and a trailing stop locking in breakeven, then each further whole R. `strategy.stop.hit` / `strategy.stop.moved` cannot be subscribed to directly.\n  - `custom_event` — requires `customEventId`. Fires when that custom event fires.\n  - any indicator event id (e.g. `cycle.low.confirmed`, `cycle.high.window.early`, `swing_low_break`). Fires on the raw indicator event.\n\n`symbols` controls scope: an array of symbols, or `['*']` for a wildcard across the whole account universe. `timeframes` accepts `['1d']`, `['1w']`, or `['*']` for any. `channels` is an array of delivery destinations — currently `{ type: 'telegram', destination: { chatId: <id> }, enabled: true }`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "eventTypeId": {
+            "type": "string",
+            "description": "Event source: `strategy.entry.triggered`, `strategy.exit.triggered`, `custom_event`, or an indicator event id like `cycle.low.confirmed`."
+          },
+          "strategyId": {
+            "description": "Required when eventTypeId is `strategy.entry.triggered` or `strategy.exit.triggered`.",
+            "type": "string"
+          },
+          "customEventId": {
+            "description": "Required when eventTypeId is `custom_event`.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Only meaningful for strategy.entry.triggered. `confirm` = planned Trade for review, `auto` = trade opens directly. Defaults to `confirm`.",
+            "type": "string",
+            "enum": [
+              "confirm",
+              "auto"
+            ]
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbols to scope to. Use ['*'] for wildcard across the account universe."
+          },
+          "timeframes": {
+            "description": "Timeframes to scope to, e.g. ['1d'], ['1w'], or ['*']. Defaults to ['*'].",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "description": "Delivery channels, e.g. [{ type: 'telegram', destination: { chatId: <number> }, enabled: true }]."
+          },
+          "enabled": {
+            "description": "Whether the subscription is active. Defaults to true.",
+            "type": "boolean"
+          },
+          "riskPerTradeOverride": {
+            "type": "number"
+          },
+          "accountBalanceOverride": {
+            "type": "number"
+          },
+          "maxConcurrentTradesOverride": {
+            "type": "number"
+          },
+          "quietHours": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "dedupeWindowMinutes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "eventTypeId",
+          "symbols",
+          "channels"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_update_subscription",
+      "description": "Update an existing subscription (PATCH). Only the fields you supply are changed; everything else is preserved. Most-used: toggle `enabled` to pause/resume without losing the subscription's history. Editable fields: enabled, symbols, timeframes, channels, quietHours, dedupeWindowMinutes, mode, strategyId, risk/accountBalance/maxConcurrentTrades overrides, and customEventId (custom_event subscriptions only). `eventTypeId` is NOT patchable — switching event class on an existing subscription requires delete+recreate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subscriptionId": {
+            "type": "string",
+            "description": "The subscriptionId returned by create or list."
+          },
+          "enabled": {
+            "description": "Toggle active/paused without deleting.",
+            "type": "boolean"
+          },
+          "symbols": {
+            "description": "Replace the symbol scope. Pass ['*'] for wildcard across the account universe.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timeframes": {
+            "description": "Replace the timeframe scope. Pass ['*'] for any.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "channels": {
+            "description": "Replace the delivery channels array, e.g. [{ type: 'telegram', destination: { chatId: <number> }, enabled: true }]. Must be non-empty.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "quietHours": {
+            "description": "Quiet-hours window object, or null to clear. Detailed shape (start/end/timezone) is validated server-side.",
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dedupeWindowMinutes": {
+            "description": "Dedup window for repeat fires, or null to clear. Must be a non-negative finite number.",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "strategyId": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "confirm",
+              "auto"
+            ]
+          },
+          "riskPerTradeOverride": {
+            "type": "number"
+          },
+          "accountBalanceOverride": {
+            "type": "number"
+          },
+          "maxConcurrentTradesOverride": {
+            "type": "number"
+          },
+          "customEventId": {
+            "description": "Only valid on custom_event subscriptions — repoints which custom event the sub watches. Backend returns 400 if the sub isn't a custom_event.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subscriptionId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_delete_subscription",
+      "description": "Permanently delete a subscription. Hard delete — also removes any pending dispatcher state. If you just want to pause it, use `dwlf_update_subscription` with `enabled: false` instead so the history is preserved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subscriptionId": {
+            "type": "string",
+            "description": "The subscriptionId to delete."
+          }
+        },
+        "required": [
+          "subscriptionId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dwlf_describe_onchain_events",
+      "description": "What does a Bitcoin on-chain event mean? Describes the `onchain.*` event types: the plain-English condition, the inputs and threshold, the history start, how often it has fired, the method version and the caveats. Packs: Quantum-exposed supply (`quantum`, 6); Mining (`mining`, 28); Fee windows (`fees`, 10); DCA cohorts (`dca`, 2); Regime labels (`regime`, 33); Blockspace demand (`blockspace`, 33); Cost basis (v1) (`costBasis`, 14). No arguments → the packs with their summaries. `pack` → that pack's types. `eventType` → one type in full. `search` → types whose id or meaning contains the words.\n\n⚠️ Read `inEngine` (live from the engine's node catalogue). It is given per TYPE, on every type returned, and per pack, where a pack is `true` if ANY of its types is in the engine: a pack can be partly in. Before building a custom event on a type, check that type's own `inEngine`. `true` = the engine evaluates it and its rows can be read with dwlf_get_events or dwlf_get_conditions; `false` = a documented condition with its history measured on DWLF's own node, not yet queryable; `null` = the catalogue could not be read, so it is unknown. Every type describes a CONDITION on the chain, not advice. `estimated: true` marks types built on an attribution or a proxy (mining-pool attribution, the fee-backlog proxy): read their caveats. And `confirmedAt` on a row is when it became knowable. Frequencies are historical counts, not predictions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pack": {
+            "description": "One pack: quantum, mining, fees, dca, regime, blockspace, costBasis",
+            "type": "string"
+          },
+          "eventType": {
+            "description": "One event type id, e.g. onchain.mining.hash_ribbon.capitulation.enter",
+            "type": "string"
+          },
+          "search": {
+            "description": "Words to find in an id or meaning, e.g. \"hash rate\" or \"consolidation\"",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "dwlf",
+    "version": "0.61.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 8500,
+  "stderr": "Warning: DWLF_API_KEY not set. Authenticated endpoints will fail.\nFor AI agents: Use the same API key from /v2/agent/register in your MCP config.\nSee docs/AGENT-ONBOARDING.md for setup instructions.\n"
+}
