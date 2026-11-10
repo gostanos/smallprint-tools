@@ -1,0 +1,254 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "sigilum-mcp",
+  "version": "1.3.0",
+  "integrity": {
+    "dist": "sha512-fvAObsWTrcmHegMp1o8dX5GOO2UM0aWyoD80j1CzWiELNCEvsUzngkG4mWUEXmBTEGRRDgbw1kzUauFdDK9Jgw==",
+    "installed": "sha512-fvAObsWTrcmHegMp1o8dX5GOO2UM0aWyoD80j1CzWiELNCEvsUzngkG4mWUEXmBTEGRRDgbw1kzUauFdDK9Jgw=="
+  },
+  "bin": "node_modules/sigilum-mcp/index.js",
+  "main": "index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T02:40:40.538Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "push_sigil",
+      "description": "Add/modify resources on the architecture sigil (the live diagram), sending ONLY the DELTA — the resources that are new or changed, not the whole stack. Use `op:\"upsert\"` for resources to create or modify (include all their detail), and `op:\"delete\"` (just `type` + `id`) for removed ones. ALWAYS include the relationships in `connections` (which resource each one talks to, with protocol and port) and containment in `vpc`/`subnet`, because the sigil draws those edges. Give every upserted resource a one-sentence `purpose` too — what it does in THIS architecture — so the user reads the role of each node, not just the service kind. The backend keeps the full authoritative state by merging your changes.\n\nA sigil is EITHER \"Design\" (a sketch — NOTHING is created in AWS) OR \"Live\" (the resources really exist in AWS). It is never a mix of both. Control this with `deployed`:\n  • Omit it (default) → a brand-new sigil is a DESIGN. Use this to draft an architecture the user can review in the web before anything is deployed. When the user is happy, call `deploy_sigil` to actually deploy it.\n  • `deployed:true` → you ACTUALLY created these in AWS already (direct deploy, no design step). The sigil is Live from the start.\nOn an existing sigil, the top-level `deployed` must match its current mode (the backend rejects a mismatch). A SINGLE resource may still diverge from the sigil mode via the PER-RESOURCE `deployed` + `deploy_note` fields on its change: e.g. on a Live sigil, a resource that failed to create (`deployed:false`, `deploy_note:\"create failed: AccessDenied…\"`) or that the user asked to keep undeployed; on a Design sigil, something the user explicitly asked to deploy already (`deployed:true` + note). The web marks divergent resources on the diagram and shows your note. EXTERNAL actors (type \"client\"/\"internet\" — the end user, a browser, a mobile app) are exempt: they can never be deployed, so the web never flags them — push them with `deployed:false` and they simply appear as part of the architecture. After `deploy_sigil`, a sigil is Live, so keep the SAME resource ids and upsert them with the real ARNs/ids (`arn`, `region`) and `state`.\n\nCODE — plan it in the DESIGN phase. When a resource runs code you wrote (a Lambda handler, an EC2 user-data / bootstrap script, a Step Functions definition, a Glue job, …), attach it in the per-resource `code` array on the SAME design push that creates the resource — do NOT wait until it is live. This lets the user review exactly what will run (via \"View code\" in the web) BEFORE approving the deploy; the diagram box otherwise only shows the service kind. Send it on every sigil, Design or Live. The backend keeps code you sent earlier if a later push omits it, so once the code is in the design it persists through the deploy into the Live sigil unchanged — re-send `code` only when the source itself actually changed.\n\nSigils are identified ONLY by name — you never see or pass an internal id anywhere. Changes always go to the currently ACTIVE sigil: this session's own sigil by default, the one you resumed with load_sigil, or the one you just started with `newSigilName` earlier in this conversation. To continue the active sigil, just call push_sigil normally. To resume a DIFFERENT existing sigil, call load_sigil with its name first. To start a brand-new, separate architecture, set `newSigilName` on this call instead — never reuse resource ids from a different architecture when doing so, they are independent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "upsert",
+                    "delete"
+                  ],
+                  "description": "\"upsert\" = created or modified (send full detail); \"delete\" = removed (type + id are enough). Use \"delete\" ONLY when the user EXPLICITLY asks to remove that resource from the diagram — it makes the node disappear. To record a teardown of the whole architecture, do NOT delete the resources: call teardown_sigil, which keeps them and just marks them undeployed."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "AWS service type, e.g. \"ec2\", \"rds\", \"s3\", \"lambda\", \"vpc\". For EXTERNAL actors that are part of the architecture but NOT AWS resources (the end user, their browser/mobile app, \"the internet\"), use type \"client\" (or \"internet\") with deployed:false and a short deploy_note — the web draws them as part of the diagram but never counts or flags them as pending deployment."
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Stable identifier of the resource (InstanceId / ARN / bucket name). This is the key the backend stores it under."
+                },
+                "name": {
+                  "description": "Friendly name, if any.",
+                  "type": "string"
+                },
+                "purpose": {
+                  "description": "ONE short sentence, in plain language, saying what THIS resource DOES in THIS architecture — its role, not the definition of the AWS service. Write it from what the user actually asked for: \"a Lambda function\" is useless, \"validates the order payload and writes it to the orders table\" or \"buffers checkout requests so payment processing can retry independently\" is what the reader needs. Include it on EVERY upsert, in the DESIGN phase too: it is shown in the web when the user clicks the node, and it grounds the diagram's connection labels. The backend keeps the purpose you sent earlier if a later push omits it, so re-send it only when the resource's role really changed.",
+                  "type": "string"
+                },
+                "region": {
+                  "description": "AWS region, e.g. \"us-east-1\". Include it whenever known — it powers the \"Open in AWS Console\" link in the web.",
+                  "type": "string"
+                },
+                "state": {
+                  "description": "Lifecycle state, e.g. \"running\", \"available\".",
+                  "type": "string"
+                },
+                "deployed": {
+                  "description": "Whether THIS resource really exists in AWS right now. Omit to inherit the sigil's mode. Set it ONLY when this resource diverges: e.g. `false` on a Live sigil for a resource that failed to create or that the user asked to keep undeployed, or `true` on a Design sigil for something the user explicitly asked to deploy already. Always pair a divergence with `deploy_note`.",
+                  "type": "boolean"
+                },
+                "deploy_note": {
+                  "description": "Short human reason why this resource diverges from the sigil mode — e.g. \"user asked to keep it design-only for now\" or \"create failed: AccessDenied (missing iam:CreateRole)\". Shown to the user on the diagram badge and in the resource panel.",
+                  "type": "string"
+                },
+                "arn": {
+                  "description": "Full AWS ARN of the resource (arn:aws:…). Always include it on Live sigils once the resource really exists in AWS — it powers the \"Open in AWS Console\" link and the copyable ARN in the web.",
+                  "type": "string"
+                },
+                "vpc": {
+                  "description": "VPC id this resource lives in (for containment in the diagram).",
+                  "type": "string"
+                },
+                "subnet": {
+                  "description": "Subnet id this resource lives in.",
+                  "type": "string"
+                },
+                "connections": {
+                  "description": "Relationships to OTHER resources (who it talks to, protocol, port). Always include these so the diagram draws the edges.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "to": {
+                        "type": "string",
+                        "description": "The id of the OTHER resource this one connects to (must match another resource's id)."
+                      },
+                      "protocol": {
+                        "description": "Protocol, e.g. \"TCP\", \"HTTPS\", \"Event\".",
+                        "type": "string"
+                      },
+                      "port": {
+                        "description": "Port, e.g. 5432.",
+                        "type": [
+                          "number",
+                          "string"
+                        ]
+                      },
+                      "kind": {
+                        "description": "Optional hint: \"db\" | \"http\" | \"ssh\" | \"async\" — colors the edge.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "to"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "details": {
+                  "description": "Full describe/create output for this resource (kept verbatim in the backend state JSON).",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "code": {
+                  "description": "Source code THIS resource runs — the Lambda handler body, the EC2 user-data / bootstrap script, a Step Functions state machine definition, etc. Include the entry source you authored so the user can read it in the web (NOT vendored dependencies or build artifacts). Attach it in the DESIGN phase too — draft the code together with the architecture so the user reviews it before deploying. The backend caps each file and the number of files, and keeps the code you sent earlier if a later push omits it (so it survives the deploy into the Live sigil).",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "File name, e.g. \"handler.py\", \"user-data.sh\", \"workflow.asl.json\"."
+                      },
+                      "language": {
+                        "description": "Language hint for syntax highlighting: \"python\", \"javascript\", \"typescript\", \"bash\", \"json\", \"yaml\". Omit for plain text.",
+                        "type": "string"
+                      },
+                      "content": {
+                        "type": "string",
+                        "description": "The actual source code, verbatim."
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "content"
+                    ]
+                  }
+                },
+                "source_command": {
+                  "description": "Optional: the aws CLI command that produced this change (audit only).",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op",
+                "type",
+                "id"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "The resources that changed in this step (upsert/delete each)."
+          },
+          "deployed": {
+            "description": "Sigil mode. Omit for a DESIGN sketch (nothing created in AWS — the default for a new sigil). Set true only if you ACTUALLY created these resources in AWS. Must match the sigil's existing mode.",
+            "type": "boolean"
+          },
+          "newSigilName": {
+            "description": "Set this ONLY to start a BRAND-NEW, SEPARATE sigil under this name — use it when the user explicitly wants to design/report a DIFFERENT architecture than whatever is currently active, not to continue or rename the current one. When set: the backend creates the new sigil, it becomes the ONLY active sigil for the rest of this session (exactly as if you had just called load_sigil on it), and `changes` is reported onto it. Leave unset for every normal call — changes then go to whatever sigil is already active. Sigils are identified ONLY by name; you never see or pass an id anywhere.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "changes"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "deploy_sigil",
+      "description": "Deploy the current DESIGN sigil to AWS. Call this when the user has reviewed the design in the web and wants it built for real. This does NOT create resources by itself — Sigilum has no AWS access. It marks the sigil as Live and returns the full resource spec; then YOU must create each resource in AWS using your own AWS tools (CLI/SDK), in dependency order (VPC → subnets/security groups → compute → data stores → wiring). As you create each one, call push_sigil (op:\"upsert\") with the SAME resource id it has in the design, filling in the real `arn`/InstanceId, the `region`, and the live `state` — keep the id stable so the node is enriched, not duplicated. The returned spec includes each resource's `code` (the source planned in the design); it carries into the Live sigil automatically, so re-send `code` on the upsert only if you changed the source before deploying. If a resource FAILS to create (permissions, quotas, conflicts), still push it with `deployed:false` and a `deploy_note` explaining the error, so the user sees exactly what is pending and why on the diagram. Resources you have not re-reported yet show as \"not deployed\" in the web until you push them. Do not add anything that is not in the spec. Only works on a DESIGN sigil (a Live one is already deployed). To reverse this later — when the user asks to tear down the deployed architecture — destroy the AWS resources yourself, then call teardown_sigil to flip the sigil back to Design.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resources": {
+            "description": "Optional: the sigil detail JSON you have in context. Ignored if it differs — the backend's stored state is the source of truth and is returned to you.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "teardown_sigil",
+      "description": "Tear down the current LIVE sigil: mark it back to DESIGN and flag every resource as undeployed. Call this when the user asks to TEAR DOWN, DESTROY, DECOMMISSION or REMOVE the deployed AWS architecture. Sigilum has NO AWS access, so FIRST you must actually destroy the real resources in AWS with your own tools (CLI/SDK), in reverse dependency order (wiring → data stores → compute → subnets/security groups → VPC); THEN call this to record it. It KEEPS every resource in the diagram — it does NOT delete any node — it just flips the sigil to Design and marks all resources undeployed, so the design is preserved and the user can review or redeploy it later (deploy_sigil works again afterwards). Do NOT use push_sigil op:\"delete\" to reflect a teardown; that would erase the design. Only delete a resource when the user EXPLICITLY asks to remove that specific resource from the diagram. Only works on a LIVE sigil (a Design one is not deployed, so there is nothing to tear down).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "load_sigil",
+      "description": "Resume a PREVIOUS sigil BY ITS NAME. To use it: call list_sigils first, look at the sigil names, pick the one whose name is the CLOSEST semantically to what the user is asking for, and pass that name here. If none of the existing names is a reasonable semantic match, do NOT call this with a made-up name — tell the user there is no similar sigil. On a match this switches the active sigil and returns its FULL current state — every resource with its real IDs/ARNs, relationships, details AND the `code` each one runs — so you resume with the complete diagram, nothing omitted. That becomes the one and only architecture in context, and every later push_sigil merges onto it (code you don't re-send is kept). Use this when the user wants to keep working on infrastructure designed or deployed earlier. To start a brand-new, UNRELATED sigil instead of resuming one, do NOT call load_sigil with a made-up name — use push_sigil's `newSigilName` instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The sigil NAME to resume (choose the closest one from list_sigils). Resolved by proximity to an existing sigil."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_sigils",
+      "description": "List the sigils available for your account (newest first), each with its name and last-updated time (no ids — sigils are identified by name only, the id is an internal backend detail you never see or need). This is the FIRST step when the user wants to resume earlier work: look at the names, pick the one closest semantically to what the user means, then pass that NAME to load_sigil (load_sigil resolves it by proximity). If no name is a reasonable match, tell the user there is no similar sigil — or, if they want a NEW architecture instead, use push_sigil's `newSigilName`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "sigilum",
+    "version": "1.3.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 5943,
+  "stderr": ""
+}

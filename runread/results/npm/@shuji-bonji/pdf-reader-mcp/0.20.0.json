@@ -1,0 +1,803 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@shuji-bonji/pdf-reader-mcp",
+  "version": "0.20.0",
+  "integrity": {
+    "dist": "sha512-Oz4GwoD2Ahon7H37OVU6G8/bRmerpShraYmFgDMD8IQb/2CT9na0UWfSRheDaHkP56X/ZBnOTnzC0z/f7L5unw==",
+    "installed": "sha512-Oz4GwoD2Ahon7H37OVU6G8/bRmerpShraYmFgDMD8IQb/2CT9na0UWfSRheDaHkP56X/ZBnOTnzC0z/f7L5unw=="
+  },
+  "bin": "node_modules/@shuji-bonji/pdf-reader-mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-09T14:27:05.761Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_page_count",
+      "description": "Get the total number of pages in a PDF document.\n\nThis is a lightweight operation that only reads the PDF header, not the full content.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  markdown (default) — the page count as a bare number, e.g. \"126\". This is the number the\n  pages arguments of the other tools are checked against.\n  json — { pageCount, scope }. scope.declaredCount is the /Count the root page tree node\n  declares (ISO 32000-2 §7.7.3.2), scope.pagesReached is the number of pages reached by\n  walking the page tree, and scope.pageTree says whether that walk could be done. The two\n  numbers can differ in a file whose writer got /Count wrong; this server reports both and\n  does not judge which is right. A value that could not be read is null, not 0.\n\nExamples:\n  - Quick check before deciding which pages to extract\n  - Validate a PDF file is readable",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_metadata",
+      "description": "Extract metadata from a PDF document including title, author, creation date, page count, PDF version, and structural information.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Metadata including: title, author, subject, keywords, creator, producer, creation/modification dates, page count, PDF version, linearized/encrypted/tagged/signature flags, file size.\n\n  The eight document-level fields are read from both the document information dictionary (ISO 32000-2 §14.3.3) and the XMP metadata stream (§14.3.2: dc:title, dc:creator, dc:description, pdf:Keywords, xmp:CreatorTool, pdf:Producer, xmp:CreateDate, xmp:ModifyDate). When both hold a value, PDF 2.0 and later use the XMP value (§14.3.3 deprecates the dictionary for this in PDF 2.0) and earlier versions use the dictionary. Values are returned as written: dictionary dates look like \"D:20260915100000+09'00'\", XMP dates like \"2026-09-15T10:00:00+09:00\".\n  metadataSources names the source of each field (\"info\", \"xmp\" or null). metadataConflicts lists fields where the two sources differ (dates compared as instants) — this server does not say which one is right. xmpMetadata says whether the stream was read, is absent, or is present but could not be read; \"could not be read\" is not \"absent\".\n\nExamples:\n  - Get document properties for cataloging\n  - Check if a PDF is tagged (accessibility)\n  - Verify PDF version compatibility",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "read_text",
+      "description": "Extract text content from a PDF document with Y-coordinate-based reading order preservation.\n\nText is extracted page by page, sorted by vertical position (top to bottom) then horizontal position (left to right), providing natural reading order.\n\n`/ActualText` replacements (ISO 32000-2 §14.9.4) are resolved, on both of the paths that clause defines: the `/ActualText` of a structure element, and the one in a `Span` marked-content property list — the latter occurs in untagged documents too. So a word carried as ActualText (ligature substitutes, hyphenation fixes) reads here the way a person viewing the page sees it, not in its glyph form.\n\nFor **tagged** PDFs, `extract_structured_text` is still the better tool when order matters: it returns text in logical content order (ISO 32000-2 §14.8.2.5), which this tool does not — read_text sorts by coordinate. Tables in tagged PDFs are best read with `extract_tables`.\n\nFor **untagged** multi-column PDFs (e.g. older 新旧対照表 PDFs that lack a structure tree), pass `split_columns: 2` or `3` to bucket items by X-coordinate left-to-right.\n\nFor Japanese form-style PDFs (帳票・様式) where U+3000 fullwidth spaces are used as visual indentation, pass `compact_whitespace: true` to collapse runs of whitespace to a single ASCII space. Cuts 20–40% of token consumption without losing content.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - pages (string, optional): Page range to extract. Format: \"1-5\", \"3\", or \"1,3,5-7\". **Omitting it means ALL pages** — on a large document that consumes the whole response budget in one call. Past ~50 pages, search_text first and pass an explicit range here.\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n  - split_columns (1 | 2 | 3, optional): Column-aware reordering for untagged multi-column PDFs. Default 1 = existing Y-sort.\n  - compact_whitespace (boolean, optional): Collapse whitespace runs (incl. U+3000) to one ASCII space and trim each line. Default false.\n\nEvery page also reports how much of its text could be converted to Unicode (ISO 32000-2 §9.10.1): `extracted`, `no_text_layer` (no text-showing operator, image content present — reading it needs OCR or a rendered page), `not_extractable` (a font used here offers no route to Unicode, so text is missing or wrong), or `not_observed` (encrypted or unreadable content stream). An empty result is therefore never by itself evidence that a page has no text.\n\nTwo separate readings produce that answer: taking the characters off the page, and observing whether those characters have a route to Unicode. Either can fail on its own, so the response says which of the two was done, under `scope`. When the characters were taken but the observation could not run, the text is still returned and `extractability` is left off the pages — absent is not `extracted`. When the characters could not be taken but the observation ran, `text` is `null` (not `\"\"`, which would say the page has no text) and the per-page observation still tells you whether the page has any text-showing operator at all. Only when neither reading could be done is this an error, and it then names both reasons.\n\nReturns:\n  `{ scope, pages }`. `pages` is the extracted text organized by page number, preceded by the extractability tally. With `split_columns >= 2`, columns are separated by a blank line so a downstream LLM can tell them apart.\n\nExamples:\n  - Extract all text: { file_path: \"/path/to/doc.pdf\" }\n  - Untagged 新旧対照表: { file_path: \"/path/to/older-shinkyu.pdf\", split_columns: 2 }\n  - Japanese form template: { file_path: \"/path/to/form.pdf\", compact_whitespace: true }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "pages": {
+            "description": "Page range to process. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages.",
+            "type": "string"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          },
+          "split_columns": {
+            "description": "Number of columns to use when reordering text. 1 (default) = existing Y-sort. 2 or 3 = bucket by X-coordinate left-to-right. Use for untagged 新旧対照表 / two-column PDFs where Y-sort would interleave columns. Tagged PDFs with proper <Table> markup should use extract_tables instead.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "compact_whitespace": {
+            "description": "When true, collapse runs of whitespace (incl. fullwidth space U+3000) to a single ASCII space and trim each line. Reduces token consumption on Japanese form-style PDFs. Default: false (no whitespace normalization).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "search_text",
+      "description": "Search for text within a PDF document. Returns matching locations with surrounding context.\n\nCase-insensitive search across all or specified pages. Each match includes the page number, the matched text, and configurable surrounding context.\n\nThe search runs over the same text `read_text` returns, so `/ActualText` replacements (ISO 32000-2 §14.9.4) match: a word carried as ActualText (ligature substitutes, hyphenation fixes) is found under the spelling a viewer shows, not under its glyph form. Rarely, a page's marked content cannot be aligned with the extracted text and the replacement is left unresolved; when that happens on a search with no hits, the result carries a `note` naming those pages.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - query (string): Text to search for (case-insensitive, 1-500 chars)\n  - pages (string, optional): Page range to search. Omit for all pages.\n  - context_chars (number): Characters of context before/after match (default: 80)\n  - max_results (number): Maximum matches to return (default: 20, max: 100)\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Search matches with page number, matched text, and surrounding context, plus `scope` — which of the two readings behind the answer were done: searching the characters on the page, and observing whether those characters have a route to Unicode (ISO 32000-2 §9.10.1). When the search itself could not run, `totalMatches` and `matches` are `null` rather than `0` and `[]`: \"could not search\" and \"searched and found nothing\" are different answers.\n\nExamples:\n  - Search entire PDF: { file_path: \"/path/to/doc.pdf\", query: \"digital signature\" }\n  - Search specific pages: { file_path: \"/path/to/doc.pdf\", query: \"error\", pages: \"1-10\" }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Text to search for (case-insensitive)"
+          },
+          "pages": {
+            "description": "Page range to process. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages.",
+            "type": "string"
+          },
+          "context_chars": {
+            "default": 80,
+            "description": "Number of characters to show before and after each match",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "max_results": {
+            "default": 20,
+            "description": "Maximum number of matches to return",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path",
+          "query"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "read_images",
+      "description": "Extract embedded images from a PDF document as PNG or JPEG files.\n\nEach image is returned as an MCP image content block, so a vision-capable model can look at it directly. A text block lists the metadata for all of them (page, index, size in the file, size returned, colour space, encoded bytes).\n\nThese are the image XObjects the page draws, not a picture of the page. A page whose content is vector drawing, or whose text is what you want to see, is not covered by this tool.\n\nResponse size is bounded: at most 4 MB of encoded image data per call. Images beyond the budget are named in the text block with the reason and are not returned — nothing is dropped silently. A 200 dpi A4 scan is ~11.6 MB of pixels on its own, so pass `pages`, `max_width` or `max_height` when working with scans.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - pages (string, optional): Page range. Format: \"1-5\", \"3\", or \"1,3,5-7\". **Omitting it means ALL pages** — on an image-heavy document that exhausts the byte budget immediately. Name the pages you need.\n  - format ('png' | 'jpeg', optional): Output encoding. Default 'png' (lossless). 'jpeg' is smaller and composites alpha over white.\n  - quality (1-100, optional): JPEG quality. Ignored for PNG.\n  - max_width (number, optional): Downscale images wider than this (area average). Never enlarges.\n  - max_height (number, optional): Downscale images taller than this.\n\nReturns:\n  A text block with the metadata table and any omissions, then one image content block per returned image.\n\nExamples:\n  - Extract all images: { file_path: \"/path/to/doc.pdf\" }\n  - A scanned page, small enough to look at: { file_path: \"/path/to/scan.pdf\", pages: \"1\", max_width: 1200, format: \"jpeg\" }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "pages": {
+            "description": "Page range to process. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages.",
+            "type": "string"
+          },
+          "format": {
+            "description": "Encoding of the returned images. png (default) is lossless; jpeg is smaller and drops alpha (composited over white).",
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ]
+          },
+          "quality": {
+            "description": "JPEG quality 1-100 (default 80). Ignored when format is png.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "max_width": {
+            "description": "Downscale images wider than this, averaging over the source pixels. Images are never enlarged. Omit to return each image at its own size.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "max_height": {
+            "description": "Downscale images taller than this. Never enlarges.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "read_url",
+      "description": "Fetch a PDF from a URL and extract its text content. Text is ALL this tool returns — see the scope note below.\n\nDownloads the PDF from the specified URL, then extracts text with Y-coordinate-based reading order. Supports HTTP and HTTPS. Maximum file size: 50MB. Timeout: 30 seconds.\n\n**Scope (#25):** the fetched bytes are discarded after extraction; this tool deliberately does not save them. Every other tool of this server takes a `file_path`, so to use search_text, inspect_structure, extract_tables, render_page or anything else on a URL's PDF, download the file to local disk FIRST (with whatever fetch capability the calling environment has) and pass its path. This keeps every tool of this server read-only with respect to the file system — writing files is not a reader's job. read_url exists for the one-shot case: \"what does the document at this URL say?\"\n\nLike `read_text`, accepts `split_columns: 2 | 3` for **untagged** multi-column PDFs and `compact_whitespace: true` to collapse U+3000 / ASCII whitespace runs. Tagged PDFs should use `extract_tables` instead.\n\nArgs:\n  - url (string): URL pointing to a PDF file (HTTP or HTTPS)\n  - pages (string, optional): Page range to extract. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages.\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n  - split_columns (1 | 2 | 3, optional): Column-aware reordering. Default 1 = existing Y-sort.\n  - compact_whitespace (boolean, optional): Collapse whitespace runs (incl. U+3000) to one ASCII space. Default false.\n\nReturns:\n  `{ scope, pages }`, the same shape as read_text: `pages` is the extracted text by page number, and `scope` says which of the two readings behind it were done — taking the characters off the page, and observing whether those characters have a route to Unicode (ISO 32000-2 §9.10.1). Either can fail on its own; only when neither could be done is this an error, and it then names both reasons.\n\nExamples:\n  - Read remote PDF: { url: \"https://example.com/document.pdf\" }\n  - Untagged 2-column PDF: { url: \"https://...\", split_columns: 2 }\n  - Japanese form: { url: \"https://...\", compact_whitespace: true }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL pointing to a PDF file (HTTP or HTTPS)"
+          },
+          "pages": {
+            "description": "Page range to process. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages.",
+            "type": "string"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          },
+          "split_columns": {
+            "description": "Number of columns to use when reordering text. 1 (default) = existing Y-sort. 2 or 3 = bucket by X-coordinate left-to-right. Use for untagged 新旧対照表 / two-column PDFs where Y-sort would interleave columns. Tagged PDFs with proper <Table> markup should use extract_tables instead.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "compact_whitespace": {
+            "description": "When true, collapse runs of whitespace (incl. fullwidth space U+3000) to a single ASCII space and trim each line. Reduces token consumption on Japanese form-style PDFs. Default: false (no whitespace normalization).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "render_page",
+      "description": "Rasterise pages of a PDF to PNG or JPEG images, returned as MCP image content blocks.\n\nThis is the tool for documents whose text cannot be read as text: pages `read_text` reports as `no_text_layer` or `not_extractable`, vector drawings, forms, handwriting, stamps. It draws the PAGE — everything on it — where `read_images` only extracts the image XObjects a page happens to embed.\n\nRendering uses PDFium compiled to WebAssembly (optional dependency `@hyzyla/pdfium`). Note this is a different engine from the pdf.js this server reads text with; where their behaviour on a damaged file differs, neither output is evidence about the other. If the dependency is not installed, this tool says so and every other tool works normally.\n\n`pages` is required — rendering is the most expensive operation here, and \"all pages\" of a large scan should be a decision, not a default. The response carries at most 4 MB of encoded images; pages past the budget are named with the reason, not dropped.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - pages (string, REQUIRED): Page range: \"1-3\", \"5\", \"1,3,5-7\".\n  - dpi (36-600, optional): Density, default 150. 150 reads well; 300 for small print.\n  - max_width (number, optional): Pixel-width cap; wins over dpi when smaller.\n  - format ('png' | 'jpeg', optional): Default 'png'. 'jpeg' is usually right for scans.\n  - quality (1-100, optional): JPEG quality.\n\nReturns:\n  A text block that starts with \"## Scope of this reading\" (the pages requested, the pages rendered, and each page not rendered with the reason — present even when every page was rendered), then per-page metadata (point size, pixel size, effective dpi, bytes) and any omissions, then one image content block per rendered page.\n\nRasterising a page can take unbounded time — a tiling pattern (ISO 32000-2 §8.7.3.1) whose `/XStep` or `/YStep` is a near-zero magnitude asks for an astronomical number of tiles, and the clause forbids only zero. Each page therefore gets 20 seconds (`PDF_READER_RENDER_TIMEOUT_MS` overrides it); the rendering runs off the main thread, so a page that does not finish is stopped and named in the omissions rather than taking the server down with it. The pages rendered before it are still returned, and the pages after it are reported separately as not attempted — \"could not be rendered\" and \"never started\" are different answers.\n\nExamples:\n  - A scanned page: { file_path: \"/path/to/scan.pdf\", pages: \"1\", format: \"jpeg\" }\n  - A diagram at high detail: { file_path: \"/path/to/doc.pdf\", pages: \"3\", dpi: 300 }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "pages": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Page range to render. Required: rendering all pages is never implicit."
+          },
+          "dpi": {
+            "description": "Rasterisation density (default 150). PDF points are 1/72 inch.",
+            "type": "integer",
+            "minimum": 36,
+            "maximum": 600
+          },
+          "max_width": {
+            "description": "Cap on the rendered width in pixels; wins over dpi when smaller.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "format": {
+            "description": "png (default, lossless) or jpeg (smaller — usually right for scans).",
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ]
+          },
+          "quality": {
+            "description": "JPEG quality 1-100 (default 80). Ignored for png.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "file_path",
+          "pages"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "summarize",
+      "description": "Generate a quick overview report of a PDF document.\n\nCombines metadata, text presence check, image count, and a text preview from the first page into a single summary. Useful as a first step before deciding which detailed tools to use.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\n`hasText` is decided from page 1's preview and cannot say *why* text is absent. `textExtractability` answers that over every page (ISO 32000-2 §9.10.1): `extracted`, `no_text_layer` (image content, no text-showing operator — the page needs OCR or a rendered image), `not_extractable` (a font used offers no route to Unicode), or `not_observed` (encrypted or unreadable content stream). `unreadablePages` lists the pages that are not `extracted`, with the reason.\n\n`declaredConformance` is what the XMP packet (ISO 32000-2 §14.3.2) declares — PDF/A (`pdfaid`), PDF/UA (`pdfuaid`) and the W3C TDMRep rights statement (`tdm`) — as written. A PDF/UA declaration is the author's claim that the structure tree is complete, which is the cue to read through it rather than infer reading order; it is not a verdict (that is pdf-verify-mcp validate_conformance). All-null blocks mean the catalog has no /Metadata; `null` means the packet could not be read (see `scope`).\n\nThe summary ends with a `next` list: tool suggestions derived from the observations themselves (hasText false → render_page; PDF/UA declared or tagged → extract_structured_text / extract_tables; large page count → search_text before read_text). Each line names the observation it follows from; nothing is enforced and no ordering is implied.\n\nReturns:\n  Summary including: page count, PDF version, file size, tagged/encrypted/signature flags, text presence, per-document text extractability, the pages that are not fully extractable, image count, a text preview from page 1, and the `next` suggestions.\n\n  Five separate readings produce that summary — the document information, the text of page 1, the image count, the extractability observation, and the XMP declarations — and any of them can fail on its own. `scope` says which were done. A field whose reading did not happen is `null`, never `0`, `false` or `\"\"`: \"not read\" and \"read and found nothing\" are different answers, and `next` stays silent about any premise that was not observed.\n\nExamples:\n  - Quick overview: { file_path: \"/path/to/doc.pdf\" }\n  - Machine-readable: { file_path: \"/path/to/doc.pdf\", response_format: \"json\" }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "inspect_structure",
+      "description": "Examine PDF internal object structure including catalog entries, page tree, and object statistics.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Catalog entries (keys and COS types), page tree info (page count, MediaBox samples), object statistics, and encryption status.\n\nObject statistics report three separate counts:\n  - byType: the COS type of each indirect object (ISO 32000-2 §7.3) — one of\n    dict, stream, array, name, string, integer, real, boolean, null, ref\n  - byDocType: the /Type of each dictionary (Catalog, Pages, Page, Font, ObjStm, XRef, ...)\n  - unreadable: objects the cross-reference table names but that could not be read.\n    This is counted apart from totalObjects: 0 means \"every object was read\", not \"nothing was checked\".\n\nExamples:\n  - Examine document catalog for structural features\n  - Count PDF objects and streams\n  - Check page dimensions across the document",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "inspect_catalog",
+      "description": "List the document-level components hanging off the catalog dictionary (ISO 32000-2 §7.7.2, Table 29) — the parts of a PDF that are not page content and that page-oriented readers drop: bookmarks, layers, attachments, the XMP packet, and the actions that run when the document is opened.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - max_outline_items (integer, 1-500, default 50): how many bookmark items to list (count and depth cover the whole tree)\n  - include_xmp (boolean, default false): also return the XMP packet text (capped at 64 KiB)\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns, per entry:\n  - outlines (/Outlines, §12.3.3): item count, depth, and the first items with title and target page\n  - optionalContent (/OCProperties, §8.11.4): every layer's /Name, and the default configuration's BaseState / ON / OFF counts\n  - embeddedFiles (/Names → /EmbeddedFiles, §7.7.4 / §7.11.4): file name, MIME type, size, /AFRelationship, description\n  - associatedFiles (/AF, §14.13): count at document level\n  - names: counts of the /Dests and /JavaScript name trees (document-level ECMAScript runs on open, §12.6.4.17)\n  - metadata (/Metadata, §14.3.2): packet size, namespaces present, and the DECLARED values of pdfaid:*, pdfuaid:part and the W3C TDMRep tdm:reservation / tdm:policy\n  - openAction (/OpenAction) and additionalActions (/AA, Table 200): action type (/S), target page or file or URI, whether /JS is present, length of the /Next chain\n  - collection (/Collection, §12.3.5): whether the document is a portfolio\n\nEach entry distinguishes { status: \"absent\" } (the catalog has no such key — an observed fact) from { status: \"unreadable\", reason } (the key is there but its value could not be reached). An encrypted document whose key cannot be derived reports every entry as unreadable, never as absent.\n\nThis tool reports what is written. A pdfuaid:part declaration is a claim about the structure tree, not a verdict on it (that is pdf-verify-mcp validate_conformance); tdm:reservation is the rights holder's statement, and whether to honour it is the caller's decision; an action with /JS is reported, not judged.\n\nExamples:\n  - Find out whether a document carries attachments, layers or bookmarks before deciding how to read it\n  - Read the XMP declarations (PDF/A, PDF/UA, TDMRep) that get_metadata, which reads the Info dictionary, does not see\n  - See what a document will execute when opened (/OpenAction, /AA, document-level JavaScript)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "max_outline_items": {
+            "default": 50,
+            "description": "How many outline (bookmark) items to list. The count and depth are always computed over the whole tree.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "include_xmp": {
+            "default": false,
+            "description": "Return the XMP packet text itself (capped at 64 KiB). Off by default: the declared values are extracted either way.",
+            "type": "boolean"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "inspect_tags",
+      "description": "Analyze the Tagged PDF structure tree for accessibility assessment.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Whether the PDF is tagged, the structure tree hierarchy with roles, max nesting depth, total element count, and role distribution (e.g., Document, P, H1, Table, Figure).\n  For an encrypted PDF whose key cannot be derived from the empty user password, isTagged and the counts are null and a note says why: the structure tree could not be read, which is not the same answer as \"not tagged\".\n\nExamples:\n  - Check if a PDF is tagged for accessibility (PDF/UA)\n  - Inspect the tag hierarchy and role distribution\n  - Assess document structure quality",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "inspect_fonts",
+      "description": "List all fonts used in a PDF document with their properties.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Font name, type (TrueType, Type1, CIDFont, etc.), encoding, embedded/subset status, and pages where each font is used.\n\nExamples:\n  - Check if all fonts are embedded (required for PDF/A, PDF/X)\n  - Identify font types and encodings\n  - Find which pages use specific fonts",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "inspect_annotations",
+      "description": "Extract and categorize all annotations in a PDF document.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - pages (string, optional): Page range. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages.\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Total annotation count, breakdown by subtype (Link, Widget, Highlight, Text, etc.) and by page, flags for links/forms/markup presence, and individual annotation details.\n\nExamples:\n  - Check for form fields (Widget annotations)\n  - Find all links in a document\n  - Inventory markup annotations (highlights, comments)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "pages": {
+            "description": "Page range to process. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages.",
+            "type": "string"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "inspect_signatures",
+      "description": "Examine digital signature fields in a PDF document.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Total signature field count, signed/unsigned breakdown, and details for each field (signer name, reason, location, signing time, filter/subFilter).\n\nNote: This tool inspects signature field structure only. Cryptographic signature verification is not performed.\n\nExamples:\n  - Check if a PDF has been digitally signed\n  - Inspect signer information and signing dates\n  - Verify signature field structure",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "extract_tables",
+      "description": "Extract every `<Table>` subtree from a Tagged PDF as a structured row/cell list,\noptionally rendered as Markdown tables.\n\nHow it works: walks the document's StructTreeRoot depth-first (the same walker\nas `extract_structured_text` / `inspect_tags`) and pulls cell text for each\n`<TR>` → `<TH>/<TD>`, then collapses kerning whitespace (e.g. \"消 費 税 法\" →\n\"消費税法\"). This sidesteps reading-order extraction's failure mode on\nmulti-column tables (typical of 新旧対照表 PDFs).\n\nA Table that continues across a page break is ONE table (ISO 32000-2 §14.8.2.5\nNOTE 2) — `pages` is an array, and a table touching the requested page range is\nreturned whole. Cell text honours `/ActualText` replacements (§14.9.4).\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - pages (string, optional): Page range. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages.\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Markdown — `# Extracted Tables` summary block followed by one\n  `## Table N — Page(s) …` section per table with a GFM table.\n\n  JSON — `{ isTagged, tables: [{ pages, index, headerRows, bodyRows, footerRows }],\n  totalTables, pagesScanned, note? }`. `index` is the table's 1-based position\n  in logical content order, document-wide.\n\nLimitations:\n  - Untagged PDFs return an empty result and a `note`.\n  - An encrypted PDF whose key cannot be derived from the empty user password returns\n    `isTagged`, `tables` and `totalTables` as `null` with a `note`: the structure\n    tree could not be read, which is not the same answer as \"not tagged\".\n  - colspan/rowspan are not honoured (cells are listed in source order).\n  - Nested tables are not emitted separately (their text appears in the outer cell).\n\nExamples:\n  - Pull 新旧対照表 from a kaisei tsutatsu PDF for diffing\n  - Convert 帳票 (form template) tables into structured data",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "pages": {
+            "description": "Page range to process. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages.",
+            "type": "string"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "extract_structured_text",
+      "description": "Extract a tagged PDF's text in logical content order, with each piece labelled by its structure type.\n\nThis answers \"what is the text of the H1?\" — which read_text (flat, coordinate order),\ninspect_tags (structure, no text) and extract_tables (text, tables only) each cannot.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - pages (string, optional): Page range (\"1-5\", \"3\", \"1,3,5-7\"). Omit for all pages.\n    An element that touches the range is returned whole, even if it continues outside it.\n  - roles (string[], optional): Structure types to include, e.g. [\"H1\",\"H2\"] for an outline\n  - include_bbox (boolean): Also report where each element is drawn (default: false)\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  isTagged, the document language, and a flat list of elements in logical content order.\n  Each element has: role, depth (nesting; top level is 0), text, pages, and optionally\n  alt / label / rows / boxes / boxNote.\n\n  `scope` says which of the two readings behind that answer were done — reading the structure tree, and observing whether the characters under it have a route to Unicode (ISO 32000-2 §9.10.1). When the structure tree could not be read, `isTagged` and `elements` are `null` rather than `false` and `[]`: \"not read\" and \"read and found no tags\" are different answers.\n\n  The list is flat with a depth field rather than nested — a depth-first pre-order plus\n  depth encodes the tree exactly, so nothing is lost. Table is the exception and carries\n  rows, because a table is two-dimensional and depth cannot express \"row 2, column 3\".\n\nKey properties:\n  - Order is a depth-first traversal of the document's structure tree, which is how\n    ISO 32000-2 §14.8.2.5 defines logical content order.\n  - An element that spans pages stays ONE element (pages is an array). A paragraph\n    split across a page break is returned as one paragraph, not two.\n  - ActualText replaces the glyphs when present (§14.9.4: \"a replacement, not a\n    description\"). Alt is reported separately in alt and never as text — it describes\n    content that has no text (§14.9.3), so it must not leak into the body.\n  - Lbl (a list bullet or number) is reported in label, not mixed into text.\n  - Artifacts (page numbers, running heads) are excluded: §14.8.2.5 NOTE 3 puts them\n    outside the logical content order.\n\nWith include_bbox (answers \"where is this paragraph?\", so an annotation can be placed on it):\n  Each element gains boxes — ONE RECTANGLE PER PAGE, because an element that spans pages\n  has no single rectangle. Each is { page, rect: {x1,y1,x2,y2}, basis } in PDF default user\n  space (origin bottom-left, pt, already normalised), which is exactly what pdf-writer-mcp\n  add_annotation takes: no coordinate system has to be reinterpreted in between. /Rotate and\n  a shifted /CropBox do not affect it.\n\n  basis says how strong the claim is, and the two are not the same kind of claim:\n    - layout-attribute-bbox — the /BBox the file DECLARES for the element (ISO 32000-2\n      Table 379). A statement by the producer about its own geometry, reported as-is.\n      This is the only source for content that has no text.\n    - text-extent — MEASURED from the text the element owns: baseline origin plus the\n      font's ascent/descent. That is the line box, not the glyph outlines. Images and\n      vector drawings contribute nothing to it.\n\n  When a declared /BBox does not cover the text measured inside it, that disagreement is\n  reported in boxNote rather than smoothed over.\n\n  An element with no rectangle has no boxes and carries boxNote saying why — a Figure\n  holding one image is the usual case (§14.8.4.8.5: such an element \"should have a BBox\n  attribute\"). Absent is not zero-sized, and neither is guessed at.\n\nUntagged PDFs return isTagged: false with a reason and no elements. Nothing is guessed\nfrom coordinates — §14.8.2.5 NOTE 1 is explicit that page order need not match logical\norder, so a guess could not be trusted. To add a structure scaffold, use pdf-writer-mcp\nensure_tagged and retry.\n\nExamples:\n  - Extract a document outline: { file_path: \"/doc.pdf\", roles: [\"H1\",\"H2\",\"H3\"] }\n  - Get content for reflow / conversion, structure preserved: { file_path: \"/doc.pdf\" }\n  - Read the text of a specific section's pages: { file_path: \"/doc.pdf\", pages: \"4-6\" }\n  - Find where to put an annotation:\n    { file_path: \"/doc.pdf\", roles: [\"P\"], include_bbox: true } → hand a box straight to\n    pdf-writer-mcp add_annotation. To go the other way, from an object number a diff\n    reported to a rectangle, use locate_objects.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "pages": {
+            "description": "Page range to process. Format: \"1-5\", \"3\", or \"1,3,5-7\". Omit for all pages. An element that touches the range is returned whole, even if it continues outside it.",
+            "type": "string"
+          },
+          "roles": {
+            "description": "Structure types to include, e.g. [\"H1\",\"H2\"] to extract an outline. Omit for all roles.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include_bbox": {
+            "default": false,
+            "description": "Also report where each element is drawn, as boxes: one rectangle per page in PDF default user space (origin bottom-left, pt, normalised) — the form pdf-writer-mcp add_annotation takes. Each carries a basis: \"layout-attribute-bbox\" (the /BBox the file declares) or \"text-extent\" (measured from the element's text; images and vector art contribute nothing). Elements with no rectangle carry boxNote saying why. Off by default: it costs a second pass over every page.",
+            "type": "boolean"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "locate_objects",
+      "description": "Report where the given objects sit on the page.\n\nBridges \"which object\" to \"which coordinates\": pdf-verify-mcp's verify_integrity names the objects an incremental update changed, and pdf-writer-mcp's add_annotation wants a page number and a rectangle. The rectangle is returned in PDF user space (origin bottom-left, pt, x1 < x2 and y1 < y2 — ISO 32000-1 §7.9.5 normalised form), which is exactly what add_annotation takes.\n\nArgs:\n  - file_path (string): Absolute path to a local PDF file\n  - object_numbers (number[]): Object numbers to locate, e.g. [25, 27]\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Per object: whether it exists, its /Type and /Subtype, and the places it occupies, each with the basis the coordinates rest on:\n  - annotation-rect — the object's own /Rect. Exact.\n  - page-box — the object is a page; the rectangle is its crop/media box.\n  - page-content-stream — the object draws the page; the rectangle is the WHOLE page, not the part that changed.\n  - page-resource — a font, image or colour space used by the page. No rectangle exists for it.\n\nLimits (observations, not judgements):\n  - Narrowing a content stream to the paragraph that moved needs a content-stream walk with graphics state; this tool does not do it and says so rather than inventing a rectangle.\n  - An object that does not exist (freed by a later revision) is returned with found: false — not as \"no coordinates\".\n  - In an encrypted document, coordinates and types are still reliable (numbers and names are not encrypted, ISO 32000-1 §7.6.2) but field names are reported as null instead of mojibake.\n\nExamples:\n  - Turn verify_integrity's \"obj 27 was added after signing\" into a page and rectangle\n  - Find which page a changed form field widget is on before annotating it",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to a local PDF file (e.g., \"/path/to/document.pdf\")"
+          },
+          "object_numbers": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "description": "Object numbers to locate, e.g. [25, 27]. Typically the objects pdf-verify-mcp's verify_integrity reported as changed."
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path",
+          "object_numbers"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "compare_structure",
+      "description": "Compare the internal structures of two PDF documents and identify differences.\n\nArgs:\n  - file_path_1 (string): Absolute path to the first PDF file\n  - file_path_2 (string): Absolute path to the second PDF file\n  - response_format ('markdown' | 'json'): Output format (default: 'markdown')\n\nReturns:\n  Structural comparison including: property-by-property diff (page count, PDF version, encryption, tagged status, object counts, page dimensions, file size, catalog entries, signatures), font comparison (fonts unique to each file and shared fonts), and a summary.\n\n  The comparison needs both files, so an unreadable file is an error — but the error names which of the two could not be read, and says that the other one was fine.\n\nExamples:\n  - Compare two versions of the same document\n  - Verify structural consistency across PDF exports\n  - Identify differences in PDF generation pipelines",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path_1": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the first PDF file for comparison"
+          },
+          "file_path_2": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path to the second PDF file for comparison"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: \"markdown\" for human-readable, \"json\" for structured data",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "file_path_1",
+          "file_path_2"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "pdf-reader-mcp",
+    "version": "0.20.0"
+  },
+  "protocolVersion": null,
+  "instructions": "pdf-reader-mcp v0.20.0 — the running build identifies itself here so a stale install is visible without a tool call; compare against `npm view @shuji-bonji/pdf-reader-mcp version` when freshness matters.\n\nThis server OBSERVES what is inside a PDF. It does not judge whether it is correct.\n\nEverything it returns is an observation: extracted text, tables, the structure tree, fonts,\nannotations, images, and the *structure* of signature fields. Treat the output as evidence,\nnever as a verdict.\n\nWhat it does NOT do:\n  - No cryptographic verification. inspect_signatures reads signature fields structurally and\n    says so explicitly; whether a signature is mathematically valid is pdf-verify-mcp's answer\n    (verify_signatures / verify_integrity).\n  - No conformance judgement. Pass/fail against PDF/UA or PDF/A is pdf-verify-mcp's\n    validate_conformance, which delegates to veraPDF (validate_tagged / validate_metadata\n    were removed from this server).\n  - No incremental-update history (that is pdf-verify-mcp verify_integrity), and no OCR. It\n    does DETECT that OCR is needed and say so: every text-returning tool reports, per page,\n    whether the characters could be converted to Unicode at all (ISO 32000-2 §9.10.1) —\n    extracted / no_text_layer / not_extractable / not_observed. An empty extraction result is\n    therefore never on its own evidence that a page has no text. When a page cannot be read as\n    text, render_page rasterises it (PDFium-WASM, optional dependency) so a vision model can\n    read the pixels instead.\n  - No collapsing of two readings into one verdict. Taking the characters off a page and\n    observing whether those characters have a route to Unicode are separate readings that\n    can fail separately, so every text-returning tool reports which of them were done under\n    `scope`, and a field whose reading did not happen is `null` — never zero, false or an\n    empty string. \"Not read\" and \"read and found nothing\" are different answers, and this\n    server keeps them apart.\n\nIt DOES map content to coordinates: locate_objects turns an object number into a page and a\nrectangle, and extract_structured_text with include_bbox does the same for a structure element.\nBoth answer in the form pdf-writer-mcp add_annotation takes, so \"annotate the thing that\nchanged\" needs no coordinate conversion in between. Every rectangle names its basis — a\nmeasurement and a rectangle the file merely declares are not the same claim.\n\nWhere an observation here and a verdict from pdf-verify-mcp disagree, the verdict wins —\nthis server reads the file, the validator applies the rules.\n\nThis server never writes to the file system — every tool is read-only. That is also why\nread_url returns text and nothing more: it does not save the fetched bytes, so pointing the\nother tools at a URL's PDF means downloading the file first (the caller's job, not this\nserver's) and passing its local path.\n\nFor what the specification *requires*, ask pdf-spec-mcp. This server never quotes ISO clauses.",
+  "durationMs": 37303,
+  "stderr": "pdf-reader-mcp v0.20.0 running via stdio\n"
+}

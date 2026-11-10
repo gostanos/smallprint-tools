@@ -1,0 +1,2559 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "common-qa-mcp",
+  "version": "0.3.0",
+  "integrity": {
+    "dist": "sha512-5D4CB77QCJwHgRozkSGIM3XQcT2qw8uLWed/81UTjHeqf7J59yxBMNR2s4KubVT1V+d5M6znG9VBph9BXPng7A==",
+    "installed": "sha512-5D4CB77QCJwHgRozkSGIM3XQcT2qw8uLWed/81UTjHeqf7J59yxBMNR2s4KubVT1V+d5M6znG9VBph9BXPng7A=="
+  },
+  "bin": "node_modules/common-qa-mcp/dist/cli.js",
+  "main": "dist/server.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T01:41:16.392Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "project_info",
+      "description": "Validate the configured connection and return provider, org/project and entity counts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "qa_connect",
+      "description": "Point this MCP at your QA product so it can work with EXISTING test cases -- list them, read their steps, modify them, and run them. Ask the user for their app URL and a token; do not guess either. The token is a product session JWT (then `projectId` is required, because the token alone carries no project context) or an MCP API key (then pass auth:\"key\" and projectId is optional -- a key is already project-scoped).\n\nThe connection is VALIDATED before it is accepted (it fetches the project), so a wrong URL, token or project fails here with the reason rather than surfacing later as a confusing error, and a failed attempt leaves any working connection untouched. It is kept in memory for as long as the agent runs and is never written to disk or logged.\n\nNOT needed to record a new test case: recording, the live editor and drafts work offline with nothing configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "MCP endpoint to hop to — the product agent /mcp, used for recording and save-with-editor. OPTIONAL for a DIRECT (backend-REST) connection: pass `baseUrl` instead. Required when connecting through a remote product MCP. Must start with http:// or https://.",
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Bearer token: a product session JWT, or an MCP API key."
+          },
+          "projectId": {
+            "description": "Project id. REQUIRED with a JWT; optional with an API key.",
+            "type": "string"
+          },
+          "auth": {
+            "description": "Token kind. Omit to AUTO-DETECT from the token (JWT-shaped → \"jwt\"). \"jwt\" sends Authorization + x-project-id; \"key\" sends Authorization only.",
+            "type": "string",
+            "enum": [
+              "jwt",
+              "key"
+            ]
+          },
+          "product": {
+            "description": "Which product to route this connection to (the product selector; defaults to the primary product). For a remote product, also pass its agent MCP `/mcp` endpoint as `url`.",
+            "type": "string",
+            "enum": [
+              "walnut",
+              "simplifyqa"
+            ]
+          },
+          "baseUrl": {
+            "description": "The product BACKEND REST base (QA_BASE_URL) for DIRECT data ops (list/read/save/run). Provide this for a direct connection; `url` is only needed for recording / save-with-editor.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "qa_switch_project",
+      "description": "Switch to a different project on the SAME connection — reuses the current URL + token, so you do NOT re-enter them. Pass the project id; if the user names a project, call list_projects first to resolve the name to an id. Validated before it is adopted, so a bad id leaves the current project in place.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The project id to switch to. Use list_projects to find it by name."
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "qa_connection_status",
+      "description": "Report whether this MCP is connected to a QA product, which URL and project, how the credentials arrived (startup config vs qa_connect), and whether a token is present. The token value itself is never returned.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "qa_disconnect",
+      "description": "Forget the runtime URL and token and fall back to whatever the agent started with (usually nothing). Use it before connecting to a different app or project, or to stop this MCP reaching a backend at all. Offline authoring is unaffected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "actions_catalog",
+      "description": "Static per-platform action-type vocabulary (web/android/api/database/mainframe), used for offline draft validation. No network call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "web",
+              "android",
+              "api",
+              "database",
+              "mainframe"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tc_draft_create",
+      "description": "Create a new in-memory test-case draft from steps you author yourself. Nothing is persisted -- no disk, no backend, no network. Use tc_draft_open to hand it to the test-case editor for viewing.\n\nDO NOT USE THIS FOR A REAL WEB APPLICATION. Steps written here have no locators, so the test case cannot execute -- it only reads plausibly. Whenever there is an app you can reach (the user gives a URL, names an environment, or asks for a test of a real flow), call `recording_start` instead and drive the app with `browser_*`: that captures real locators, real element names and real parameters, and is the DEFAULT way to create a web test case. You do not need the user to say \"record\" -- if a test case for a real app is wanted, recording is how it is made.\n\nLegitimate uses: a manual test case (no automation), API/database steps that need no element binding, restructuring or drafting steps the user supplied verbatim, or sketching a plan when no app is reachable -- and say plainly that the result is not executable until recorded.\n\nINPUT VALUES MUST BE PARAMETERIZED. When a step has a value (text to type, a URL to open, an expected string), put a `${param}` token in its description AND set the step `value` -- e.g. description \"Enter ${username} in the Username field\", value \"standard_user\". On save these bind into the test case's default test-data row (the dataset the product auto-creates), so it can run with data. A value with no `${param}` in the same description has nowhere to bind and is dropped -- this is how the product stores web values (never inline on the step).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "automated",
+              "manual",
+              "playwright"
+            ]
+          },
+          "description": {
+            "description": "Optional test-case description / summary.",
+            "type": "string"
+          },
+          "storyRef": {
+            "description": "Link this test case to a USER STORY — its id or business key (US_123, from story_list / story_get). Used when drafting MANUAL test cases for a story so they save linked to it.",
+            "type": "string"
+          },
+          "folderOrModule": {
+            "description": "SimplifyQA-only: id of the MODULE / folder to file this test case under on save (from list_modules). ASK the user which module before drafting; SimplifyQA files test cases in a module tree. Walnut ignores this.",
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "actionType": {
+                  "type": "string"
+                },
+                "stepType": {
+                  "type": "string",
+                  "enum": [
+                    "web",
+                    "api",
+                    "control_flow",
+                    "function",
+                    "database",
+                    "android",
+                    "mainframe"
+                  ]
+                },
+                "objectRef": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "locators": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          },
+                          "unique": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "value"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string"
+                },
+                "expectedResult": {
+                  "type": "string"
+                },
+                "controlFlow": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "if",
+                        "else",
+                        "if_end",
+                        "while",
+                        "while_end"
+                      ]
+                    },
+                    "condition": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "selector": {
+                          "type": "string"
+                        },
+                        "objectId": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "variableName": {
+                          "type": "string"
+                        },
+                        "variableValue": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    "blockId": {
+                      "type": "string"
+                    },
+                    "maxIterations": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ]
+                },
+                "functionCall": {
+                  "type": "object",
+                  "properties": {
+                    "testCaseId": {
+                      "type": "string"
+                    },
+                    "testCaseName": {
+                      "type": "string"
+                    },
+                    "inputParams": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "continueOnFailure": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "testCaseId"
+                  ]
+                },
+                "api": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "db": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "flags": {
+                  "type": "object",
+                  "properties": {
+                    "skip": {
+                      "type": "boolean"
+                    },
+                    "screenshot": {
+                      "type": "boolean"
+                    },
+                    "continueOnFailure": {
+                      "type": "boolean"
+                    },
+                    "optional": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              },
+              "required": [
+                "description",
+                "actionType",
+                "stepType"
+              ]
+            }
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "tc_draft_update",
+      "description": "Apply one or more ops (set_meta | add_step | update_step | remove_step | move_step) to a draft. Steps renumber contiguously from 1 after every op.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string"
+          },
+          "ops": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "set_meta"
+                    },
+                    "patch": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "objective": {
+                          "type": "string"
+                        },
+                        "priority": {
+                          "type": "string",
+                          "enum": [
+                            "critical",
+                            "high",
+                            "medium",
+                            "low"
+                          ]
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "automated",
+                            "manual",
+                            "playwright"
+                          ]
+                        },
+                        "preconditions": {
+                          "type": "string"
+                        },
+                        "expectedOutcome": {
+                          "type": "string"
+                        },
+                        "folderOrModule": {
+                          "type": "string"
+                        },
+                        "storyRef": {
+                          "type": "string"
+                        },
+                        "tags": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "patch"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "add_step"
+                    },
+                    "at": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "step": {
+                      "type": "object",
+                      "properties": {
+                        "description": {
+                          "type": "string"
+                        },
+                        "actionType": {
+                          "type": "string"
+                        },
+                        "stepType": {
+                          "type": "string",
+                          "enum": [
+                            "web",
+                            "api",
+                            "control_flow",
+                            "function",
+                            "database",
+                            "android",
+                            "mainframe"
+                          ]
+                        },
+                        "objectRef": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "locators": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  },
+                                  "unique": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "value"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "expectedResult": {
+                          "type": "string"
+                        },
+                        "controlFlow": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "if",
+                                "else",
+                                "if_end",
+                                "while",
+                                "while_end"
+                              ]
+                            },
+                            "condition": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "selector": {
+                                  "type": "string"
+                                },
+                                "objectId": {
+                                  "type": "string"
+                                },
+                                "text": {
+                                  "type": "string"
+                                },
+                                "variableName": {
+                                  "type": "string"
+                                },
+                                "variableValue": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ]
+                            },
+                            "blockId": {
+                              "type": "string"
+                            },
+                            "maxIterations": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        "functionCall": {
+                          "type": "object",
+                          "properties": {
+                            "testCaseId": {
+                              "type": "string"
+                            },
+                            "testCaseName": {
+                              "type": "string"
+                            },
+                            "inputParams": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {}
+                            },
+                            "continueOnFailure": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "testCaseId"
+                          ]
+                        },
+                        "api": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "db": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "flags": {
+                          "type": "object",
+                          "properties": {
+                            "skip": {
+                              "type": "boolean"
+                            },
+                            "screenshot": {
+                              "type": "boolean"
+                            },
+                            "continueOnFailure": {
+                              "type": "boolean"
+                            },
+                            "optional": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      },
+                      "required": [
+                        "description",
+                        "actionType",
+                        "stepType"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "step"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "update_step"
+                    },
+                    "n": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "patch": {
+                      "type": "object",
+                      "properties": {
+                        "description": {
+                          "type": "string"
+                        },
+                        "actionType": {
+                          "type": "string"
+                        },
+                        "stepType": {
+                          "type": "string",
+                          "enum": [
+                            "web",
+                            "api",
+                            "control_flow",
+                            "function",
+                            "database",
+                            "android",
+                            "mainframe"
+                          ]
+                        },
+                        "objectRef": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "locators": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  },
+                                  "unique": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "value"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "expectedResult": {
+                          "type": "string"
+                        },
+                        "controlFlow": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "if",
+                                "else",
+                                "if_end",
+                                "while",
+                                "while_end"
+                              ]
+                            },
+                            "condition": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "selector": {
+                                  "type": "string"
+                                },
+                                "objectId": {
+                                  "type": "string"
+                                },
+                                "text": {
+                                  "type": "string"
+                                },
+                                "variableName": {
+                                  "type": "string"
+                                },
+                                "variableValue": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ]
+                            },
+                            "blockId": {
+                              "type": "string"
+                            },
+                            "maxIterations": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        "functionCall": {
+                          "type": "object",
+                          "properties": {
+                            "testCaseId": {
+                              "type": "string"
+                            },
+                            "testCaseName": {
+                              "type": "string"
+                            },
+                            "inputParams": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {}
+                            },
+                            "continueOnFailure": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "testCaseId"
+                          ]
+                        },
+                        "api": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "db": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "flags": {
+                          "type": "object",
+                          "properties": {
+                            "skip": {
+                              "type": "boolean"
+                            },
+                            "screenshot": {
+                              "type": "boolean"
+                            },
+                            "continueOnFailure": {
+                              "type": "boolean"
+                            },
+                            "optional": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "n",
+                    "patch"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "remove_step"
+                    },
+                    "n": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "n"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "move_step"
+                    },
+                    "n": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "to": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "n",
+                    "to"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "draftId",
+          "ops"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "tc_draft_get",
+      "description": "Fetch a draft by id: readable steps table, validation summary, and the neutral TestCase.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "draftId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tc_draft_discard",
+      "description": "Delete an in-memory draft. Nothing was ever persisted, so there is nothing else to undo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "draftId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "tc_draft_open",
+      "description": "Show this draft in the product's real editor. Prefers the local agent's own native window when the agent is running; otherwise returns a link to open. The draft rides in the URL fragment -- nothing is uploaded, no backend call is made.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string"
+          },
+          "frontendOrigin": {
+            "type": "string"
+          },
+          "useAgentWindow": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "draftId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tc_save",
+      "description": "Validate a draft, then PERSIST it to the connected product — creating a NEW test case, or UPDATING the one it was opened from (when the draft carries an id). Returns the product id + a deep link. Requires a live connection (qa_connect); the persist is forwarded to the product MCP.\n⚠️ CALL ONLY ON AN EXPLICIT USER SAVE INSTRUCTION (e.g. \"save it\", \"save this\", \"persist it\"). RECORDING or AUTHORING a test case is NOT a save instruction; neither is the user approving the content (\"looks good\", \"nice\"). After a recording/draft finishes, SHOW the steps and ASK — do NOT auto-save. When unsure whether a reply meant save, ASK rather than saving.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "description": "The draft id from tc_draft_create / tc_draft_open."
+          }
+        },
+        "required": [
+          "draftId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "tc_automate",
+      "description": "Promote an existing MANUAL test case to AUTOMATED, IN PLACE. Reads the test case, uses its steps as the guide to drive a REAL browser recording (the web sub-agent, with real locators), then REPLACES the same test case's steps with the recorded ones and flips its category to \"automated\" — keeping its story link. The manual steps are superseded (this is the promote-in-place the user chose). Pass `url` (the app entry point) unless the manual steps already contain one, and `extra` for credentials / data / what to assert; `profile` reuses a signed-in browser profile. Requires a live connection + the web recording agent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string",
+            "description": "The manual test case id (or business key TC_123) to automate."
+          },
+          "url": {
+            "description": "Starting URL for the recording (the app under test).",
+            "type": "string"
+          },
+          "profile": {
+            "description": "Reuse a signed-in browser profile (else a fresh one).",
+            "type": "string"
+          },
+          "extra": {
+            "description": "Extra guidance for the recorder: credentials, data, assertions.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tcId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "list_projects",
+      "description": "List the projects visible to the current connection — id, name and counts. Use this to resolve a project NAME to its id (e.g. before qa_switch_project when the user names a project). Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tc_list",
+      "description": "List or search EXISTING test cases in the connected product. Requires a live connection (qa_connect). Returns a summary list — id, title, priority, status, step count. Use tc_get to read one in full. This is a read-only, product-neutral tool: it works identically whichever product the session is connected to.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "description": "Free-text search over title / id.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Filter by status.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max results (paging).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "offset": {
+            "description": "Result offset (paging).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tc_get",
+      "description": "Read a single EXISTING test case in full — metadata plus its steps as a readable table — from the connected product. Requires a live connection (qa_connect). `id` accepts the product's id or business key. Product-neutral: same shape on any connected product.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The test case id (or business key) to read."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tc_delete",
+      "description": "Delete an existing test case in the connected product. It is RECOVERABLE from the product recycle bin, not a hard delete. Requires a live connection (qa_connect). `tcId` accepts the product's id or business key. Product-neutral.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string",
+            "description": "The test case id (or business key) to delete."
+          }
+        },
+        "required": [
+          "tcId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "story_list",
+      "description": "Pull up USER STORIES in the connected project — id, key (US_…), title, status. Give `search` to find stories by keyword (matches key / title / description / acceptance criteria). Use story_get to read one with its acceptance criteria, then draft manual test cases for it. Requires a live connection (qa_connect). Read-only and product-neutral.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "description": "Keyword to find stories (key / title / description / AC).",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sprintId": {
+            "description": "Only stories that belong to this sprint (from list_sprints).",
+            "type": "string"
+          },
+          "releaseId": {
+            "description": "Only stories that belong to this release (from list_releases).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "story_get",
+      "description": "Read a single user story — title, description, and ACCEPTANCE CRITERIA — from the connected product. `id` accepts the story id or its business key (US_123). Read this before drafting manual test cases so they cover the acceptance criteria. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Story id or business key (US_123)."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_releases",
+      "description": "List RELEASES in SimplifyQA — id, name, state, planned dates. `scope` is required: \"project\" = releases attached to the currently connected project, \"all\" = every release the token can see. ASK the user which scope before calling — do not guess. Requires a live connection (qa_connect). Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "all"
+            ],
+            "description": "ASK the user first: \"project\" = current project only, \"all\" = every release visible to the token."
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_sprints",
+      "description": "List SPRINTS in SimplifyQA — id, name, parent release, state, planned dates. Pass `releaseId` (from list_releases) to see sprints of one release; omit to see every sprint the token can see. To answer \"how many stories in this sprint\", follow up with story_list({ sprintId }). Requires a live connection. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "description": "Only sprints belonging to this release (from list_releases).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_modules",
+      "description": "List the MODULES (folder tree) test cases can be filed under in the connected project. ASK the user which module to file a draft under before tc_draft_create — pass the chosen id as `folderOrModule`. SimplifyQA-only: Walnut has no module tree. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "suite_list",
+      "description": "List the test suites in the connected product — id, name, and member (test-case) count. Use suite_get to read one with its ordered members, or suite_run to execute one. Requires a live connection (qa_connect). Read-only and product-neutral.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "suite_get",
+      "description": "Read a single test suite — its name, description, and ORDERED member test cases — from the connected product. Requires a live connection (qa_connect). `id` is the suite id. Product-neutral: same shape on any connected product.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The suite id to read."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "suite_add_testcases",
+      "description": "Add one or more EXISTING test cases to a suite (appended in order). `tcIds` accepts ids or business keys (e.g. TC_123) — use suite_list / tc_list to find them. NOTE: a suite can only hold test cases of ONE category (all manual OR all automated) — the product rejects a mix. Requires a live connection. Returns the updated suite with its members.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "suiteId": {
+            "type": "string",
+            "description": "The suite id to add to (from suite_list)."
+          },
+          "tcIds": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Test case ids / business keys to add."
+          }
+        },
+        "required": [
+          "suiteId",
+          "tcIds"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "suite_remove_testcases",
+      "description": "Remove one or more test cases from a suite. `tcIds` accepts ids or business keys; every occurrence of each is removed and the remaining members are reordered. Requires a live connection. Returns the updated suite with its members.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "suiteId": {
+            "type": "string",
+            "description": "The suite id to remove from."
+          },
+          "tcIds": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Test case ids / business keys to remove."
+          }
+        },
+        "required": [
+          "suiteId",
+          "tcIds"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "journal_grep",
+      "description": "Load a test case as NUMBERED steps to edit — from its recording JOURNAL when one exists (so a later journal_modify stays healer/re-record consistent), else from its persisted steps (the `source` is reported). Optional `pattern` filters shown rows (case-insensitive substring over the step description) to help locate a range for journal_modify. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string",
+            "description": "Test case id or business key."
+          },
+          "pattern": {
+            "description": "Case-insensitive substring filter over step descriptions.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tcId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "journal_modify",
+      "description": "Apply granular edits to an EXISTING test case and persist them, opening the result in the test-case editor. Use journal_grep first to see the numbered steps, then pass ops (numbers are from that view, 1-based):\n  • add_step / update_step / remove_step / move_step — edit individual steps\n  • wrap_in_loop { from, to, condition?, maxIterations? } — wrap steps from..to in a while loop\n  • wrap_in_if   { from, to, condition? } — wrap steps from..to in an if block\n  • insert_nested { at?, tcId, name? } — insert an existing test case as a nested step (reuse)\nFor a test case backed by a recording journal the journal is kept in sync (so healer / re-record stay consistent); others edit the persisted steps. NOTE: adding a brand-new INTERACTION step (click/type on a new element) via add_step has no captured locator, so it is a manual/non-executable step — capture new interactions by recording instead. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string",
+            "description": "Test case id or business key."
+          },
+          "ops": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "set_meta"
+                    },
+                    "patch": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "objective": {
+                          "type": "string"
+                        },
+                        "priority": {
+                          "type": "string",
+                          "enum": [
+                            "critical",
+                            "high",
+                            "medium",
+                            "low"
+                          ]
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "automated",
+                            "manual",
+                            "playwright"
+                          ]
+                        },
+                        "preconditions": {
+                          "type": "string"
+                        },
+                        "expectedOutcome": {
+                          "type": "string"
+                        },
+                        "folderOrModule": {
+                          "type": "string"
+                        },
+                        "storyRef": {
+                          "type": "string"
+                        },
+                        "tags": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "patch"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "add_step"
+                    },
+                    "at": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "step": {
+                      "type": "object",
+                      "properties": {
+                        "description": {
+                          "type": "string"
+                        },
+                        "actionType": {
+                          "type": "string"
+                        },
+                        "stepType": {
+                          "type": "string",
+                          "enum": [
+                            "web",
+                            "api",
+                            "control_flow",
+                            "function",
+                            "database",
+                            "android",
+                            "mainframe"
+                          ]
+                        },
+                        "objectRef": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "locators": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  },
+                                  "unique": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "value"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "expectedResult": {
+                          "type": "string"
+                        },
+                        "controlFlow": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "if",
+                                "else",
+                                "if_end",
+                                "while",
+                                "while_end"
+                              ]
+                            },
+                            "condition": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "selector": {
+                                  "type": "string"
+                                },
+                                "objectId": {
+                                  "type": "string"
+                                },
+                                "text": {
+                                  "type": "string"
+                                },
+                                "variableName": {
+                                  "type": "string"
+                                },
+                                "variableValue": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ]
+                            },
+                            "blockId": {
+                              "type": "string"
+                            },
+                            "maxIterations": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        "functionCall": {
+                          "type": "object",
+                          "properties": {
+                            "testCaseId": {
+                              "type": "string"
+                            },
+                            "testCaseName": {
+                              "type": "string"
+                            },
+                            "inputParams": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {}
+                            },
+                            "continueOnFailure": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "testCaseId"
+                          ]
+                        },
+                        "api": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "db": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "flags": {
+                          "type": "object",
+                          "properties": {
+                            "skip": {
+                              "type": "boolean"
+                            },
+                            "screenshot": {
+                              "type": "boolean"
+                            },
+                            "continueOnFailure": {
+                              "type": "boolean"
+                            },
+                            "optional": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      },
+                      "required": [
+                        "description",
+                        "actionType",
+                        "stepType"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "step"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "update_step"
+                    },
+                    "n": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "patch": {
+                      "type": "object",
+                      "properties": {
+                        "description": {
+                          "type": "string"
+                        },
+                        "actionType": {
+                          "type": "string"
+                        },
+                        "stepType": {
+                          "type": "string",
+                          "enum": [
+                            "web",
+                            "api",
+                            "control_flow",
+                            "function",
+                            "database",
+                            "android",
+                            "mainframe"
+                          ]
+                        },
+                        "objectRef": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "locators": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  },
+                                  "unique": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "value"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "expectedResult": {
+                          "type": "string"
+                        },
+                        "controlFlow": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "if",
+                                "else",
+                                "if_end",
+                                "while",
+                                "while_end"
+                              ]
+                            },
+                            "condition": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "selector": {
+                                  "type": "string"
+                                },
+                                "objectId": {
+                                  "type": "string"
+                                },
+                                "text": {
+                                  "type": "string"
+                                },
+                                "variableName": {
+                                  "type": "string"
+                                },
+                                "variableValue": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ]
+                            },
+                            "blockId": {
+                              "type": "string"
+                            },
+                            "maxIterations": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        "functionCall": {
+                          "type": "object",
+                          "properties": {
+                            "testCaseId": {
+                              "type": "string"
+                            },
+                            "testCaseName": {
+                              "type": "string"
+                            },
+                            "inputParams": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {}
+                            },
+                            "continueOnFailure": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "testCaseId"
+                          ]
+                        },
+                        "api": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "db": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "flags": {
+                          "type": "object",
+                          "properties": {
+                            "skip": {
+                              "type": "boolean"
+                            },
+                            "screenshot": {
+                              "type": "boolean"
+                            },
+                            "continueOnFailure": {
+                              "type": "boolean"
+                            },
+                            "optional": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "n",
+                    "patch"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "remove_step"
+                    },
+                    "n": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "n"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "move_step"
+                    },
+                    "n": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "to": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "n",
+                    "to"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "wrap_in_loop"
+                    },
+                    "from": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "to": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "condition": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "selector": {
+                          "type": "string"
+                        },
+                        "objectId": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "variableName": {
+                          "type": "string"
+                        },
+                        "variableValue": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    "maxIterations": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "from",
+                    "to"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "wrap_in_if"
+                    },
+                    "from": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "to": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "condition": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "selector": {
+                          "type": "string"
+                        },
+                        "objectId": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "variableName": {
+                          "type": "string"
+                        },
+                        "variableValue": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "from",
+                    "to"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "insert_nested"
+                    },
+                    "at": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "tcId": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "tcId"
+                  ]
+                }
+              ]
+            },
+            "description": "Ops to apply, in order."
+          }
+        },
+        "required": [
+          "tcId",
+          "ops"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "story_sync_testcases",
+      "description": "Compare a user STORY against every MANUAL test case linked to it (via storyRef) and return a structured drift report: what changed (ac_added / ac_reworded / ac_removed / step_stale) and the exact draft ops (add_step / update_step / remove_step) to apply.\n\nHOW TO APPLY THE REPORT (mandatory path — do not deviate):\n  For each entry in `results[]`:\n    1. tc_draft_open({ tcId: <testCaseId> })   ← loads the EXISTING TC as a draft, SAME id\n    2. tc_draft_update({ draftId, ops: <proposedOps> })\n    3. tc_save({ draftId })                    ← persists back to the SAME TC id\nDO NOT delete the test case and recreate it. DO NOT create a sibling/replacement TC. In-place edit preserves the TC id, run history, existing parameters, testdata bindings, and suite membership — all of which are lost on delete+recreate. Even when the drift is large (new AC, restructured flow), the correct action is still edit-in-place via the three steps above. If the user needs a NEW test case for scope the existing TC does not cover, that is a separate authoring task (tc_draft_create), NOT part of applying this drift report.\n\nAUTOMATION test cases are reported in `skipped` (v1 scope: manual only — automation drift needs recording, which is user-driven). Pass `testCaseIds` to limit the scan; otherwise the tool walks listTestCases and filters by storyRef (bounded by `scanLimit`, default 200). Report-only: this tool writes nothing itself. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "storyId": {
+            "type": "string",
+            "description": "Story id or business key (US_123)."
+          },
+          "testCaseIds": {
+            "description": "Restrict comparison to these TC ids/keys. Recommended for large projects; otherwise the tool walks up to `scanLimit` TCs.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sensitivity": {
+            "description": "Match-strictness for AC↔step overlap. strict=more drift flagged, loose=less. Default normal.",
+            "type": "string",
+            "enum": [
+              "strict",
+              "normal",
+              "loose"
+            ]
+          },
+          "scanLimit": {
+            "description": "Cap on how many TCs to fetch when `testCaseIds` is omitted. Default 200.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "storyId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "cloud_runners",
+      "description": "List the cloud runner VMs registered to the connected project and which are online. Use this to show the user the cloud options, or to pick a specific runner id for tc_run. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "local_agents",
+      "description": "List the LOCAL agents registered to the connected project and which are online. Use this to show the user their local run options, or to pick a specific agent id (its credential_id) to pass as `agentId` to a LOCAL tc_run / suite_run. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tc_run",
+      "description": "Execute ONE existing test case in the connected product. ASK the user — never assume — and in ORDER (this mirrors the product UI): (1) `mode` local/cloud, (2) `when` immediate/schedule, (3) for a schedule the start time + recurrence + timezone, (4) THEN offer the eligible agent/runner and pass the pick. `mode` decides WHERE it runs:\n  • 'local' — a local agent's own browser. Pass `agentId` from local_agents. For when:'immediate' only ONLINE agents are eligible (a run-now can't target an offline agent; omit to auto-pick your own online agent). For when:'schedule' ANY agent (online OR offline) is eligible and `agentId` is REQUIRED.\n  • 'cloud' — an online cloud runner VM (ONLINE-only whether now or scheduled). Pass `cloudRunnerId` from cloud_runners; for a schedule omit it to let the backend auto-pick a live VM at fire time.\nIF THE USER HAS NOT SAID local or cloud, ASK — this tool refuses when `mode` is omitted. For cloud, if no runner is online it reports that there are no active cloud runners (nothing is run).\n`when` decides WHEN it runs (this tool REFUSES when `when` is omitted — ASK the user):\n  • 'immediate' — dispatch now; returns the run id — poll run_status for the result.\n  • 'schedule' — create a schedule instead (requires `scheduledFor`); ASK the start time, recurrence, end date and timezone BEFORE offering an agent. Returns the schedule id.\nNOTE: MANUAL test cases cannot be run or scheduled by an agent — the backend rejects them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string",
+            "description": "The test case id (or business key) to run."
+          },
+          "mode": {
+            "description": "Where to run. REQUIRED — ASK the user if unstated (the tool refuses when omitted).",
+            "type": "string",
+            "enum": [
+              "local",
+              "cloud"
+            ]
+          },
+          "agentId": {
+            "description": "For local: a specific agent credential_id (from local_agents). when:'immediate' → must be an ONLINE agent (or omit to auto-pick your own online agent); when:'schedule' → REQUIRED, and may be an offline agent (it runs when it fires).",
+            "type": "string"
+          },
+          "environment": {
+            "description": "Environment id (Mongo id); a name is ignored and the project default is used.",
+            "type": "string"
+          },
+          "browser": {
+            "description": "Browser, default 'chromium' (bundled + isolated). Others: 'chrome'/'msedge' (installed channel), 'firefox', 'webkit'. NOTE: a schedule accepts only chromium/msedge/firefox/webkit.",
+            "type": "string"
+          },
+          "headless": {
+            "description": "Headless. Defaults: cloud=true, local=false. (Immediate runs only.)",
+            "type": "boolean"
+          },
+          "cloudRunnerId": {
+            "description": "For cloud: a specific ONLINE runner id (from cloud_runners). For when:'schedule' omit to auto-pick a live VM at fire time.",
+            "type": "string"
+          },
+          "deviceId": {
+            "description": "REQUIRED for ANDROID/IOS test cases — the target device id. LOCAL: adb serial or emulator name. CLOUD: the marketplace device name. Enumerate with android_list_devices.",
+            "type": "string"
+          },
+          "when": {
+            "description": "When to run — REQUIRED, ASK the user if unstated (the tool refuses when omitted). 'immediate' dispatches now; 'schedule' creates a schedule (needs scheduledFor).",
+            "type": "string",
+            "enum": [
+              "immediate",
+              "schedule"
+            ]
+          },
+          "scheduledFor": {
+            "description": "REQUIRED for when:'schedule' — ISO datetime of the first/only run (e.g. '2026-08-20T09:00:00Z').",
+            "type": "string"
+          },
+          "scheduleType": {
+            "description": "Recurrence for a schedule. Default 'once'. hourly/daily/weekdays require an endDate.",
+            "type": "string",
+            "enum": [
+              "once",
+              "hourly",
+              "daily",
+              "weekdays",
+              "weekly",
+              "monthly"
+            ]
+          },
+          "endDate": {
+            "description": "For a recurring schedule — ISO end date (required for hourly/daily/weekdays).",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA timezone for a schedule (e.g. 'Asia/Kolkata'). Default 'UTC'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tcId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "suite_run",
+      "description": "Execute an existing test SUITE — all its member test cases, in order — in the connected product. ASK the user — never assume — and in ORDER (mirrors the product UI): (1) `mode` local/cloud, (2) `when` immediate/schedule, (3) for a schedule the start time + recurrence + timezone, (4) THEN offer the eligible agent/runner. `mode` decides WHERE it runs:\n  • 'local' — a local agent's own browser, always serial. Pass `agentId` from local_agents. For when:'immediate' only ONLINE agents are eligible (omit to auto-pick your own online agent); for when:'schedule' ANY agent (online OR offline) is eligible and `agentId` is REQUIRED.\n  • 'cloud' — online cloud runner VM(s) (ONLINE-only whether now or scheduled). Pass `cloudRunnerId` from cloud_runners; for a schedule omit it to auto-pick a live VM at fire time.\nIF THE USER HAS NOT SAID local or cloud, ASK — this tool refuses when mode is omitted. For cloud, if no runner is online it reports that there are no active cloud runners (nothing is run).\n`when` decides WHEN it runs (this tool REFUSES when `when` is omitted — ASK the user):\n  • 'immediate' — dispatch now; returns the suite-run id — poll run_status for progress (per-test-case results under `children`) and run_stop to cancel.\n  • 'schedule' — create a schedule instead (requires `scheduledFor`); ASK the start time, recurrence, end date and timezone BEFORE offering an agent. Returns the schedule id.\nNOTE: a suite of only MANUAL test cases cannot be run or scheduled by an agent — the backend rejects it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "suiteId": {
+            "type": "string",
+            "description": "The suite id to run (from suite_list / suite_get)."
+          },
+          "mode": {
+            "description": "Where to run. REQUIRED — ASK the user if unstated (the tool refuses when omitted).",
+            "type": "string",
+            "enum": [
+              "local",
+              "cloud"
+            ]
+          },
+          "agentId": {
+            "description": "For local: a specific agent credential_id (from local_agents). when:'immediate' → must be ONLINE (or omit to auto-pick your own online agent); when:'schedule' → REQUIRED, may be offline.",
+            "type": "string"
+          },
+          "environment": {
+            "description": "Environment id (Mongo id); a name is ignored and the project default is used.",
+            "type": "string"
+          },
+          "browser": {
+            "description": "Browser, default 'chromium'. Others: 'chrome'/'msedge', 'firefox', 'webkit'. NOTE: a schedule accepts only chromium/msedge/firefox/webkit.",
+            "type": "string"
+          },
+          "headless": {
+            "description": "Headless. Defaults: cloud=true, local=false. (Immediate runs only.)",
+            "type": "boolean"
+          },
+          "cloudRunnerId": {
+            "description": "For cloud: a specific ONLINE runner id (from cloud_runners). For when:'schedule' omit to auto-pick a live VM at fire time.",
+            "type": "string"
+          },
+          "strategy": {
+            "description": "Cloud dispatch order across the suite (immediate runs). Default serial; local is always serial.",
+            "type": "string",
+            "enum": [
+              "serial",
+              "batch",
+              "dynamic"
+            ]
+          },
+          "maxConcurrent": {
+            "description": "Cloud batch/dynamic only — max test cases running at once (immediate runs).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "terminateOnFailure": {
+            "description": "Stop dispatching remaining test cases after the first failure (immediate runs).",
+            "type": "boolean"
+          },
+          "when": {
+            "description": "When to run — REQUIRED, ASK the user if unstated (the tool refuses when omitted). 'immediate' dispatches now; 'schedule' creates a schedule (needs scheduledFor).",
+            "type": "string",
+            "enum": [
+              "immediate",
+              "schedule"
+            ]
+          },
+          "scheduledFor": {
+            "description": "REQUIRED for when:'schedule' — ISO datetime of the first/only run (e.g. '2026-08-20T09:00:00Z').",
+            "type": "string"
+          },
+          "scheduleType": {
+            "description": "Recurrence for a schedule. Default 'once'. hourly/daily/weekdays require an endDate.",
+            "type": "string",
+            "enum": [
+              "once",
+              "hourly",
+              "daily",
+              "weekdays",
+              "weekly",
+              "monthly"
+            ]
+          },
+          "endDate": {
+            "description": "For a recurring schedule — ISO end date (required for hourly/daily/weekdays).",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA timezone for a schedule (e.g. 'Asia/Kolkata'). Default 'UTC'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suiteId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "run_status",
+      "description": "Read the status of a run started by tc_run — state (queued/running/passed/failed/stopped/error), step progress, and a link. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The run id returned by tc_run."
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "run_stop",
+      "description": "Signal a running execution to stop. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The run id to stop."
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "schedule_list",
+      "description": "List the scheduled runs in the connected project — each with WHAT it runs (test case / suite), its cadence, next run time, status (scheduled / running / paused / cancelled), where it runs + the pinned agent, and its browser. Use this to find a schedule to edit, pause/resume, cancel, or delete. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "schedule_update",
+      "description": "Change a schedule's time / recurrence / end date / timezone / browser / environment, or RE-PIN its agent. Pass `scheduleId` (from schedule_list) and ONLY the fields to change. To re-pin: mode:'local' + `agentId` (from local_agents), or mode:'cloud' + a runner's `cloudRunnerCredentialId` (the `credentialId` from cloud_runners). Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scheduleId": {
+            "type": "string",
+            "description": "The schedule id (from schedule_list)."
+          },
+          "scheduledFor": {
+            "description": "New start / next-run ISO datetime.",
+            "type": "string"
+          },
+          "scheduleType": {
+            "description": "New recurrence.",
+            "type": "string",
+            "enum": [
+              "once",
+              "hourly",
+              "daily",
+              "weekdays",
+              "weekly",
+              "monthly"
+            ]
+          },
+          "endDate": {
+            "description": "New ISO end date (for recurring schedules).",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "New IANA timezone (e.g. 'Asia/Kolkata').",
+            "type": "string"
+          },
+          "browser": {
+            "description": "New browser (schedules accept chromium/msedge/firefox/webkit, not chrome).",
+            "type": "string",
+            "enum": [
+              "chromium",
+              "msedge",
+              "firefox",
+              "webkit"
+            ]
+          },
+          "environment": {
+            "description": "New environment id (Mongo id).",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Re-pin target: pair with agentId (local) or cloudRunnerCredentialId (cloud).",
+            "type": "string",
+            "enum": [
+              "local",
+              "cloud"
+            ]
+          },
+          "agentId": {
+            "description": "Local re-pin: an agent credential_id from local_agents.",
+            "type": "string"
+          },
+          "cloudRunnerCredentialId": {
+            "description": "Cloud re-pin: a runner's credentialId from cloud_runners.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheduleId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "schedule_control",
+      "description": "Change a schedule's state: `pause` (stop it firing but keep it — reversible with `resume`), `resume` (re-enable a paused schedule), or `cancel` (stop its pending / live run). To remove a schedule entirely, use schedule_delete instead. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scheduleId": {
+            "type": "string",
+            "description": "The schedule id (from schedule_list)."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "pause",
+              "resume",
+              "cancel"
+            ],
+            "description": "pause / resume / cancel."
+          }
+        },
+        "required": [
+          "scheduleId",
+          "action"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "schedule_delete",
+      "description": "Permanently DELETE a schedule (and tear down any run it currently owns). This cannot be undone — to only stop it temporarily use schedule_control (pause / cancel). CONFIRM with the user before deleting. Requires a live connection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scheduleId": {
+            "type": "string",
+            "description": "The schedule id (from schedule_list)."
+          }
+        },
+        "required": [
+          "scheduleId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "tc_get_testdata",
+      "description": "Fetch the default iteration (template row) for TC `tcId` — the parameter list plus the CURRENT seed values. Call this FIRST when you plan to generate testdata: use the seeds + the test case's steps (from tc_get) to reason about what realistic values look like for THIS flow, then pass those values to tc_generate_testdata. Example: for a SauceDemo login flow, seeds tell you the valid usernames and the constant password/product/prices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string",
+            "description": "Test case id (or business key like TC_123)."
+          },
+          "environmentType": {
+            "description": "Env key; defaults to the first configured env for the project (falls back to \"general\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tcId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tc_generate_testdata",
+      "description": "Persist up to 20 testdata rows for TC `tcId`. Two ways to feed values:\n  1) Model-generated — pass `rows: [{paramName: value}, ...]`. Call tc_get_testdata first for the parameter names + seeds, tc_get for step context, then produce rows that fit the flow.\n  2) Formula-driven — pass `formulas: {paramName: {name, args?}}` (names from tc_list_formulas). The adapter evaluates each formula per row via /tm/customFormula and stamps both the value and the source `=NAME(...)` expression. Use `count` to say how many rows, or provide `rows` for constant columns; mixing is fine (formulas win over row values for the same param).\nRows are appended as new iterations; they do not become the default. Hard cap: 20 rows.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string",
+            "description": "Test case id (or business key like TC_123)."
+          },
+          "rows": {
+            "description": "Rows keyed by param name (from tc_get_testdata). 1..20 rows. Omit when using formulas + count.",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "count": {
+            "description": "How many rows to generate when using formulas without explicit rows. Ignored if rows is set.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "formulas": {
+            "description": "Per-column formula assignments applied to every row. Outer keys are param names from tc_get_testdata. Wins over rows[i] for the same key.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "RAW formula name from tc_list_formulas — the identifier only, no parens, no arg list. Correct: \"FIRST_NAME\". Wrong: \"FIRST_NAME()\", \"FIRST_NAME(country,sex)\"."
+                },
+                "args": {
+                  "description": "Named args. Keys MUST match Formula.parameters[].keyName exactly, no trailing colons or extra whitespace. Correct: {\"country name\": \"United States\"}. Wrong: {\"country name:\": \"...\"}.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          },
+          "environmentType": {
+            "description": "Env key; defaults to whatever tc_get_testdata resolved.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tcId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "tc_list_formulas",
+      "description": "Return the formulas the connected project can use for testdata generation — DEFAULT prefabs (FIRST_NAME, RANDOM_EMAIL, PHONE_NUMBER, …) plus any CUSTOM formulas defined at customer or project scope. Each entry carries a signature (parameter list), an example, and the accepted argument keys. Feed a chosen `{name, args}` into `tc_generate_testdata.formulas` and that column will be auto-filled fresh per row via the product /tm/customFormula service. Use this when the user says \"use a formula\" / \"generate email with our formula\" / \"list formulas\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tc_heal",
+      "description": "Replays a failed test case live, captures the DOM at the failing step, classifies the failure (LOCATOR / TIMING / IFRAME / STALE / ASSERTION_TEXT / DATA / APP_BUG / ENV / FLAKY / UNKNOWN), and proposes a fix. Every response carries the classification and a human rationale — even when the failure is not healable (product bug, bad data, env).\n\n  • mode='suggest' (default) — diagnose and propose, do not write.\n  • mode='apply' — persist the fix as a NEW test-case version (never overwrites).\n  • mode='apply_and_verify' — apply then re-run the test case; result in `verified`.\n\n  • scope='tc' (default) — patch the step's own objectRef.locators (TC-local).\n  • scope='object' — patch the shared object's attribute chain (heals every TC that uses it; opt-in, higher blast radius).\n\nLocator fixes always APPEND a new strategy; the original locators are preserved as fallbacks so a bad proposal cannot destroy the recorded intent. Runs are capped at `maxAttemptsPerStep` retries per step (default 3).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string",
+            "description": "The failing test case id."
+          },
+          "runId": {
+            "description": "Specific failed run to heal against. Omit to use the latest failed run for tcId.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Default 'suggest'. 'apply' persists a new version; 'apply_and_verify' also re-runs the TC.",
+            "type": "string",
+            "enum": [
+              "suggest",
+              "apply",
+              "apply_and_verify"
+            ]
+          },
+          "scope": {
+            "description": "Default 'tc'. 'object' patches the shared object library — heals every TC using it.",
+            "type": "string",
+            "enum": [
+              "tc",
+              "object"
+            ]
+          },
+          "url": {
+            "description": "Override start URL for the replay session (if the TC lacks a navigate step).",
+            "type": "string",
+            "format": "uri"
+          },
+          "maxAttemptsPerStep": {
+            "description": "Cap on heal retries at the failing step. Default 3.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "dryRun": {
+            "description": "Classify + propose from existing objectRef.locators only. No browser session opened.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tcId"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "common-qa-mcp",
+    "version": "0.3.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 10257,
+  "stderr": "[qa-mcp] stdio server ready — offline (draft authoring only; set QA_MCP_URL / QA_MCP_TOKEN / QA_MCP_PROJECT_ID to connect)\n"
+}

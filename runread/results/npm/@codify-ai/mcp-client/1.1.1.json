@@ -1,0 +1,705 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@codify-ai/mcp-client",
+  "version": "1.1.1",
+  "integrity": {
+    "dist": "sha512-24oc3V+anuekpQnlrk43vnD+1uBVVnh/1rSgvMR6R9HS9Ap1vV6Cugj8uRtLENunnzTDdAAftfkaZ3t4bpV+mA==",
+    "installed": "sha512-24oc3V+anuekpQnlrk43vnD+1uBVVnh/1rSgvMR6R9HS9Ap1vV6Cugj8uRtLENunnzTDdAAftfkaZ3t4bpV+mA=="
+  },
+  "bin": "node_modules/@codify-ai/mcp-client/./dist/index.js",
+  "main": "./dist/index.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T00:09:42.091Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_guidelines",
+      "description": "会话入口：当用户要使用 Codify / MasterGo 能力时先调用本工具。scope 为字符串数组，不传时默认 [\"page-generate\"]。可选值：page-generate / component-import / component-generate / variable-import / variable-generate。component-generate 仅用于 agent_create_component 创建母版组件/组件集，团队库页面生成请用 [\"page-generate\",\"component-import\",\"variable-import\"]。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "page-generate",
+                "component-import",
+                "component-generate",
+                "variable-import",
+                "variable-generate"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false,
+        "description": "可选参数：scope，字符串数组，元素取值 page-generate / component-import / component-generate / variable-import / variable-generate。不传默认 [\"page-generate\"]。多个 scope 同传会附加 Final Hard Gate。",
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "design_page",
+      "description": "【页面设计主入口 · 必须首选】当用户表达「设计 / 创建 / 做一个 / 帮我画 / 生成 一个页面」等任意页面级生成需求时，必须首先调用本工具，禁止直接调用 submit_page_to_canvas 跳过本流程。本工具负责需求拆解、设计来源选择、HTML+CSS 代码生成，并最终在产出完整页面 HTML 后调用 submit_page_to_canvas 推送到画布。页面设计场景禁止为了提交而先创建/写入本地 HTML 文件；应直接生成 HTML 并调用 submit_page_to_canvas(code=完整页面HTML)。若用户要求一次生成多个页面，必须逐页生成并逐页提交：每完成一个页面的完整 HTML 后，立即调用 submit_page_to_canvas(code=该页面HTML) 发送到画布；禁止把多个页面合并成一次提交，也禁止等所有页面都完成后再统一提交。流程：先让用户在「自由绘制 / 使用本地组件 / 使用订阅的团队库」三者中选一；选『本地组件』会刷新当前文件本地组件/变量/图标快照；选『订阅的团队库』会先列出订阅团队库供用户选择，再刷新对应团队库快照；模型尽可能从快照中寻找适合的组件、图标和变量来设计页面，但不要求完全使用组件搭建整页，团队库能力不足时允许自由绘制补足。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "requirement": {
+            "type": "string",
+            "description": "界面需求描述，例如：\"一个美观的登录页面\"、\"现代化的仪表盘界面\"等。"
+          },
+          "code": {
+            "type": "string",
+            "description": "【可选】若已生成完整代码（可含 Markdown + <main>），传入后将自动提取 <main> 并直接提交到画布。"
+          },
+          "projectDir": {
+            "type": "string",
+            "description": "【选填】用户当前工作区的根目录绝对路径。变量场景与组件库场景下用于读取/写入 .codify 落盘数据。"
+          },
+          "designSource": {
+            "type": "string",
+            "enum": [
+              "free-draw",
+              "local-components",
+              "component-library"
+            ],
+            "description": "【必填（流程）】设计来源三选一：free-draw（自由绘制）/ local-components（使用当前文件本地组件）/ component-library（使用订阅的团队库）。每次调用 design_page 都应先让用户明确选择。"
+          },
+          "userConfirmedDesignSource": {
+            "type": "boolean",
+            "default": false,
+            "description": "【必填（流程）】是否已完成本次「设计来源三选一」的用户确认。每次新页面流程都应传 true 才可继续。"
+          },
+          "teamLibraryName": {
+            "type": "string",
+            "description": "【订阅团队库模式必填】用户确认选择的订阅团队库名称。每次都需要重新确认，不允许助手自动选库。本地组件模式无需传。"
+          },
+          "teamLibraryId": {
+            "type": "string",
+            "description": "【订阅团队库模式推荐】用户确认选择的订阅团队库 ID。若已通过 get_library_list 拿到 ID，建议同时传入；用于精确判定是否仍是同一个团队库，避免名字归一化撞车的不同库被误复用。"
+          }
+        },
+        "required": [
+          "requirement"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_code",
+      "description": "获取代码：通过 codify://getCode/{contentId} 从 Codify MCP获取代码。常规的\"获取选中节点快照\"请优先使用 get_selection_node；导出前端可渲染 HTML 请使用 get_frontend_code。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contentId": {
+            "type": "string",
+            "description": "从Codify MCP复制图层的指令 (contentId)"
+          },
+          "documentId": {
+            "type": "string",
+            "description": "当前 MasterGo 文档 ID。"
+          },
+          "documentPageId": {
+            "type": "string",
+            "description": "当前 MasterGo 页面 ID。"
+          },
+          "projectDir": {
+            "type": "string",
+            "description": "【必填】用户当前工作区的根目录绝对路径"
+          },
+          "outDir": {
+            "type": "string",
+            "description": "【必填】保存代码和资源的绝对路径"
+          }
+        },
+        "required": [
+          "contentId",
+          "projectDir",
+          "outDir"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_code_list",
+      "description": "代码列表：获取所有可用的代码列表",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "无需参数获取代码列表",
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_user_info",
+      "description": "用户信息：获取当前登录用户的信息，包括配额、团队等",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "获取当前用户信息",
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_version",
+      "description": "版本信息：当用户询问 Codify MCP / 当前 MCP / Codify MCP 的版本号时，调用本工具获取准确版本。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "无需参数获取版本信息",
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_library_list",
+      "description": "订阅团队库列表：获取当前文件已订阅/已加载的远端团队库列表（名称、ID、组件数、样式数），不包含当前文件本地组件。本地组件请走 design_page 的 local-components 或 get_component_info({ teamLibraryName: \"当前文件\" })。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "无需参数",
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_component_info",
+      "description": "组件信息：获取本地组件或指定订阅团队库组件数据并落盘为本地快照，用于基于组件/变量/图标生成页面。teamLibraryName 为“当前文件”或 teamLibraryId 为 local-* 时刷新当前文件本地组件/变量/图标；指定订阅团队库时会从远端重新拉取并覆盖落盘。未传 teamLibraryId/teamLibraryName 时仅返回订阅团队库列表供选择。生成页面规则见 component-import.md。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "description": "【必填】用户当前工作区的根目录绝对路径（用于落盘）"
+          },
+          "teamLibraryId": {
+            "type": "string",
+            "description": "【选填】团队库 ID。若提供则直接获取该库组件信息。"
+          },
+          "teamLibraryName": {
+            "type": "string",
+            "description": "【选填】团队库名称。若未提供 teamLibraryId，可用名称自动匹配团队库 ID。"
+          }
+        },
+        "required": [
+          "projectDir"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_variables",
+      "description": "变量列表：获取当前 MasterGo 文件中的全部本地变量。只读取当前文件，不读取远程团队库。返回 documentName、documentId、variables（updateVariables 同款批量数组）；兼容接口仅返回数组时的形态。每次成功后将 variables 字段写入 .codify/library/local-{documentId}/variable.json。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "【必填】用户当前工作区的根目录绝对路径；变量数组写入该目录下的 .codify/library/local-{documentId}/variable.json。"
+          }
+        },
+        "required": [
+          "projectDir"
+        ],
+        "additionalProperties": false,
+        "description": "必填：projectDir（工作区根目录绝对路径，用于落盘）。",
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "update_variables",
+      "description": "变量更新：创建、修改、排序当前 MasterGo 文件变量；删除变量必须使用 agent_remove_variable。固定流程：先调用 get_variables 落盘；创建一套变量时先提交基础变量，重新 get_variables，再提交语义/引用变量，最后再次 get_variables。本工具首次调用会自动加载 variable-generate 规则。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "【必填】用户当前工作区的根目录绝对路径。"
+          },
+          "documentId": {
+            "type": "string",
+            "description": "【选填】当前 MasterGo 文档 ID；未传 filePath/variables/operations 时，用于定位 .codify/library/local-{documentId}/variable.json。"
+          },
+          "documentPageId": {
+            "type": "string",
+            "description": "【选填】当前 MasterGo 页面 ID。"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "【选填】变量 JSON 文件绝对路径。通常是 get_variables 落盘后的 .codify/library/local-{documentId}/variable.json。"
+          },
+          "variables": {
+            "description": "【选填】变量数组，格式与 get_variables 落盘文件一致；也可传 { variables: [...] }。"
+          },
+          "operations": {
+            "description": "【选填】操作数组；用于 createVariable/updateVariable/moveVariable 等非完整快照式操作。删除请使用 agent_remove_variable。"
+          }
+        },
+        "required": [
+          "projectDir"
+        ],
+        "additionalProperties": false,
+        "description": "必填：projectDir。提交数据三选一：filePath、variables、operations；若只传 documentId，则读取 .codify/library/local-{documentId}/variable.json。",
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "submit_page_to_canvas",
+      "description": "【内部提交工具 · 仅在 design_page 流程结束后调用】将已生成完整 HTML 推送到 Codify MCP 画布。⚠️ 当用户说『设计 / 创建 / 做一个 / 帮我画 / 生成 一个页面』时，禁止直接调用本工具，必须先调用 design_page 走完需求拆解与设计来源选择流程；本工具只负责把 design_page 产出的最终 HTML 提交到画布。页面设计交付必须直接使用 code 参数提交，禁止为了提交而先创建/写入本地 HTML 文件。一次工具调用只提交一个页面；多页面任务必须由 design_page 逐页生成并逐页调用本工具提交。filePath 仅用于用户已经明确提供的现成本地 HTML 文件，不得由模型临时写文件后再传入。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "【可选】要发送的 HTML 代码内容。页面设计交付时应直接使用本参数传入完整页面 HTML。"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "【可选】现成本地 HTML 文件的绝对路径。仅当用户明确提供已有文件时使用；禁止为了页面设计提交而临时创建 HTML 文件再传此参数。"
+          },
+          "projectDir": {
+            "type": "string",
+            "description": "【必填】用户当前工作区的根目录绝对路径"
+          },
+          "saveCodeToLocal": {
+            "type": "boolean",
+            "default": false,
+            "description": "是否将 MasterGo 返回的渲染结果保存到本地 .codify 目录（落盘机制）"
+          }
+        },
+        "required": [
+          "projectDir"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agent_create_component",
+      "description": "创建组件：创建一个 MasterGo 母版组件或组件集（变体）。仅在创建母版组件/组件集时，先调用 get_guidelines(scope=[\"component-generate\"]) 加载组件生成规则；团队库页面生成不要使用 component-generate。本工具仅负责发送到 MasterGo，不做规范兜底校验。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "组件的纯 HTML 字符串。根节点必须包含 data-type=\"component\" 或 \"component-set\"；若为 component-set，变体节点必须是其直接子节点，并使用 data-variant-* 扁平声明变体属性。"
+          },
+          "projectDir": {
+            "type": "string",
+            "description": "【选填】用户当前工作区的根目录绝对路径。若传入，工具会探测 .codify/library/local-{documentId}/ 是否已落盘当前文件变量；存在则自动追加 variable-import 规则，让母版组件优先 var(...) 引用变量，保持设计系统的视觉语言一致。"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_selection_code",
+      "description": "获取设计节点快照：拉取 MasterGo 当前选中图层（或指定图层）的最新节点 HTML，并按既有逻辑同步到本地 .codify 设计基准文件。本工具保留 d2c 组件语义（enableComponentSyntax=true，可能输出 <ui-component>），仅用于读取/同步画布上下文和后续画布修改；生成前端可运行页面请使用 get_frontend_code。不要在没有用户具体修改诉求的情况下，紧接着自动调用 agent_update_node / agent_replace_node / sync_to_design。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "description": "【必填】用户当前工作区的根目录绝对路径"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "【选填】MasterGo图层ID (例如 123:456)。如果提供，将直接拉取该ID的代码；如果不提供，将拉取当前选中图层的代码。"
+          },
+          "targetNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "【选填】批量目标图层 ID 列表，传入后按列表顺序拉取节点快照。"
+          },
+          "syncToBase": {
+            "type": "boolean",
+            "default": true,
+            "description": "【选填】是否将获取到的子图层代码同步回本地 .codify 目录下的基准 HTML 文件（合并更新）。默认为 true。"
+          }
+        },
+        "required": [
+          "projectDir"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_selection_node",
+      "description": "获取设计节点快照：拉取 MasterGo 当前选中图层（或指定图层）的最新节点 HTML，并按既有逻辑同步到本地 .codify 设计基准文件。本工具保留 d2c 组件语义（enableComponentSyntax=true，可能输出 <ui-component>），仅用于读取/同步画布上下文和后续画布修改；生成前端可运行页面请使用 get_frontend_code。不要在没有用户具体修改诉求的情况下，紧接着自动调用 agent_update_node / agent_replace_node / sync_to_design。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "description": "【必填】用户当前工作区的根目录绝对路径"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "【选填】MasterGo图层ID (例如 123:456)。如果提供，将直接拉取该ID的代码；如果不提供，将拉取当前选中图层的代码。"
+          },
+          "targetNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "【选填】批量目标图层 ID 列表，传入后按列表顺序拉取节点快照。"
+          },
+          "syncToBase": {
+            "type": "boolean",
+            "default": true,
+            "description": "【选填】是否将获取到的子图层代码同步回本地 .codify 目录下的基准 HTML 文件（合并更新）。默认为 true。"
+          }
+        },
+        "required": [
+          "projectDir"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_frontend_code",
+      "description": "获取前端可渲染代码：拉取 MasterGo 当前选中图层（或指定图层）的普通 HTML（enableComponentSyntax=false，不输出 <ui-component>），用于生成可在浏览器/前端项目中渲染的页面代码。本工具默认不落盘到 .codify 或任何目录；如需写文件，必须先询问用户保存目录并传入 outDir。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "description": "【必填】用户当前工作区的根目录绝对路径。outDir 必须解析在该目录内。"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "【选填】MasterGo图层ID (例如 123:456)。如果提供，将直接拉取该ID的前端代码；如果不提供，将拉取当前选中图层。"
+          },
+          "targetNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "【选填】批量目标图层 ID 列表，传入后按列表顺序拉取前端代码。"
+          },
+          "outDir": {
+            "type": "string",
+            "description": "【选填】用户明确指定的保存目录。相对路径按 projectDir 解析；不传时只返回代码，不写入本地文件。"
+          },
+          "fileName": {
+            "type": "string",
+            "description": "【选填】保存的 HTML 文件名，例如 index.html。不传时根据节点名称和 ID 生成。"
+          },
+          "writeToFile": {
+            "type": "boolean",
+            "default": false,
+            "description": "【选填】是否写入本地文件。为 true 时必须传 outDir；若只传 outDir，也会写入文件。"
+          }
+        },
+        "required": [
+          "projectDir"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_selection_image",
+      "description": "获取节点预览图：拉取 MasterGo 当前选中图层（或指定图层）的渲染预览图（默认 PNG）。仅在你需要看一眼设计稿做视觉参考时调用，例如：\"参考设计稿还原\"、\"按图重新写一下\"、\"对照视觉调整\"、\"复刻这个设计\"、\"match the design\" 等。本工具会返回 image content 用于多模态判断，但不会把图片写入本地文件。日常纯代码同步/小修请使用 get_selection_node，不要调用本工具。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "description": "【必填】用户当前工作区的根目录绝对路径；仅为保持工具调用参数一致，本工具不会写入预览图文件。"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "【选填】MasterGo图层ID (例如 123:456)。如果提供，将直接导出该ID的预览图；如果不提供，将导出当前选中图层。"
+          },
+          "targetNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "【选填】批量目标图层 ID 列表，传入后按列表顺序逐个导出预览图。"
+          }
+        },
+        "required": [
+          "projectDir"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agent_update_node",
+      "description": "局部修改：处理现有节点的默认工具。文本、样式、布局、组件 props 及大多数局部结构调整，都优先使用 agent_update_node。但替换图片内容 / 换图 / 修改 <img src> 必须使用 agent_replace_node；agent_update_node 仅适合修改图片节点的尺寸、圆角、边框、阴影、布局等样式。两种合法用法,按需选择：\n  1) **仅改父容器自身的样式/属性**(保留所有子节点): 传入根容器,内部留空。例如把容器背景改为黑色,只需发 `<div data-node-id=\"X\" style=\"background:#000\"></div>`，无需任何占位文本/注释，系统会自动保留所有原有子节点。\n  2) **改父容器 + 重建/调整子结构**: 必须传入完整子树,包括所有需要保留的子节点。系统会按 diff 精确应用。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "description": "当前 MasterGo 文档 ID。"
+          },
+          "documentPageId": {
+            "type": "string",
+            "description": "当前 MasterGo 页面 ID。"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "【选填】目标图层 ID (例如 123:456)。如果不传，则默认更新 MasterGo 中当前选中的图层。"
+          },
+          "code": {
+            "type": "string",
+            "description": "【必填】修改后的 HTML 代码片段。必须包含 data-node-id。"
+          },
+          "projectDir": {
+            "type": "string",
+            "description": "【选填】用户当前工作区的根目录绝对路径。当 HTML 中包含 <img src=\"./asset/xxx.png\"> 或 <img src=\"file:///...\"> 本地图片时必填；工具会启动临时 HTTP 服务，把本地图片通过短期 URL 暴露给画布读取，避免在 context 中写 base64。"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agent_replace_node",
+      "description": "节点替换：仅在用户明确要求“替换某个节点 / 图标 / 图片”时使用本工具。替换图片内容 / 换图 / 修改 <img src> 必须使用本工具，不要使用 agent_update_node。其中图标遵循 FontAwesome，图片换图遵循 <img src=\"{{keyword}}\" /> 或本地图片相对路径语义规范。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "description": "当前 MasterGo 文档 ID。"
+          },
+          "documentPageId": {
+            "type": "string",
+            "description": "当前 MasterGo 页面 ID。"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "【选填】目标图层 ID (例如 123:456)。如果不传，则默认替换 MasterGo 中当前选中的图层。"
+          },
+          "code": {
+            "type": "string",
+            "description": "【必填】新的 HTML 代码内容。将完整替换目标节点内部。"
+          },
+          "projectDir": {
+            "type": "string",
+            "description": "【选填】用户当前工作区的根目录绝对路径。当新 HTML 中包含 <img src=\"./asset/xxx.png\"> 或 <img src=\"file:///...\"> 本地图片时必填；工具会启动临时 HTTP 服务把图片暴露给画布。"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agent_sync_design",
+      "description": "全量同步：仅用于将本地完整的静态 HTML 文件 / 本地代码文件内容【全量覆盖】到已有 MasterGo 画布根节点。调用前必须先加载并遵守 page-generate.md，确认本地 HTML 满足页面生成/逆向转译协议。只有当用户明确要求“把本地 HTML 文件 / 本地代码 / 指定文件路径全量同步覆盖到画布/设计稿根节点”，或在助手针对这个精确操作询问后明确回答“是/确认”时才允许调用。禁止用于新页面生成、页面交付、把生成结果发送到 MasterGo；这些场景即使用户口语说“同步到 MasterGo / 同步到画布”，也必须走 design_page → submit_page_to_canvas。历史确认不能复用，禁止每次修改后自动触发。必须传入根节点 ID (rootId)，或使用 get_selection_node 生成的基准 HTML 文件名让工具反推出 rootId。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "description": "当前 MasterGo 文档 ID。"
+          },
+          "documentPageId": {
+            "type": "string",
+            "description": "当前 MasterGo 页面 ID。"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "【推荐】页面的根节点 ID (rootId)。不传时仅尝试从本地基准 HTML 文件名反推 rootId；推导失败会报错，不会默认同步当前选中图层。"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "【必填】本地静态 HTML 文件的绝对路径（通常位于 .codify/... 目录下）。工具会自动读取内容。严禁传入 .vue/.tsx 业务代码路径！"
+          },
+          "userConfirmed": {
+            "type": "boolean",
+            "default": false,
+            "description": "【必填】用户是否已针对本次“本地 HTML / 本地代码文件全量覆盖同步到画布根节点”工具调用明确确认。每次调用都必须重新确认；仅在用户本轮明确要求这个本地文件覆盖操作，或在助手询问这个精确操作后明确回答“是/确认”时传 true。"
+          },
+          "userConfirmationText": {
+            "type": "string",
+            "description": "【必填】用户对本次本地文件全量覆盖同步的确认原文，例如“把本地 HTML 文件全量同步覆盖到画布”“将这个本地代码文件同步到设计稿根节点”“是”“确认”。禁止填写“同步到 MasterGo”这类页面交付口语、历史确认、上下文总结或模型推断。"
+          }
+        },
+        "required": [
+          "filePath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agent_generate_image",
+      "description": "模型生图资产入口：仅当用户明确要求“用 AI/模型生成图片、生成原创图片资产、模型绘制插画或图像、画一张图片”时使用。普通页面生成、普通配图、英雄图、头像、背景图、产品图默认必须使用 <img src=\"{{keyword}}\" />，禁止调用本工具。本工具只接收 sourcePath，即生图工具已经落盘的本地图片路径；它会把该图片复制到项目内指定目录。仅当模型生图成功并拿到可读 sourcePath 时才调用本工具；如果生图模型失败或没有可用 sourcePath，改用 <img src=\"{{keyword}}\" /> 兜底。outputDir 优先级：工具参数 > .codify/generated-images。保存后返回本地文件路径和可用于 HTML 的相对 <img src>。重要工作流：如果本轮目标是把模型生成图替换到画布中的图片节点，成功调用本工具后必须继续调用 agent_replace_node，并在 code 中使用返回的相对 <img src>，同时传入 projectDir，让本地图片临时服务把图片提供给画布读取。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "description": "【必填】用户当前工作区的根目录绝对路径。outputDir 必须解析到该目录内。"
+          },
+          "sourcePath": {
+            "type": "string",
+            "description": "【必填】生图工具已经落盘的本地图片文件路径，支持绝对路径或相对路径。工具会读取该文件并复制到目标目录。"
+          },
+          "fileName": {
+            "type": "string",
+            "description": "【选填】目标文件名，例如 hero-cat.png。不传时使用内容哈希生成文件名；若文件已存在，会自动追加 -2、-3，避免覆盖。"
+          },
+          "outputDir": {
+            "type": "string",
+            "description": "【选填】保存目录。相对路径按 projectDir 解析；不传则保存到 .codify/generated-images。"
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "【选填】图片 MIME 类型，例如 image/png、image/jpeg、image/webp。sourcePath 后缀无法推断时使用。"
+          }
+        },
+        "required": [
+          "projectDir",
+          "sourcePath"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_design_diff",
+      "description": "比较差异：获取本地基准文件与 MasterGo 画布设计现状的差异。调用后返回 JSON 形式的 Diff 结果，用于协助判断有哪些图层或样式发生了改变。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectDir": {
+            "type": "string",
+            "description": "【必填】用户当前工作区的根目录绝对路径"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "【选填】MasterGo图层ID (例如 123:456)。如果不传，则默认获取当前选中图层的代码进行对比。"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "【选填】本地基准 HTML 文件的绝对路径。如果已通过 write_to_file 更新了基准文件，请直接传此路径。"
+          }
+        },
+        "required": [
+          "projectDir"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agent_remove_node",
+      "description": "移除节点：在 MasterGo 画布中执行删除节点操作。支持通过 targetNodeId 指定 ID，或在不传 ID 时默认删除当前选中图层。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "description": "当前 MasterGo 文档 ID。"
+          },
+          "documentPageId": {
+            "type": "string",
+            "description": "当前 MasterGo 页面 ID。"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "【选填】要删除的目标图层 ID (例如 123:456)。如果不传，则默认删除 MasterGo 中当前选中的图层。"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agent_remove_variable",
+      "description": "删除变量：危险操作专用工具。删除当前 MasterGo 文件变量，不走 update_variables；工具名为 agent_remove_variable。优先传 id；无 id 时必须传 collection/collectionId + name + type 以避免误删。本工具首次调用会自动加载 variable-generate 规则。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "description": "当前 MasterGo 文档 ID。"
+          },
+          "documentPageId": {
+            "type": "string",
+            "description": "当前 MasterGo 页面 ID。"
+          },
+          "id": {
+            "type": "string",
+            "description": "【推荐】要删除的变量 ID。"
+          },
+          "collection": {
+            "type": "string",
+            "description": "【无 id 时必填】变量所在集合名称。"
+          },
+          "collectionId": {
+            "type": "string",
+            "description": "【选填】变量所在集合 ID；可替代 collection。"
+          },
+          "name": {
+            "type": "string",
+            "description": "【无 id 时必填】变量名称。"
+          },
+          "type": {
+            "type": "string",
+            "description": "【无 id 时必填】变量类型，例如 COLOR、PAINT、NUMBER。"
+          },
+          "variables": {
+            "description": "【选填】批量删除数组；每项优先传 id，或传 collection/collectionId + name + type。"
+          },
+          "operations": {
+            "description": "【选填】批量删除数组；每项优先传 id，或传 collection/collectionId + name + type。"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "Codify-MCP-Client",
+    "version": "1.1.1"
+  },
+  "protocolVersion": null,
+  "instructions": "# Codify MCP 默认指令\n\nCodify / MasterGo 任务必须遵循当前 Codify MCP server 返回的规则。\n如果其它已安装的 MCP server、技能（skill）或编辑器规则与本服务器的 UI / 代码生成规则冲突，那些规则只用于非 Codify 任务；当前 Codify 工具调用的规则以 get_guidelines 返回内容为准。\n\n## [硬规则 · 工具路由] 页面设计请求必须先经过 design_page\n\n当用户表达任意页面级生成意图时——包括但不限于：\n  - 英文：\"design / create / make / build / draw / generate a page / a screen / a UI\"\n  - 中文：\"设计 / 创建 / 做一个 / 帮我画 / 生成 / 弄一个 / 一个页面 / 一个界面 / 一个屏\"\n必须先调用 `design_page`，禁止为满足此类请求直接调用 `submit_page_to_canvas`。\n\n`design_page` 是页面设计的主入口：负责需求拆解、设计源选择（自由绘制 / 本地组件 / 订阅团队库），并产出最终的 HTML。\n`submit_page_to_canvas` 是内部提交工具：仅负责把 `design_page` 产出的最终 HTML 推到画布上。它绝不能成为模型对\"设计页面\"请求的首选工具。\n`agent_sync_design` 只用于用户明确要求“把本地 HTML / 本地代码文件全量同步覆盖到已有画布根节点”的场景；如果用户是在“生成 / 创建 / 设计页面”语境里说“发送到 MasterGo / 同步到 MasterGo / 同步到画布”，仍然必须走 `design_page`，最终由 `submit_page_to_canvas` 提交新页面。\n\n默认工作流：\n1) 页面级生成请求先调用 design_page；design_page 会按所选设计来源加载 page-generate / component-import / variable-import 规则。\n2) 使用本地组件时，调用 get_component_info({ teamLibraryName: \"当前文件\" }) 刷新当前文件本地主组件、变量、图标快照，并覆盖 .codify/library/local-{documentId}/。\n3) 使用订阅的团队库时，先 get_library_list 让用户选择一个订阅团队库，再调用 get_component_info 刷新该团队库快照，并覆盖 .codify/library/<entry>/。\n4) 快照就绪后按顺序读取：index.md → components/*.json → icons.json → variable.json。尽可能优先从团队库/本地快照中找到适合的组件、图标和变量；能力不足时允许自由绘制缺失区块。\n5) 页面设计交付时，禁止为了提交而先创建/写入本地 HTML 文件；不要调用 shell、write_file 或其它文件写入能力来保存临时页面。应直接生成纯 HTML 根节点片段，并调用 submit_page_to_canvas(code=...) 提交。\n6) 通过 agent_create_component 创建 MasterGo 主组件 / 组件集之前，先 get_guidelines(scope=[\"component-generate\",\"page-generate\"])。如果当前文件存在变量（快照在 .codify/library/local-{documentId}/variable.json——若尚未加载，先调 get_variables），还需要在 scope 中加上 \"variable-import\"，使主组件使用 var(...) token 而不是字面值。component-generate 不用于\"基于本地组件/订阅团队库生成页面\"，那种场景请用 component-import。\n7) 在创建或修改变量之前，先 get_guidelines(scope=[\"variable-generate\"])，并按两批次流程执行：get_variables → 创建基础变量 → update_variables → get_variables → 创建语义/引用变量 → update_variables → get_variables。\n8) 新页面始终优先使用 design_page；修改已有节点时优先使用 get_selection_node；局部节点编辑优先使用 agent_update_node。submit_page_to_canvas 仅保留给 design_page 最终 HTML 的交付——绝不是页面设计请求的首选工具。\n9) 若用户要求一次生成多个页面，必须逐页编排：生成一个页面的完整 HTML 后立即调用 submit_page_to_canvas(code=该页面HTML) 提交该页面，再继续生成下一个页面；禁止多页面合并为一次提交，禁止全部生成完后再统一提交。\n10) agent_sync_design 禁止用于新页面生成、页面交付、把设计结果发送到 MasterGo；它只用于已有本地静态 HTML 文件对已有画布根节点的全量覆盖同步。\n11) agent_sync_design 属于全量覆盖画布的高风险提交工具，必须先加载并遵守 page-generate.md，确认本地 HTML 满足页面生成/逆向转译协议后才允许同步。\n12) 在调用 submit_page_to_canvas、agent_sync_design、agent_create_component、update_variables 之前，必须先加载相关的当前 Codify 规则，并对照规则核查 payload。\n\n## [硬规则 · 图片来源路由] 默认 keyword，显式模型生图才用 agent_generate_image\n\n两种图片语义必须严格区分：\n  - `{{keyword}}` = 素材检索语义。页面生成、普通配图、英雄图、头像、背景图、产品图默认都用 `<img src=\"{{keyword}}\" />`。\n  - `agent_generate_image` = 模型生图资产语义。仅当用户明确要求“用 AI 生成图片 / 用模型生成图片 / 生图模型 / 原创图片资产 / 模型绘制插画或图像 / 画一张图片”时才允许使用。\n\n默认页面设计流程中，禁止为了普通配图调用 `agent_generate_image`；应直接在 HTML 中写 `<img src=\"{{精准英文关键词}}\" />`。\n\n当且仅当用户明确要求模型生图，并且图片需要出现在 MasterGo / 画布 / 当前设计节点中时，必须按以下顺序执行：\n  1) 先使用实际生图模型或宿主环境完成图片生成，并拿到已经落盘的本地图片 `sourcePath`。\n  2) 立刻调用 `agent_generate_image({ sourcePath, projectDir })`，把图片统一复制到项目内目录，获取返回的相对 `<img src>`。\n  3) 若目标是替换已有图片节点或更新图片内容，必须调用 `agent_replace_node`，在 code 中使用 `agent_generate_image` 返回的相对 `<img src>`，并传入同一个 `projectDir`，让本地图片服务把图片提供给画布读取。\n  4) 如果生图模型调用失败、没有返回可用图片，或无法拿到本地 `sourcePath`，不要调用 `agent_generate_image`；改用 `<img src=\"{{精准英文关键词}}\" />` 作为兜底。若是在已有图片节点上兜底换图，仍然使用 `agent_replace_node`。\n\n`agent_generate_image` 负责模型生图资产的统一落盘入口；`agent_replace_node` 负责把图片内容真正替换到画布。只保存图片但不替换画布，不算完成“把模型生成图放到画布里”的请求。\n\n图片节点修改路由：\n  - 替换图片内容 / 换图 / 修改 `<img src>`：必须使用 `agent_replace_node`。\n  - 只改图片节点尺寸、圆角、边框、阴影、布局等样式：可以使用 `agent_update_node`。\n\n## [流程编排] 设计 + 组件化双轮工作流\n\n当用户表达\"设计一个 X 页面，把里面的 Y/Z 抽成组件 / 组件化 Y/Z\"类似意图时，拆分两轮执行：\n\n第一轮（设计）：\n  1) design_page(designSource='free-draw') 设计整页\n  2) submit_page_to_canvas 提交画布\n  3) 停在这里等用户确认或下一步指令\n\n第二轮（抽组件，需要用户明确发起）：\n  对每个目标组件：\n    a) get_selection_node(targetNodeId) 拉画布真实 HTML\n    b) agent_create_component 用拉到的 HTML 创建主组件（声明合理 props）\n  全部创建完后：\n    c) get_component_info({ teamLibraryName: '当前文件' }) 刷新本地组件\n  替换画布实例：\n    d) agent_replace_node(节点ID, '<ui-component name=\"...\"/>')\n\n注意：\n- 第二轮禁止重新调 design_page；只做\"识别 + 抽 + 替换\"\n- 复合组件依赖原子组件：原子优先创建并刷新快照后，复合组件内部才能引用\n- agent_create_component 后必须 get_component_info 刷新，否则后续引用找不到 name",
+  "durationMs": 12098,
+  "stderr": ""
+}

@@ -1,0 +1,191 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "sentineltx-mcp",
+  "version": "1.0.7",
+  "integrity": {
+    "dist": "sha512-+qA9NEeZZeayOHXvsVUOtXO3VbAfA83h86cw23D/QGXGUnugpbRhBteKTIFkztGCSW0Wkh/aQy+h3BA5ogePuA==",
+    "installed": "sha512-+qA9NEeZZeayOHXvsVUOtXO3VbAfA83h86cw23D/QGXGUnugpbRhBteKTIFkztGCSW0Wkh/aQy+h3BA5ogePuA=="
+  },
+  "bin": "node_modules/sentineltx-mcp/./dist/index.js",
+  "main": "./dist/index.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.26.0",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T02:39:03.874Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "lookup_address",
+      "description": "Look up a blockchain address. Returns labels, risk tags, entity info, balance\nand up to five top outbound counterparties, as a short fact table. The\ncounterparties come from an outbound trace run at the standard forensic depth\nof five hops, so some may be several hops away rather than direct.\nWorks for Ethereum and 50+ other EVM chains, Bitcoin, Litecoin, Solana, Tron\nand XRP.\nUsually answers in under a minute; past 90s it returns a timeout notice, which\nis not a finding about the address, plus a session_id whose finished answer\ncheck_investigation collects. It is not the court-grade forensic write-up: for\nthat, or for deep fund-flow tracing, call start_investigation — with this\nlookup's session_id to continue the same case.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Blockchain address (0x..., T..., bc1..., r..., etc.)"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "validate_address",
+      "description": "Validate a blockchain address format and detect which chain it belongs to. Use this before any tracing tool to confirm the address parses cleanly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Address to validate"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_credits",
+      "description": "Check remaining SentinelTX investigation credits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "start_investigation",
+      "description": "Start a blockchain forensic investigation. Returns a session_id immediately.\n\nUse for: multi-hop fund tracing, cross-chain bridge detection, suspect-to-exchange\nflow analysis, AML / STR report generation, victim-fund recovery analysis.\n\nMost investigations finish within 10 minutes; a deep trace or a court-grade\nreport can run to the server's 30-minute ceiling. After calling this, tell the\nuser it has started, then call check_investigation(session_id) again and again\nuntil the status is complete, error or cancelled. Each call waits for a change\nitself, so no pause is needed between calls. Do not leave a gap of 3 minutes:\npast 10 minutes, the server stops relaying a run nothing has polled for 3\nminutes, and check_investigation then reports status=error with what it had.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural-language investigation request"
+          },
+          "address": {
+            "type": "string",
+            "description": "Primary address to investigate (if any)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "investigation",
+              "compliance"
+            ],
+            "description": "'investigation' (default) for forensic / law-enforcement use; 'compliance' for AML / STR reporting on a deposit address"
+          },
+          "headless": {
+            "type": "boolean",
+            "description": "Default true. When true, the trace runs server-side — no SentinelTX dashboard needed. Set false only if a human user is going to open the SentinelTX dashboard in a browser to watch it run."
+          },
+          "session_id": {
+            "type": "string",
+            "pattern": "^$|^[A-Za-z0-9_-]{8,128}$",
+            "description": "Continue this existing case, e.g. the session_id lookup_address returned, instead of opening a new one. The investigation reuses what that session already retrieved. An id you do not own opens a new case instead."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_investigation",
+      "description": "Check the status of an investigation started by start_investigation.\n\nLong-polls; returns as soon as the status changes. One call can take up to\nwait_sec + ~28s before it returns something — the wait_sec budget, a grace\nperiod for the round trip, then a snapshot if the long-poll overran. At the\ndefault wait_sec=45 that is a ~73s ceiling. Budget for that, not for 45s:\nthe overrun is real and measured, and this client stops waiting rather than\nletting a call outlive the deadline of whoever called it.\n\nReturns one of:\n- status=\"queued\"      — accepted, agent about to start; call again.\n- status=\"running\"     — in progress; call again.\n- status=\"complete\"    — full assistant_text is ready.\n- status=\"error\"       — stopped before a final report. Any findings it made\n  follow, marked INCOMPLETE, with the case URL. Review them before starting a\n  new investigation for the same request.\n- status=\"cancelled\"   — cancel_investigation was called; it will not resume.\n  Any text gathered before the cancel follows, marked INCOMPLETE.\n- status=\"unconfirmed\" — no answer reached us (a timeout, a dropped connection\n  or a 5xx). Not the investigation's status, which is kept server-side apart\n  from these polls. Call again.\n\nCall it back to back until the status is complete, error or cancelled, unless\nan answer says to wait first; a run usually takes several calls. The server\nstops relaying a run that is past 10 minutes and has had no call for 3\nminutes, and every run at 30 minutes: either reads as status=error with what\nit had found.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,128}$",
+            "description": "session_id returned from start_investigation, or from a lookup_address that timed out"
+          },
+          "wait_sec": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60,
+            "description": "Long-poll budget requested of the server, in seconds. Default 45. Set 0 for an immediate snapshot. The call itself can run ~28s longer than this."
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "cancel_investigation",
+      "description": "Cancel a running investigation started by start_investigation.\n\nUse this when the user wants to abort early — wrong address, taking too long, etc.\nOnly the session owner can cancel.\n\nRead the returned status, not the absence of an error:\n- status=\"cancelled\" — it is stopped and will not resume. In-flight tools may\n  take a few seconds to unwind, so one further check_investigation can still\n  report work in progress; that is the unwind, not a failed cancel.\n- any other status    — the investigation had already finished on its own, as\n  that status. Nothing was cancelled and its result stands.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,128}$",
+            "description": "session_id returned from start_investigation"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_investigation_graph",
+      "description": "Export the fund-flow graph (nodes + links) saved for an investigation, frozen\nat the moment of this call. A run that stopped short (status error or\ncancelled) exports the graph it traced before it stopped. The result's\ninvestigation_status line is the investigation's status when the graph was\nfrozen: anything but complete means a partial graph, and a note says so.\n\nReturns a share URL that any HTTP client can GET to receive the graph JSON.\nThe 24h token in the URL is the credential — no login required for that URL.\nEach call mints a new link, and an account holds a limited number of live\nlinks: past it the call is refused (429) until older ones expire. Call this\nonce per graph you need and reuse the URL.\n\nSet include_payload=true to inline the graph JSON in the tool result, up to\n65536 characters. A larger graph comes back as status: too_large, with its\nnode and link counts and size, and no JSON: GET graph_fetch_url for it. If\nfetching the graph fails, the link is still returned, with status: fetch_failed\nand the reason: GET graph_fetch_url again rather than calling this again.\n\nGraph shape:\n- nodes[]: { id (address), address, label, group, depth (0 = origin,\n  positive = hops out, negative = inbound side), balance, received, sent,\n  chain?, isOrigin?, sentinelLabel?, entity?, ... }\n- links[]: { id, source (node id), target (node id), label? (token), sum,\n  sumDict? (per token), txCount, txHashes[], firstDate?, lastDate?, isSwap,\n  isBridge, chain?, ... }\n\nA node's balance, received and sent are not the address's wallet balance or\nwhat it moved in this graph. Each is a figure the tracer stamped on the first\ntransaction naming the address, and 0 when no transaction carried one. An\noutbound trace stamps at most the receiving side, so the origin reads 0 there\neven when it holds funds and sent every link out of it. What moved is on the\nlinks (sum, and sumDict per token); an address's balance is lookup_address's.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,128}$",
+            "description": "session_id returned from start_investigation"
+          },
+          "include_payload": {
+            "type": "boolean",
+            "description": "Inline the graph JSON in this tool result, up to 65536 characters. Default false."
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "sentineltx",
+    "version": "1.0.7"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 5468,
+  "stderr": "[sentineltx-mcp] Warning: SENTINELTX_API_KEY not set. Tools requiring authentication will fail.\n[sentineltx-mcp] v1.0.7 connecting to https://api.sentineltx.ai\n"
+}

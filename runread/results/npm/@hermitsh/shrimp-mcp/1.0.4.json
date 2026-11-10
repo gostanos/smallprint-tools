@@ -1,0 +1,663 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@hermitsh/shrimp-mcp",
+  "version": "1.0.4",
+  "integrity": {
+    "dist": "sha512-o13WTXIJmf0pC9RwVWCrJAomXbFBaU/6IzH4gqBGXmr6reojG/+rKxjSHOZtlwgtPC6cZUwY2YkeEzt8u7CCsQ==",
+    "installed": "sha512-o13WTXIJmf0pC9RwVWCrJAomXbFBaU/6IzH4gqBGXmr6reojG/+rKxjSHOZtlwgtPC6cZUwY2YkeEzt8u7CCsQ=="
+  },
+  "bin": "node_modules/@hermitsh/shrimp-mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-09T23:28:43.910Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "shrimp_pair",
+      "description": "Connect this agent to a SHrimp account using a 6-digit pairing code.\n\nThe user must open the SHrimp app on their phone → Settings → Agents → Pair New Agent to generate a code. The code expires after 5 minutes.\n\nAfter pairing, this agent can read and write the user's task tree. The token is saved locally so you stay connected across sessions.\n\nArgs:\n  - code (string): The 6-digit numeric code from the SHrimp app.\n  - agentName (string): Display name for this agent in the app (default: \"Claude\").\n\nReturns on success:\n  { paired: true, email: string, agentName: string, scopes: string[], configPath: string }\n\nReturns on failure:\n  { paired: false, error: string }\n\nCommon errors:\n  - \"Invalid code\" → code is not exactly 6 digits\n  - \"Pairing failed\" → code expired or wrong. User must generate a new one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "description": "The 6-digit pairing code from the SHrimp app"
+          },
+          "agentName": {
+            "type": "string",
+            "default": "Claude",
+            "description": "Display name for this agent connection (shown in the SHrimp app)"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_status",
+      "description": "Check whether this agent is paired with a SHrimp account.\n\nTakes no arguments.\n\nReturns:\n  { paired: true, email: string, agentName: string, scopes: string[] }\n  or\n  { paired: false }\n\nIf not paired, call shrimp_pair with a 6-digit code from the user's SHrimp app.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "shrimp_get_tasks",
+      "description": "Read the user's task tree from SHrimp.\n\nReturns all tasks as a nested hierarchy. Each task has: id, title, notes, dueDate, category, isCompleted, isArchived, and children[].\n\nFilters (all optional):\n  - category: one of home, work, errands, health, people, money, travel, projects\n  - completed: \"true\" or \"false\" — filter by completion status\n  - archived: \"true\" or \"false\" — default is active only (false)\n  - subtree: a task ID — returns only that task and its descendants\n  - flat: \"true\" — returns a flat array with parentID instead of nesting\n\nThe response includes a version number. Cache this to detect changes efficiently.\n\nReturns:\n  { version: number, updatedAt: string, tasks: TaskItem[] }\n\nTaskItem shape:\n  { id: string, title: string, notes?: string, dueDate?: string, category?: string, isCompleted: boolean, isArchived: boolean, children: TaskItem[] }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Filter by category: home, work, errands, health, people, money, travel, projects"
+          },
+          "completed": {
+            "type": "string",
+            "enum": [
+              "true",
+              "false"
+            ],
+            "description": "Filter by completion status"
+          },
+          "archived": {
+            "type": "string",
+            "enum": [
+              "true",
+              "false"
+            ],
+            "description": "Filter by archive status (default: active only)"
+          },
+          "subtree": {
+            "type": "string",
+            "description": "Task ID — return only this task and its descendants"
+          },
+          "flat": {
+            "type": "string",
+            "enum": [
+              "true"
+            ],
+            "description": "Return flat list with parentID instead of nested tree"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_search",
+      "description": "Search tasks by keyword. Matches against titles and notes (case-insensitive substring match).\n\nReturns matching tasks with their full breadcrumb path so you know where they sit in the tree.\n\nArgs:\n  - q (string): Search query.\n  - limit (number): Max results, 1–50 (default: 20).\n\nReturns:\n  { results: SearchResult[], total: number }\n\nSearchResult shape:\n  { id: string, title: string, notes?: string, isCompleted: boolean, path: string[], matchField: \"title\" | \"notes\" }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Search query (case-insensitive substring match)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "Max results (default 20, max 50)"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_add_task",
+      "description": "Create a new task in SHrimp. The task appears on the user's phone within seconds.\n\nYou can nest tasks at any depth by specifying a parentID. Use insertBefore to control ordering among siblings.\n\nArgs:\n  - title (string, required): Task title.\n  - notes (string, optional): Additional notes or details.\n  - parentID (string, optional): UUID of parent task. Omit for a root-level task.\n  - dueDate (string, optional): ISO 8601 date (e.g. \"2026-04-15\").\n  - category (string, optional): One of home, work, errands, health, people, money, travel, projects.\n  - insertBefore (string, optional): UUID of sibling task to insert before.\n\nReturns:\n  { ok: true, opID: string, version: number }\n\nTips:\n  - Use shrimp_batch for creating multiple tasks at once (up to 50 ops).\n  - UUIDs must be hex-only (0-9, a-f). Non-hex characters will be rejected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Task title"
+          },
+          "notes": {
+            "type": "string",
+            "description": "Additional notes or details"
+          },
+          "parentID": {
+            "type": "string",
+            "description": "UUID of parent task (omit for root-level task)"
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "ISO 8601 date string (e.g. 2026-04-15)"
+          },
+          "category": {
+            "type": "string",
+            "description": "Category: home, work, errands, health, people, money, travel, projects"
+          },
+          "insertBefore": {
+            "type": "string",
+            "description": "UUID of sibling task to insert before"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_update_task",
+      "description": "Update an existing task's properties. Only include the fields you want to change — omitted fields are left unchanged.\n\nArgs:\n  - taskID (string, required): UUID of the task to update.\n  - title (string, optional): New title.\n  - notes (string, optional): New notes (replaces existing notes entirely).\n  - dueDate (string, optional): New due date (ISO 8601).\n  - category (string, optional): New category (home, work, errands, health, people, money, travel, projects).\n\nReturns:\n  { ok: true, opID: string, version: number }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskID": {
+            "type": "string",
+            "description": "UUID of the task to update"
+          },
+          "title": {
+            "type": "string",
+            "description": "New title"
+          },
+          "notes": {
+            "type": "string",
+            "description": "New notes (replaces existing)"
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "New due date (ISO 8601)"
+          },
+          "category": {
+            "type": "string",
+            "description": "New category: home, work, errands, health, people, money, travel, projects"
+          }
+        },
+        "required": [
+          "taskID"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_complete_task",
+      "description": "Toggle a task's completion status. If incomplete, marks it done. If already done, marks it incomplete.\n\nArgs:\n  - taskID (string, required): UUID of the task.\n\nReturns:\n  { ok: true, opID: string, version: number }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskID": {
+            "type": "string",
+            "description": "UUID of the task to complete/uncomplete"
+          }
+        },
+        "required": [
+          "taskID"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_archive_task",
+      "description": "Archive a task and all its children. Archived tasks are hidden from the main view but not deleted. Use shrimp_restore_task to bring them back.\n\nArgs:\n  - taskID (string, required): UUID of the task to archive.\n\nReturns:\n  { ok: true, opID: string, version: number }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskID": {
+            "type": "string",
+            "description": "UUID of the task to archive"
+          }
+        },
+        "required": [
+          "taskID"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_restore_task",
+      "description": "Restore an archived task back to the active list.\n\nArgs:\n  - taskID (string, required): UUID of the task to restore.\n\nReturns:\n  { ok: true, opID: string, version: number }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskID": {
+            "type": "string",
+            "description": "UUID of the task to restore"
+          }
+        },
+        "required": [
+          "taskID"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_move_task",
+      "description": "Move a task to a different position in the tree. Can reparent under a new task or reorder among siblings.\n\nArgs:\n  - taskID (string, required): UUID of the task to move.\n  - parentID (string, optional): UUID of new parent. Omit or null to move to root level.\n  - insertBefore (string, optional): UUID of sibling to insert before. Omit to append at end.\n\nReturns:\n  { ok: true, opID: string, version: number }\n\nTips:\n  - Moving a task also moves all its children.\n  - You cannot move a task under itself (circular reference).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskID": {
+            "type": "string",
+            "description": "UUID of the task to move"
+          },
+          "parentID": {
+            "type": "string",
+            "description": "UUID of new parent (omit to move to root)"
+          },
+          "insertBefore": {
+            "type": "string",
+            "description": "UUID of sibling to insert before"
+          }
+        },
+        "required": [
+          "taskID"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_delete_task",
+      "description": "Permanently delete a task and all its children. This cannot be undone by the agent (the user can undo on their phone within a short window).\n\nPrefer shrimp_archive_task if you're unsure — archived tasks can always be restored.\n\nArgs:\n  - taskID (string, required): UUID of the task to delete.\n\nReturns:\n  { ok: true, opID: string, version: number }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskID": {
+            "type": "string",
+            "description": "UUID of the task to delete"
+          }
+        },
+        "required": [
+          "taskID"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_batch",
+      "description": "Execute multiple task operations in a single request. Much more efficient than individual calls when making several changes at once.\n\nMax 50 ops per batch. All ops are validated upfront before any are applied — if one has an invalid UUID, the entire batch is rejected.\n\nEach op must have a \"type\" field. Required fields depend on the type:\n  - create: title (required), notes, parentID, dueDate, category, insertBefore\n  - update: taskID (required), title, notes, dueDate, category\n  - complete: taskID (required)\n  - archive: taskID (required)\n  - restore: taskID (required)\n  - move: taskID (required), parentID, insertBefore\n  - delete: taskID (required)\n\nArgs:\n  - ops (array): Array of operation objects (max 50).\n\nReturns:\n  { ok: true, opIDs: string[], version: number }\n\nTips:\n  - Use this to build entire project plans in one call.\n  - Create ops are processed in order, so you can create a parent then nest children under it in the same batch.\n  - All UUIDs must be hex-only (0-9, a-f).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "update",
+                    "complete",
+                    "archive",
+                    "restore",
+                    "move",
+                    "delete"
+                  ]
+                },
+                "taskID": {
+                  "type": "string",
+                  "description": "Required for update/complete/archive/restore/move/delete"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "notes": {
+                  "type": "string"
+                },
+                "parentID": {
+                  "type": "string"
+                },
+                "dueDate": {
+                  "type": "string"
+                },
+                "category": {
+                  "type": "string",
+                  "description": "One of: home, work, errands, health, people, money, travel, projects"
+                },
+                "insertBefore": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Array of operations to execute"
+          }
+        },
+        "required": [
+          "ops"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_get_prompt",
+      "description": "Read the current prompt sections that control the in-app AI behavior. SHrimp's AI system prompt is modular — split into 6 editable sections that shape how the AI processes user requests.\n\nSections:\n  - intro: Identity and role definition\n  - rules: Behavioral rules and constraints\n  - thoroughness: How thorough/detailed the AI should be\n  - categories: Life categories for task organization (home, work, errands, health, people, money, travel, projects)\n  - schema: The JSON response schema the AI must follow\n  - terminal: Additional instructions for the terminal/chat interface\n\nReturns all sections with their current content. Empty strings indicate the section uses the built-in default.\n\nUse this to understand the current AI behavior before making changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_update_prompt",
+      "description": "Update one or more prompt sections that control the in-app AI behavior. Partial updates are supported — only include the sections you want to change.\n\nSections: intro, rules, thoroughness, categories, schema, terminal\n\nThis immediately pushes the changes to the user's phone. The next AI request will use the updated prompt.\n\nRate limit: 20 settings changes per hour.\n\nExample: To make the AI more concise, update the \"thoroughness\" section.\nExample: To add a new category, update the \"categories\" section.\nExample: To change how the AI introduces itself, update the \"intro\" section.\n\nIMPORTANT: Read the current sections first (shrimp_get_prompt) before making changes, so you understand what you're modifying.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "intro": {
+            "type": "string",
+            "description": "AI identity and role definition"
+          },
+          "rules": {
+            "type": "string",
+            "description": "Behavioral rules and constraints"
+          },
+          "thoroughness": {
+            "type": "string",
+            "description": "How thorough/detailed the AI should be"
+          },
+          "categories": {
+            "type": "string",
+            "description": "Life categories for task organization"
+          },
+          "schema": {
+            "type": "string",
+            "description": "JSON response schema the AI must follow"
+          },
+          "terminal": {
+            "type": "string",
+            "description": "Additional terminal/chat interface instructions"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_get_provider",
+      "description": "Read the current AI provider and model configuration. This controls which AI processes requests in the SHrimp app.\n\nReturns:\n  - type: The provider (anthropic, openai, google, xai)\n  - modelID: The specific model ID (e.g. \"claude-sonnet-4-20250514\", \"gpt-4o\")\n  - useOpenAIOAuth: Whether OpenAI uses ChatGPT OAuth (true) or API key (false)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_update_provider",
+      "description": "Change the AI provider and/or model used by SHrimp. This immediately pushes the change to the phone.\n\nValid providers: anthropic, openai, google, xai\n\nYou can update just the provider, just the model, or both. The user must have an API key configured for the selected provider (this tool cannot set API keys).\n\nRate limit: 20 settings changes per hour.\n\nExample: Switch to Anthropic's Claude → type: \"anthropic\", modelID: \"claude-sonnet-4-20250514\"\nExample: Switch to OpenAI → type: \"openai\", modelID: \"gpt-4o\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai",
+              "google",
+              "xai"
+            ],
+            "description": "AI provider type"
+          },
+          "modelID": {
+            "type": "string",
+            "description": "Model identifier (e.g. \"claude-sonnet-4-20250514\", \"gpt-4o\")"
+          },
+          "useOpenAIOAuth": {
+            "type": "boolean",
+            "description": "Use ChatGPT OAuth instead of API key (OpenAI only)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_pipeline",
+      "description": "Read the processing pipeline log from the user's phone. This shows what the in-app AI has been doing — push notifications received, emails fetched, AI requests sent, inbox status transitions, etc.\n\nThe pipeline is a ring buffer of up to 200 entries, synced to the server when the app launches and periodically during use. Entries are chronological (oldest first).\n\nPipeline stages:\n  - push: Push notification received\n  - fetch: Full email body fetch\n  - attach: Attachment fetch/cache\n  - batch: Inbox batch processing\n  - ai: AI request/response/error\n  - inbox: Inbox status transitions\n  - share: Share extension receive\n  - file: Disk read/write operations\n  - retry: Crash recovery re-queues\n\nUse this to understand what's happening on the phone, debug issues, or monitor AI activity.\n\nThe pipeline naturally reflects changes made by outside agents — when you modify tasks, the phone processes those changes and logs them here.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Max entries to return (default 50, max 200)"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "push",
+              "fetch",
+              "attach",
+              "batch",
+              "ai",
+              "inbox",
+              "share",
+              "file",
+              "retry"
+            ],
+            "description": "Filter by pipeline stage"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_inbox",
+      "description": "Read the SHrimp terminal inbox. The inbox receives items from multiple sources — emails, share extension, Siri, GitHub webhooks, and the in-app composer. Each item is processed by the phone's AI to create/update tasks.\n\nItem sources: email, shareExtension, siri, github, clipboard, composer\n\nItem statuses:\n  - pending: Saved but not yet sent to AI\n  - processing: Currently being processed by AI\n  - processed: AI successfully handled it\n  - failed: AI call failed (check failureReason)\n\nAttachment metadata is included (filename, type, size) but not binary data.\n\nItems are returned newest first. Use filters to narrow results.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "processed",
+              "failed"
+            ],
+            "description": "Filter by item status"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "email",
+              "shareExtension",
+              "siri",
+              "github",
+              "clipboard",
+              "composer"
+            ],
+            "description": "Filter by item source"
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Max items to return (default 50, max 100)"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "shrimp_feedback",
+      "description": "Send feedback to the SHrimp developer on behalf of the user. This works like the feedback button in the app's settings — your message is stored and forwarded to the support team.\n\nUse this when:\n  - The user asks you to report a bug or issue with SHrimp.\n  - The user wants to suggest a feature or improvement.\n  - You notice something that seems like a bug while interacting with SHrimp.\n\nRate limit: 5 feedback messages per hour.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "Feedback message (max 2000 chars)"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "shrimp-mcp-server",
+    "version": "1.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 11510,
+  "stderr": "SHrimp MCP server running via stdio\ntime=\"2026-11-09T18:28:55-05:00\" level=error msg=\"Error forwarding signal 15 to container 3aa320f08ce03fdf2bd72ede4fc6229e1d19a71966e1e8a2b9f7ce85b04e8998: container has already been removed\"\n"
+}
