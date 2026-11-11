@@ -1,0 +1,1067 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@mounsecom/dsers-mcp",
+  "version": "2.0.0",
+  "integrity": {
+    "dist": "sha512-/9SAtyMEfAJLjaxa83a3BRX/W/fFpgrDAmggGaHqE3lgMIFicDOSUkfZr42KyysLywEAnwLRCeQ+57s42oW9Tw==",
+    "installed": "sha512-/9SAtyMEfAJLjaxa83a3BRX/W/fFpgrDAmggGaHqE3lgMIFicDOSUkfZr42KyysLywEAnwLRCeQ+57s42oW9Tw=="
+  },
+  "bin": "node_modules/@mounsecom/dsers-mcp/dist/cli.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T14:08:21.155Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "dsers_store_discover",
+      "description": "Retrieve available stores and supported rules for the connected DSers account. Call this first — the response contains store IDs and configuration needed by all subsequent operations. Returns: stores and rules (pricing modes, content, images). ONLY id AND name ARE ALWAYS PRESENT on a store. platform is omitted when the server could not identify it, ship[] only exists for Shopify stores (it is the list of delivery profiles, and the source of shipping_profile_name in dsers_store_push push_options), and pricing_rule appears when the store has a DSers pricing rule configured. Do not treat an absent field as a false value. Observed on a live single-store account: { id, name, push_supported: false, pricing_rule: { enabled: false } } — no platform, no ship. READ push_supported CAREFULLY. It is set to false when the store's platform is not one of shopify / woocommerce / wix — including the case where the platform could not be identified at all. The platform is resolved from the store's appid through the DSers app catalogue, so it normally works for every platform; if that catalogue is unreachable the server falls back to a .myshopify.com domain check, and a non-Shopify store then reports push_supported: false without a platform field. So when platform is ABSENT, read push_supported as 'not confirmed' rather than 'confirmed unpushable': say which store you could not identify and ask the user, instead of declaring it unsupported. ONLY id AND name ARE ALWAYS PRESENT on a store. platform is omitted when the server could not identify it, ship[] only exists for Shopify stores (it is the list of delivery profiles, and the source of shipping_profile_name in dsers_store_push push_options), and pricing_rule appears when the store has a DSers pricing rule configured. Do not treat an absent field as a false value. Observed on a live single-store account: { id, name, push_supported: false, pricing_rule: { enabled: false } } — no platform, no ship. READ push_supported CAREFULLY. It is set to false whenever `platform` is missing OR is not one of shopify / woocommerce / wix. But `platform` is only known when DSers reports it or the domain ends in .myshopify.com — so a WooCommerce store on its own domain comes back with no platform at all, and is reported as push_supported: false even though WooCommerce is a supported target. push_supported: false therefore means 'not confirmed pushable', not 'confirmed unpushable'. If the store has no platform field, do not silently give up: tell the user which platform the server failed to identify and ask them, rather than declaring their store unsupported. ae_expired means AliExpress re-authorization is needed but does NOT block imports — proceed normally. plan_issue only appears if the DSers subscription has a real problem (expired, suspended). After calling this tool, proceed to the next step (import, preview, etc.) — do NOT retry discover.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_store": {
+            "description": "Store ID or name to filter capabilities for a specific store. Omit to see all linked stores. Use the id or name from this response in later calls.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_rules_validate",
+      "description": "Check and normalize a rules object against the provider's capabilities before importing. Use this to verify pricing, content, and image rules are valid and see exactly which ones will be applied. Returns: effective_rules_snapshot (what will actually be applied), warnings (adjustments made), errors (blocking issues that must be fixed before calling dsers_product_import).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "string",
+            "description": "Rules as a JSON string. Top-level keys: pricing, content, images, variant_overrides, option_edits. Pricing modes: fixed_price (exact dollar amount for all), multiplier (cost × ratio), fixed_markup (cost + dollars). Example: {\"pricing\": {\"mode\": \"fixed_price\", \"fixed_price\": 9.99}, \"content\": {\"title_prefix\": \"[US] \"}, \"images\": {\"keep_first_n\": 5}}"
+          },
+          "target_store": {
+            "description": "Store ID or display name from dsers_store_discover. Some rule capabilities vary by store.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_product_import",
+      "description": "Import product(s) from supplier URL(s) into the DSers import list and return a preview. Supports AliExpress, Alibaba, and Accio.com URLs. THIS CONSUMES THE ACCOUNT'S IMPORT QUOTA (importLimit and importDayLimit — read them with dsers_plan_info what='limits'). To evaluate or compare products without spending quota, use dsers_supplier_inspect instead and import only the winners. Provide source_url (single) or source_urls_json (batch). Optionally apply rules at import time via rules_json or flat params. EXPIRED/LOST JOB_ID: Re-import with source_url — DSers finds the existing draft (no duplicate). To UPDATE rules on an existing import, use dsers_product_update_rules instead. SINGLE RESPONSE: compact preview with all variants [name, sell, qty], price_summary, active_rules. BATCH RESPONSE: summary mode (default) returns job_id + key metadata per product (~100 tokens each). Use batch_detail='full' for complete previews. Use dsers_product_preview for individual details. MIXING THE TWO INPUT STYLES LOSES DATA. Flat parameters and rules_json are merged per FAMILY, and rules_json wins: if you set title_prefix as a flat parameter AND pass content in rules_json, the whole content family from rules_json replaces the flat one and title_prefix is silently dropped. Use one style or the other for a given family — different families can safely come from different styles. ",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source_url": {
+            "description": "Single supplier product URL. Supports AliExpress (aliexpress.com/item/xxx.html), Alibaba (alibaba.com/product-detail/xxx.html), and Accio.com product links (accio.com/c/...?productId=xxx&ds=aliexpress.com).",
+            "type": "string"
+          },
+          "source_urls_json": {
+            "description": "Batch import: JSON array of URL strings or objects with {url, rules?, source_hint?, country?, target_store?, visibility_mode?}. Example: [\"https://aliexpress.com/item/123.html\", {\"url\": \"https://aliexpress.com/item/456.html\", \"rules\": {\"pricing\": {\"mode\": \"multiplier\", \"multiplier\": 3}}}]",
+            "type": "string"
+          },
+          "source_hint": {
+            "default": "auto",
+            "description": "Supplier platform hint. Default: auto. Note this is only a fallback — when the URL host is recognisable (aliexpress.*, alibaba.*, accio.com) the resolver derives the platform from the host and ignores this value, so a wrong hint on a normal URL changes nothing.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "aliexpress",
+              "alibaba",
+              "accio"
+            ]
+          },
+          "country": {
+            "default": "US",
+            "description": "ISO-3166 alpha-2 destination country, e.g. US, GB, DE, FR, AU. This LOCALISES THE PRICES, it does not just pick a shipping lane: the same product quoted for another market can differ by 15% or more. Use the same country you used for ship_to_country in dsers_supplier_inspect, otherwise the cost you compared during sourcing is not the cost imported here, and your margins are computed against the wrong figure. Not validated by this server — a malformed code is passed to DSers as-is.",
+            "type": "string"
+          },
+          "target_store": {
+            "description": "Store ID or display name from dsers_store_discover. Required when the account has multiple stores.",
+            "type": "string"
+          },
+          "visibility_mode": {
+            "description": "Product visibility after push. backend_only (default): saved as draft, not visible to shoppers — SAFE, no financial risk. sell_immediately: published and LIVE on the storefront — RISK: verify pricing and inventory first.",
+            "type": "string",
+            "enum": [
+              "backend_only",
+              "sell_immediately"
+            ]
+          },
+          "job_id": {
+            "description": "(DEPRECATED — use dsers_product_update_rules) Passing this WITHOUT source_url makes the tool silently perform a different operation: it updates the rules on an existing draft and imports nothing. The response carries a _deprecated note. Prefer calling dsers_product_update_rules directly so the intent is visible in the trace.",
+            "type": "string"
+          },
+          "rules_json": {
+            "description": "Rules as JSON string. Keys: pricing, content, images, variant_overrides, option_edits. PRICING: {mode:'fixed_price',fixed_price:9.99} | {mode:'multiplier',multiplier:2} | {mode:'fixed_markup',fixed_markup:5}. VARIANT_OVERRIDES: [{match:'Red',sell_price:9.99,compare_at_price:19.99}]. CONTENT: {title_override, title_prefix, title_suffix, description_override_html, tags_add:['tag']}. IMAGES: {drop_indexes, reorder, add_urls, keep_first_n}. OPTION_EDITS: [{action:'rename_option',option_name:'Color',new_name:'Style'}].",
+            "type": "string"
+          },
+          "pricing_mode": {
+            "description": "Flat param: pricing mode. Use instead of rules_json for simple pricing.",
+            "type": "string",
+            "enum": [
+              "multiplier",
+              "fixed_markup",
+              "fixed_price"
+            ]
+          },
+          "pricing_multiplier": {
+            "description": "Flat param: multiplier value when pricing_mode='multiplier'.",
+            "type": "number"
+          },
+          "pricing_fixed_markup": {
+            "description": "Flat param: markup in dollars when pricing_mode='fixed_markup'.",
+            "type": "number"
+          },
+          "pricing_fixed_price": {
+            "description": "Flat param: exact price in dollars when pricing_mode='fixed_price'.",
+            "type": "number"
+          },
+          "title_override": {
+            "description": "Flat param: replace entire product title.",
+            "type": "string"
+          },
+          "title_prefix": {
+            "description": "Flat param: prepend to product title.",
+            "type": "string"
+          },
+          "title_suffix": {
+            "description": "Flat param: append to product title.",
+            "type": "string"
+          },
+          "batch_detail": {
+            "description": "Batch response detail level. summary (default): job_id + title + sell_price + cost + variants_count + stock per product (~100 tokens each). full: complete preview per product (can be very large for 10+ products). Single imports always return full preview.",
+            "type": "string",
+            "enum": [
+              "summary",
+              "full"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "dsers_product_preview",
+      "description": "Reload preview for an import job. Two modes: compact (default) returns [name, sell, qty] for ALL variants — lightweight. full returns [name, sell, compare_at, cost, qty, supplier_qty] for 3 variants by default. Always includes price_summary: {sell:{min,max}, cost:{min,max}, zero_stock_count, low_stock_count, variants_count}. Key fields: sell_price (store listing price, $), cost (supplier price, $), compare_at_price (strikethrough, $). options: array of {name, values[], values_count} — values truncated to 10 by default, set show_all_options=true for full list. active_rules: currently applied rules (always present, {} if none). Use variant_detail='full' when agent needs compare_at or cost columns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Job ID returned by dsers_product_import."
+          },
+          "variant_detail": {
+            "description": "compact (default): columns [name, sell, qty], shows ALL variants. full: columns [name, sell, compare_at, cost, qty, supplier_qty], shows 3 by default.",
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ]
+          },
+          "variant_offset": {
+            "description": "Start index for variant/SKU listing (0-based). Default: 0.",
+            "type": "number"
+          },
+          "variant_limit": {
+            "description": "Max variants in skus table. Compact default: all. Full default: 3. Hard cap: 200.",
+            "type": "number"
+          },
+          "show_all_options": {
+            "description": "Show all option values instead of truncating to 10. Use before applying option_edits.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_product_update_rules",
+      "description": "Update pricing, content, images, or variant rules on an already-imported product. Rules are merged incrementally: pricing/images/variant_overrides replace by family; content merges by field (set title_prefix without losing description). To clear a content field, send it as empty string or null (e.g. title_prefix:''). To remove an entire family, pass null (e.g. rules_json='{\"pricing\":null}'). option_edits are always fully replaced (ordered operations, not mergeable). MIXING THE TWO INPUT STYLES LOSES DATA. Flat parameters and rules_json are merged per FAMILY, and rules_json wins: if you set title_prefix as a flat parameter AND pass content in rules_json, the whole content family from rules_json replaces the flat one and title_prefix is silently dropped. Use one style or the other for a given family — different families can safely come from different styles. A content field is cleared with '' or null ONLY when a content family already exists on the job; on the very first content rule an empty string is stored as-is instead of being dropped. Send the fields you want, not empty ones. OPTION_EDITS actions: rename_option {action,option_name,new_name} — rename e.g. Color→Style. rename_value {action,option_name,value_name,new_name} — rename a value within an option. remove_value {action,option_name,value_name} — remove value and DELETE all variants with that value. remove_option {action,option_name} — remove entire option dimension. RESPONSE: compact preview with active_rules showing all currently applied rules.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Job ID from a previous dsers_product_import call."
+          },
+          "rules_json": {
+            "description": "Rules as JSON string. Keys: pricing, content, images, variant_overrides, option_edits. PRICING: {mode:'fixed_price',fixed_price:9.99} | {mode:'multiplier',multiplier:2} | {mode:'fixed_markup',fixed_markup:5}. VARIANT_OVERRIDES: [{match:'Red',sell_price:9.99,compare_at_price:19.99}]. CONTENT: {title_override, title_prefix, title_suffix, description_override_html, tags_add:['tag']}. Content fields merge individually — set title_prefix without losing description. Clear with '' or null. IMAGES: {drop_indexes, reorder, add_urls, keep_first_n}. OPTION_EDITS (always full replacement): [{action:'rename_option',option_name:'Color',new_name:'Style'},{action:'rename_value',option_name:'Color',value_name:'Red',new_name:'Crimson'},{action:'remove_value',option_name:'Color',value_name:'Gray'},{action:'remove_option',option_name:'Size'}]. Only include families you want to change. Others are preserved automatically.",
+            "type": "string"
+          },
+          "pricing_mode": {
+            "description": "Flat param: pricing mode. Use instead of rules_json for simple pricing.",
+            "type": "string",
+            "enum": [
+              "multiplier",
+              "fixed_markup",
+              "fixed_price"
+            ]
+          },
+          "pricing_multiplier": {
+            "description": "Flat param: multiplier value when pricing_mode='multiplier'.",
+            "type": "number"
+          },
+          "pricing_fixed_markup": {
+            "description": "Flat param: markup in dollars when pricing_mode='fixed_markup'.",
+            "type": "number"
+          },
+          "pricing_fixed_price": {
+            "description": "Flat param: exact price in dollars when pricing_mode='fixed_price'.",
+            "type": "number"
+          },
+          "title_override": {
+            "description": "Flat param: replace entire product title.",
+            "type": "string"
+          },
+          "title_prefix": {
+            "description": "Flat param: prepend to product title.",
+            "type": "string"
+          },
+          "title_suffix": {
+            "description": "Flat param: append to product title.",
+            "type": "string"
+          },
+          "description_override_html": {
+            "description": "Flat param: replace full description (HTML).",
+            "type": "string"
+          },
+          "description_append_html": {
+            "description": "Flat param: append HTML to description.",
+            "type": "string"
+          },
+          "target_store": {
+            "description": "Store ID or name from dsers_store_discover.",
+            "type": "string"
+          },
+          "visibility_mode": {
+            "description": "backend_only (default, safe) or sell_immediately (live — confirm with user).",
+            "type": "string",
+            "enum": [
+              "backend_only",
+              "sell_immediately"
+            ]
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "dsers_product_visibility",
+      "description": "Change the visibility mode of a prepared job before pushing it to the store. Call this between dsers_product_import and dsers_store_push to switch between draft and published. Returns: job_id, status, visibility_mode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Job ID returned by dsers_product_import."
+          },
+          "visibility_mode": {
+            "type": "string",
+            "enum": [
+              "backend_only",
+              "sell_immediately"
+            ],
+            "description": "New visibility mode. backend_only: save as draft, not visible to shoppers — SAFE. sell_immediately: publish and LIVE on storefront — RISK: product becomes purchasable immediately. Confirm with user first."
+          }
+        },
+        "required": [
+          "job_id",
+          "visibility_mode"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_store_push",
+      "description": "Push one or more prepared import drafts to the connected Shopify, WooCommerce or Wix store(s). SAFETY: Automatic pre-push validation checks pricing (blocks if sell price < cost or $0) and stock (blocks if all variants have zero inventory). Warnings are raised for low margin (<10%), low stock (<5 units), or very low price (<$1). If blocked, fix pricing rules or use force_push=true ONLY after explaining the risk to the user. Three modes: (1) Single push — provide job_id + target_store. (2) Batch push — provide job_ids_json with an array of job IDs or objects; takes priority over job_id. (3) Multi-store push — provide job_id + target_stores_json to push one product to multiple stores. SAFETY RESPONSE: If checks fail, response includes 'blocked' (array of reasons push was rejected — must fix before retrying) and/or 'warnings' (array of risk alerts — push proceeds but user should be informed). blocked = hard stop (e.g. sell below cost), warnings = soft alert (e.g. low margin). On success, returns per-job: job_id, status, target_store, visibility_applied, push_options_applied, job_summary, warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "description": "Single job ID from dsers_product_import. Used for single-push or multi-store mode.",
+            "type": "string"
+          },
+          "job_ids_json": {
+            "description": "Batch push: JSON array of job ID strings or objects {job_id, target_store?, target_stores?, push_options?, visibility_mode?}. Example: [\"job-abc123\", {\"job_id\": \"job-def456\", \"target_store\": \"My Store\"}]. When provided, this takes priority over job_id.",
+            "type": "string"
+          },
+          "target_store": {
+            "description": "Target store ID or display name from dsers_store_discover. Required when the account has multiple stores.",
+            "type": "string"
+          },
+          "target_stores_json": {
+            "description": "Multi-store: JSON array of store IDs or display names. Pushes the same job_id to each listed store. Example: [\"Store A\", \"Store B\"]",
+            "type": "string"
+          },
+          "visibility_mode": {
+            "description": "Override the visibility mode set during prepare. backend_only: draft — SAFE. sell_immediately: published and LIVE — RISK: confirm pricing/inventory with user first.",
+            "type": "string",
+            "enum": [
+              "backend_only",
+              "sell_immediately"
+            ]
+          },
+          "push_options_json": {
+            "description": "Push configuration as JSON string. Keys: publish_to_online_store (bool), image_strategy ('selected_only' or 'all_available'), pricing_rule_behavior ('keep_manual' or 'apply_store_pricing_rule'), shipping_profile_name (string — Shopify delivery profile name), auto_inventory_update (bool), auto_price_update (bool), sales_channels (string[]), only_push_specifications (bool). Example: {\"image_strategy\": \"all_available\", \"shipping_profile_name\": \"DSers Shipping Profile\"}. Any other key is SILENTLY IGNORED — it only produces a warning in the response, never an error, so a typo here is a no-op you will not notice unless you read warnings. In particular force_push is NOT accepted here: it is a separate top-level parameter, and putting it in this object does not override the safety checks.",
+            "type": "string"
+          },
+          "force_push": {
+            "description": "Override pre-push safety checks. ONLY set true after you have shown the user the specific risk (e.g., 'This product is priced below cost — you will lose $X per sale') and they explicitly confirmed. Never set this silently.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "dsers_job_status",
+      "description": "Check the current status of an import or push job. Status lifecycle: preview_ready → push_requested → completed or failed. Returns: job_id, status, target_store, push_status (if pushed), warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Job ID from dsers_product_import or dsers_store_push."
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_product_delete",
+      "description": "Permanently delete a product from the DSers import list. IRREVERSIBLE — the product cannot be recovered after deletion. Requires explicit confirmation (confirm=true) to execute. If called without confirm=true, returns a confirmation prompt — show this to the user. SCOPE: Only removes the product from DSers import list (pre-push staging area). Products already pushed to Shopify/Wix stores are NOT affected — to remove a store listing, use the Shopify/Wix admin directly. BUSINESS CONTEXT: Deleting from import list means losing the supplier mapping (link between the store product and the AliExpress/Alibaba supplier). If the user wants to re-import later, they will need the original supplier URL. AFTERWARDS, THE job_id IS DEAD. Deleting the import item does not clean up the job record this server keeps for it, so the job_id you used for preview, rules and push still exists but now points at nothing. Do not reuse it: any later dsers_product_preview, dsers_product_update_rules or dsers_store_push on that job_id operates on a deleted item. Start over with dsers_product_import and the original supplier URL. AGENT PROTOCOL: Before calling with confirm=true, always: 1) Show the user the product title and supplier URL. 2) Warn that this cannot be undone. 3) Get explicit user consent (e.g. 'yes, delete it'). Never set confirm=true without the user's explicit approval.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "import_item_id": {
+            "type": "string",
+            "description": "The import list item ID to delete. Obtain from dsers_product_preview (provider_state.import_item_id). That is the ONLY source: this server exposes no import-list listing tool, so if you never previewed the job you cannot recover the id from here — re-import from the supplier URL, or delete the item in the DSers UI."
+          },
+          "confirm": {
+            "description": "Set to true to confirm deletion. First call without this to get a confirmation prompt, then call again with confirm=true after user approves.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "import_item_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_orders_search",
+      "description": "Search orders across stores with counts by status (pending, awaitingOrder, awaitingPayment, awaitingShipment, awaitingFulfillment, fulfilled, cancelled, failed, received). Read-only. USE simplify=true IN PRACTICE. Probed on a live account holding one order in awaitingOrder: the default mode returned `orders: []` while reporting `count.total: '1'`, on four different filter shapes (no filter, storeIds, status, storeIds+tabStatus). simplify=true returned the order. So the default mode can tell you there are orders and hand you none — never conclude 'no orders' from it. Every downstream tool needs the order objects anyway: orderId, storeId and items[].itemId feed dsers_orders_fulfill and dsers_orders_edit_line_item, and only simplify=true returns them. THE THREE MODES RETURN THREE SHAPES. default: { orders, count, cursor, hideOrderCount, payingOrders } where count is an OBJECT of per-status totals. simplify=true: { orders, totalCount, cursor } where totalCount is a STRING. archived=true: { orders, count, cursor }. Read the right field for the mode you asked for — totalCount does not exist outside simplify mode. PAGINATION: pass the returned cursor back through filters_json as {\"cursor\": [...]}. An empty cursor array in the response means there is no next page — that is the end signal, not an error. COST: about 940 bytes per order in simplify mode, so roughly 47k tokens for 200 orders. No page-size parameter is exposed by this tool; if the account has many orders, filter by status or store rather than pulling everything, and walk the cursor page by page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "store_ids": {
+            "description": "Store IDs to search. Omit to search all connected stores.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "simplify": {
+            "description": "Return the lightweight summary list instead of full order objects.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          },
+          "archived": {
+            "description": "Search archived orders instead of active ones.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          },
+          "filters_json": {
+            "description": "Extra filters as JSON, merged into the request body (e.g. {\"status\":\"awaitingOrder\",\"startTime\":\"...\",\"cursor\":[...]}).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_orders_check_fulfillable",
+      "description": "Read-only eligibility probe before placing or fulfilling. Always run it before dsers_orders_place — it catches missing mappings and unavailable variants without spending money. HOW TO READ `items` — this is the part that decides whether money is spent, so read it precisely. A non-empty items array lists the orders that CANNOT be fulfilled, with the reason. An empty items array means only that nothing was rejected among the ids the server actually recognised — it is NOT proof that your ids were all checked. Two observed cases return an empty items array while verifying nothing: an empty order_ids array (now rejected by this tool's schema), and a list mixing valid ids with unknown ones, where the unknown ids are silently dropped rather than reported. An all-unknown list, by contrast, fails loudly with 'record not found'. SO: never infer 'all clear' from an empty items array alone. Confirm the ids exist first with dsers_orders_search (simplify=true), and check them in small batches so a silent drop cannot hide inside a large one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_ids": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Order IDs to check. At least one — an empty list returns a clean bill of health for nothing at all."
+          }
+        },
+        "required": [
+          "order_ids"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_orders_batch_progress",
+      "description": "Read-only progress on batch operations. THIS IS NOT A PER-TASK POLL, despite the parameter name. Captured from the DSers UI, the endpoint takes { appId, storeIds, types } and answers with one aggregate per task TYPE — successCount, failedCount, pendingCount, partiallyCount, plus orderIds and supplierOrderIds. A body carrying taskIds is accepted and ignored, returning { items: [] }: that is why polling a batchId used to look like a task stuck at zero forever. So to follow a placement, pass store_ids and leave types on its default (BATCH_TASK_TYPE_PLACE_ORDER), then read the counts and the orderIds. Use details=true for the per-order outcome, which does key off task ids.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Batch/task IDs. Only dsers_orders_batch_progress with details=true uses them — the progress endpoint itself ignores taskIds (see the description)."
+          },
+          "store_ids": {
+            "description": "Stores to aggregate over. Progress is reported per store, not per task.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "types": {
+            "description": "Task types to report, e.g. BATCH_TASK_TYPE_PLACE_ORDER (the default), BATCH_TASK_TYPE_MANUAL_FULFILL, BATCH_TASK_TYPE_ARCHIVE, BATCH_TASK_TYPE_CANCEL.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "details": {
+            "description": "Fetch full per-order results instead of progress only.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "task_ids"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_orders_report",
+      "description": "Read-only reporting: seller charts and order/sales detail, supplier charts and cost/order detail. Call with kind='has-data' first to check a report exists.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "has-data",
+              "seller-charts",
+              "seller-orders-detail",
+              "seller-sales-detail",
+              "supply-charts",
+              "supplier-cost-detail",
+              "supplier-orders-detail"
+            ],
+            "description": "Which report to fetch."
+          },
+          "params_json": {
+            "description": "Query params as JSON (e.g. {\"startTime\":\"...\",\"endTime\":\"...\"}).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_orders_place",
+      "description": "CRITICAL — places orders with the supplier and CHARGES the payment method on file. Spends real money and cannot be undone from this server. THIS IS THE LAST STEP, NOT THE FIRST. The captured DSers flow is: dsers_orders_check_fulfillable → dsers_orders_edit_line_item (sets the variant and the freightInfo shipping method) → dsers_orders_fulfill → this tool. Calling it on an order whose line items have no freight selection leaves DSers to choose, and the cost you showed the user is then not the cost charged. AGENT PROTOCOL: run dsers_orders_check_fulfillable first, show the user the order count and total cost, call this WITHOUT confirm to get the confirmation prompt, relay it verbatim, and only pass confirm=true after they approve. NEVER RETRY BLINDLY. There is no idempotency key: this server cannot tell a retry from a second purchase, and neither can DSers. If the call fails with a network error or a timeout, the orders may already have been placed. Do NOT call again with confirm=true. Instead call dsers_orders_search on those order ids and check whether their status already moved out of awaitingOrder, and only then decide with the user. A blind retry buys everything twice. READING THE RESPONSE — the raw reply carries TWO batchId fields and the useful one is nested: { batchId: '0', data: { batchId: '2069184393307619328' } }. The top-level batchId is always '0' and is NOT a task id. FOLLOWING THE BATCH: do not expect to poll that id directly. dsers_orders_batch_progress aggregates per task TYPE for a store, not per task id — call it with store_ids and read the counts and orderIds for BATCH_TASK_TYPE_PLACE_ORDER. Keep data.batchId for dsers_orders_batch_progress with details=true, which is the call that does key off task ids.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_ids": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Order IDs to place. At least one."
+          },
+          "payload_json": {
+            "description": "Additional placement fields as JSON (shipping selection, supplier account), merged into the request body. UNDOCUMENTED SHAPE: no capture of this endpoint's request body exists, so the accepted fields are unknown. Prefer setting the variant and shipping method beforehand with dsers_orders_edit_line_item, which has a verified body, and leave this empty.",
+            "type": "string"
+          },
+          "confirm": {
+            "description": "Set to true only after the user has explicitly approved this operation. Call without it first to receive the confirmation prompt to show them.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "order_ids"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "dsers_orders_fulfill",
+      "description": "CRITICAL — marks order items fulfilled. Requires user confirmation (see confirm). TWO DIFFERENT OPERATIONS BEHIND ONE ENDPOINT, selected by fulfillOnSeller: fulfillOnSeller=false (the captured default) fulfils inside DSers only. It is step 5 of the chain — it marks the order ready for placement and runs BEFORE dsers_orders_place. It is not visible to the shopper and sends no email. fulfillOnSeller=true marks the order fulfilled on the seller platform (Shopify/WooCommerce), which is what triggers the shipping-confirmation email when the store has emailIsEnable set. Decide which one you mean before calling, and tell the user which one you are doing — they are not interchangeable. REPLAY: the response is { data: { failedItems: [] } }. An empty failedItems means everything succeeded. Always read it — a 200 with a non-empty failedItems is a partial failure, not a success. Do not blindly re-call after a timeout; re-read the order status with dsers_orders_search (simplify=true) first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_ids": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Order IDs to fulfill. Used for the confirmation prompt and sent as orderIds; the captured endpoint body uses the SINGULAR orderId, so also put orderId in payload_json."
+          },
+          "payload_json": {
+            "description": "The real request body as JSON. Captured shape (observed 5 times): { \"orderId\": \"<id>\", \"lineItemIds\": [\"<itemId>\"], \"storeId\": \"<id>\", \"name\": \"<order name>\", \"itemValue\": { \"<itemId>\": { \"title\": \"<supplier product id>\", \"pic\": \"<image url>\" } }, \"fulfillOnSeller\": false, \"switchFulfillmentService\": false, \"cantFulfilledItemIds\": [] }. WHERE TO GET THESE: call dsers_orders_search with simplify=true — it returns orderId, storeId, orderName (→ name) and items[] with itemId (→ lineItemIds and the itemValue keys), productName (→ itemValue.title) and imageUrl (→ itemValue.pic). The non-simplify mode does not return the order objects, so it cannot supply these fields.",
+            "type": "string"
+          },
+          "confirm": {
+            "description": "Set to true only after the user has explicitly approved this operation. Call without it first to receive the confirmation prompt to show them.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "order_ids"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "dsers_orders_update",
+      "description": "Mutates an order. Four unrelated operations share this tool, and they do NOT share a risk level: `address` is CRITICAL (an already-placed parcel may ship to the wrong destination), `archive` and `message` need review, `flag` is cosmetic and executes immediately. All but `flag` require confirm=true. The tool-level annotations describe the worst case (`address`), so treat the destructive marking as per-action, not per-tool. ONLY THE `message` BODY IS VERIFIED. Its shape comes from captured traffic; the shapes for `address`, `archive` and `flag` have never been observed, so build them from what DSers returns for that order rather than from a guess, and show the user the exact body before confirming. `archive` has no pre-check wired in: DSers exposes a check-orders-can-archive probe, but no tool surfaces it, so an archive that DSers would refuse only fails at write time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "address",
+              "archive",
+              "message",
+              "flag"
+            ],
+            "description": "Which mutation to apply."
+          },
+          "order_ids": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Order IDs affected. Used for the confirmation prompt, and also sent as orderIds — which DSers IGNORES on this family. Probed against the live API on update-order-flag: a body carrying only orderIds fails with 'record not found', a body carrying orderId succeeds, and a body carrying both succeeds. So orderId in payload_json is what actually selects the order — this parameter alone will not do it."
+          },
+          "payload_json": {
+            "type": "string",
+            "description": "Mutation body as JSON, merged over { orderIds }. message — VERIFIED (captured twice): { \"storeId\": \"<id>\", \"orderId\": \"<id>\", \"settingMessage\": \"<supplier note>\", \"supplierAppId\": \"159831080\", \"sellerMessage\": \"<seller note>\" }. address / archive / flag — NOT VERIFIED: no capture of these request bodies exists. Their fields are unknown; do not assume an `archived` boolean or a bare flag value. Read the order first (dsers_orders_search with simplify=true) and mirror the field names it returns."
+          },
+          "confirm": {
+            "description": "Set to true only after the user has explicitly approved this operation. Call without it first to receive the confirmation prompt to show them.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "order_ids",
+          "payload_json"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_orders_edit_line_item",
+      "description": "Sets the variant and shipping method on an order line item, changing cost and delivery time. Requires confirm=true. THIS IS STEP 4 OF THE FULFILMENT CHAIN and it is not optional: it is what pins the freight choice. Skipping it leaves DSers to pick, so the cost you quoted the user is not the cost dsers_orders_place charges. Setting the same variant and freight twice has no additional effect, so a retry with an identical body is safe — unlike dsers_orders_place.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payload_json": {
+            "type": "string",
+            "description": "Full action-edit body as JSON. VERIFIED shape (captured from the DSers UI): { \"orderId\": \"<id>\", \"storeId\": \"<id>\", \"lineItemId\": \"<id>\", \"supplyVariantId\": \"14:173#Cup Holder;200007763:201336100\", \"supplyProductId\": \"<supplier product id>\", \"supplyAppId\": \"159831080\", \"supplyId\": \"<dsers supply id>\", \"freightInfo\": { \"serviceId\": \"...\", \"companyName\": \"...\", \"currency\": \"USD\", \"amount\": \"199.00\", \"time\": { \"mode\": 0, \"min\": 9, \"max\": 12, \"formatTime\": \"\" }, \"shipFrom\": \"CN\", \"shipTo\": \"FR\", \"tracking\": true, \"currencyAmount\": { \"amount\": \"199.00\", \"currencyCode\": \"USD\" } }, \"syncMapping\": false }. WHERE TO GET THESE: orderId, storeId and lineItemId (= items[].itemId) come from dsers_orders_search with simplify=true. supplyId, supplyProductId and supplyVariantId come from dsers_mapping_inspect (what='suppliers'). freightInfo maps one-to-one onto a freight option from dsers_supplier_inspect: serviceId, companyName, currency, amount, shipFrom and tracking carry over unchanged, and its minDays/maxDays become time.min/time.max. UNITS: freightInfo.amount is a DECIMAL STRING in major units ('199.00' = 199 USD, '0.00' = free) — the same convention as freight options in dsers_supplier_inspect, and the opposite of that tool's price_range, which is in minor units. Do not copy a price_range value in here."
+          },
+          "order_ids": {
+            "description": "Order IDs, for the confirmation prompt only. Unlike the other order write tools, they are NOT merged into the request body — put orderId in payload_json.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirm": {
+            "description": "Set to true only after the user has explicitly approved this operation. Call without it first to receive the confirmation prompt to show them.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "payload_json"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_csv_upload",
+      "description": "Uploads a CSV to DSers for merchants on a CSV (non-Shopify) store. Handles the full STS → object storage → submit flow; pass the file content directly. This stages an import that DSers validates — it does not place orders or spend money, so it runs without a confirmation step. WHY THIS IS NOT A MONEY OPERATION: an imported order lands in Open Orders and still has to be submitted explicitly — DSers' own guide ends with 'go to Open Orders and click ORDER on the order card', and from this server that submission is dsers_orders_place, which is gated. Uploading alone spends nothing. ONE CAVEAT THIS SERVER CANNOT CHECK: DSers has a per-supplier auto-place-order setting. No tool here reads it, so if the merchant has enabled it, staged orders may be placed by DSers without any further call from you. Before uploading a large order file, tell the user this and ask whether auto-place is on for their supplier. IMPORTANT: upload kind='products' BEFORE any order file that references its SKUs, otherwise the order import fails with 'product not upload'. The file must be UTF-8 with the DSers headers. Poll dsers_csv_status afterwards.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "orders",
+              "products"
+            ],
+            "description": "Which import file this is."
+          },
+          "file_name": {
+            "type": "string",
+            "description": "File name ending in .csv."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full UTF-8 CSV text, including the header row."
+          }
+        },
+        "required": [
+          "kind",
+          "file_name",
+          "content"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_csv_status",
+      "description": "Read-only. `process` polls the running import and returns { hasResult, hasError, errReason } — hasResult:true with hasError:false means the import finished cleanly. `product_file` returns the current product mapping file as { date, fileName }. `order_files` lists the order files uploaded previously, newest first, as { date, fileName }. It is paginated server-side (50 per page) — DSers refuses an unpaginated call, so this tool always sends a page size.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "what": {
+            "type": "string",
+            "enum": [
+              "process",
+              "order_files",
+              "product_file"
+            ],
+            "description": "What to fetch."
+          }
+        },
+        "required": [
+          "what"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_plan_info",
+      "description": "Read-only. `limits` is the one to check before attempting a gated feature — it reports storeLimit, productLimit, importLimit, importDayLimit, and booleans for pricingRule, syncStock, bundle and advancedVariantMapping. Checking it first avoids operations that would fail with a plan error. `limits` IS THE ONE YOU WANT — it describes the CURRENT plan in about 800 bytes. `all_type_limits` is a pricing table: it returns the limits of every plan tier at once, measured at 22 KB (~5.5k tokens) on a live account. Only call it when the user is comparing plans, never to check what they can do now.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "what": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "limits",
+              "all_type_limits",
+              "ai_surplus",
+              "billing",
+              "billing_status"
+            ],
+            "description": "Which information to fetch."
+          }
+        },
+        "required": [
+          "what"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_mapping_inspect",
+      "description": "Read-only view of how a DSers product routes to suppliers. `current` returns the mapping IN FORCE — the document dsers_mapping_set replaces — plus a `summary` counting the live seller variants that route nowhere. Read this before any write: DSers answers 200 with a full-looking document even when every variant is unmapped, so the summary is the only signal that a product is not actually routing. `suppliers` lists candidate supplier products and variants, `status` reports an in-flight mapping job, `auto_process` reports the automatic mapping queue.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "what": {
+            "type": "string",
+            "enum": [
+              "current",
+              "suppliers",
+              "status",
+              "auto_process"
+            ],
+            "description": "What to inspect."
+          },
+          "dsers_product_id": {
+            "description": "Required for `current`, `suppliers` and `status`.",
+            "type": "string"
+          },
+          "store_id": {
+            "description": "Store owning the product, for `current`. From dsers_store_discover. The DSers UI always sends it; the call has only ever been observed with it, so omitting it is untested rather than known-safe.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "what"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_mapping_set",
+      "description": "Writes the supplier mapping for a DSers product — this decides which supplier variant a customer order is routed to, so a wrong mapping silently ships the wrong item. Show the user the change and only then pass confirm=true. THIS IS A FULL REPLACEMENT, NOT A PATCH: the body you send becomes the whole mapping. Omit a seller variant and you unmap it. ALWAYS READ FIRST with dsers_mapping_inspect what='current': it returns the document in force. Modify that document and send it back whole — a captured save does exactly this and the server accepts it. Never assemble a body from scratch when a read is available. Check the `summary` of that read before and after: live_variants_unmapped counts seller variants that route nowhere, and DSers reports no error for them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dsers_product_id": {
+            "type": "string",
+            "description": "DSers product to remap."
+          },
+          "mapping_json": {
+            "type": "string",
+            "description": "Mapping body as JSON. NORMALLY: the `data` object returned by dsers_mapping_inspect what='current', with your edits applied and every other field left untouched. A captured save posts that document back verbatim — all of it, including fields that look read-only (price, currency, checked, agencyId, camId, supplyProductMainImg, optionsEdited, customizeInfoId) — and the server returns 200. A second captured save prunes those fields and adds a top-level store_id; that is also accepted. Prefer the echo: it needs no guessing. VERIFIED shape: { \"dsersProductId\": \"<same id as the parameter — send it in the body too>\", \"mappingType\": \"<the mode IN FORCE — see below>\", \"pool\": [ { \"supplyAppId\": \"159831080\", \"supplyProductId\": \"<id>\", \"supplyProductTitle\": \"...\", \"mainImgUrl\": \"...\", \"mappingType\": \"MapBas\", \"optionMap\": [ { \"sellerOption\": {...}, \"supplyOption\": {...} } ], \"supplyStoreName\": \"...\", \"supplyStoreUrl\": \"...\", \"applyType\": [\"BasicDefault\"] } ], \"mapping\": [ { \"sellerVariantId\": \"<pb_sku, e.g. PSM-Y3Z11MFQKS>\", \"sellerVariantTitle\": \"...\", \"sellerVariantImage\": \"\", \"customizeInfoId\": \"\", \"options\": [], \"optionsSnapshot\": [], \"variantDelete\": false, \"mappings\": [ { \"mappingType\": \"MapBas\", \"isDefault\": true, \"supplyAppId\": \"159831080\", \"supplyProductId\": \"<id>\", \"supplyVariantId\": \"14:173#Cup Holder;200007763:201336100\", \"supplyVariantTitle\": \"...\", \"supplyVariantImg\": \"...\", \"quantity\": 1, \"country\": [], \"supplyOptions\": [ { \"optionId\": \"14\", \"optionName\": \"Color\", \"valueId\": \"173\", \"valueName\": \"Cup Holder\", \"imgUrl\": \"...\" } ] } ] } ] }. pool[] is the supplier catalogue for this product; mapping[] is the routing, one entry per seller variant. MAPPING TYPES DECIDE WHAT ACTUALLY SHIPS. The top-level mappingType is the mode in force (the UI's 'Current In Use'). Each entry of mappings[] carries its own mappingType, so one variant can hold several alternatives and only those matching the top-level mode route orders. Adding a supplier under an inactive mode looks like a successful mapping and ships nothing. Values observed in captures: 'MapBas' (basic), 'MapDef' (default), 'MapNewAdv' (advanced); 'MapWeb' and 'MapRzm' appear in DSers docs. pool[].applyType names the mode a supplier serves ('BasicDefault', 'NewAdvancedDefault'). sellerVariantId is the DSers pb_sku — the same value that appears as variantName on order items in dsers_orders_search (simplify=true). It embeds the variant label, so renaming a variant in the store creates a NEW sellerVariantId and silently orphans its mapping; the old one stays behind with variantDelete=true, still carrying the supplier. supplyProductId / supplyVariantId come from dsers_mapping_inspect (what='suppliers'); supplyVariantId uses the same grammar as the freight variantId in dsers_supplier_inspect."
+          },
+          "confirm": {
+            "description": "Set to true only after the user has explicitly approved this operation. Call without it first to receive the confirmation prompt to show them.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "dsers_product_id",
+          "mapping_json"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsers_supplier_inspect",
+      "description": "READ-ONLY sourcing analysis for one or more AliExpress URLs or product ids. Chains parse-url → product detail → per-variant freight in a single call, and creates NO import draft, so it does not consume the daily import quota. Use this — not dsers_product_import — when the user asks you to evaluate, compare or shortlist products. Import only what survives the analysis. RETURNS per product: title, is_choice, rating, orderNum, store ratings (itemAsDescribed / communication / shippingSpeed), price range, variant and in-stock counts, option summary, media URLs, and real shipping cost, delivery window and tracking availability. PRICES ARE IN MINOR UNITS. price_range.min/max and freight[].price are integers in the smallest unit of price_range.currency — divide by 100 to get the amount. price_range {min:13897, currency:'USD'} means $138.97, NOT $13,897. freight[].options[].amount is the opposite: a decimal string already in major units ('0.00' = free). Never compare the two without converting first — a margin computed on the raw integers is wrong by a factor of 100. COST IN CONTEXT: roughly 600 tokens per product with freight_mode='sample', and about 8s of latency each. Inspect in batches of 10-15, not 100+ — a 170-product sourcing list would return ~100k tokens. Narrow the list first (by category, or with dsers_dedupe_grid), then inspect the shortlist. URLS IT CANNOT RESOLVE: only /item/<id>.html links and bare numeric ids are parsed locally; anything else is sent to DSers, which rejects AliExpress bundle/SSR links (aliexpress.com/ssr/.../BundleDeals2?productIds=<id>:<sku>) with 'invalid product url'. Those links do carry the id — take the digits before the ':' in productIds and pass that id instead of the URL. READING THE RESULT: is_choice=true means AliExpress fulfils the order under its own commitment (90-day returns, refund if late) — a POSITIVE signal for goods shipped from China, never a reason to exclude. orderNum is a product-level sales tier shared by every reseller of the same item, so it CANNOT rank two sellers of the same product. An empty freight list on a variant means that variant is unavailable (usually out of stock), not that the product cannot be shipped. is_local=true means the stock sits in a warehouse in the destination country (AliExpress Local+) — these typically ship free in 2-7 days instead of 5-9 from China, which usually outweighs a lower unit price. But is_local is a strict country match, so DO NOT rank on it alone: read ships_from and the freight entries. A product warehoused in Germany reports is_local=false for a French buyer, yet still ships free and tracked in 3-8 days — far better than China, and better than a lower-priced CN listing. The reliable signal is freight[].options[]: shipFrom, amount and min/maxDays. Rank on those; treat is_local as a shortcut that is only correct when it is true. Prices are quoted for ship_to_country (see priced_for), so they can be compared directly against the freight cost; the same product priced for another market can differ by 15% or more. To detect the same product resold by different sellers, compare the returned `medias` visually — resellers reuse the manufacturer's image pack, while titles, brand names and variant labels differ and will mislead you.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "AliExpress product URLs or bare product ids."
+          },
+          "ship_to_country": {
+            "default": "US",
+            "description": "Destination country code for the freight lookup, e.g. FR, US, GB, DE.",
+            "type": "string"
+          },
+          "ship_to_province": {
+            "description": "Optional province/region — narrows the delivery window, not the cost.",
+            "type": "string"
+          },
+          "quantity": {
+            "description": "Units per freight quote. Default 1.",
+            "type": "number"
+          },
+          "freight_mode": {
+            "description": "sample (default): quote the cheapest, median and dearest in-stock variant — enough to bound shipping cost across the range. all: every in-stock variant (one request each; expensive on wide catalogues). none: skip freight entirely.",
+            "type": "string",
+            "enum": [
+              "sample",
+              "all",
+              "none"
+            ]
+          },
+          "supply_app_id": {
+            "description": "Supplier platform app id. Defaults to AliExpress (159831080).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sources"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "dsers_dedupe_grid",
+      "description": "READ-ONLY. Renders one labelled row of product images per source and returns it as an image you can look at directly. Use it to decide whether several listings are the same item resold by different sellers. WHY VISUAL: resellers reuse the manufacturer's image pack, so identical rows mean the same product — while titles, brand names and variant labels differ between sellers and will fool a metadata comparison. HOW TO READ IT: rows are keyed A, B, C…; compare them image by image. Identical photo sets = same product. Judge the whole set, not the first image: the cover shot is often the only one a reseller replaces. Watch for the two cases that look like duplicates but are not — same base product with a different variant range, and a listing that bundles an extra accessory or consumable. Pair with dsers_supplier_inspect: this call decides identity, that one supplies the price, stock, freight and seller ratings needed to pick the winner. SIZE AND COST, measured: 6 products x 8 images at the default cell_size renders a 2134x1770 sheet, about 500 KB of JPEG. The picture itself is cheap to look at (~2.7k tokens once the host rescales it), but the response carries ~685k characters of base64, and resolving 6 products takes ~20s. Stay in the 2-8 range per call; beyond that lower cell_size (140px roughly halves the sheet) and compare in several passes rather than one huge grid. A SOURCE THAT RETURNS NO IMAGE IS DROPPED FROM THE SHEET, not from the response: row keys are assigned before that filtering, so a failed source leaves a HOLE IN THE LETTERING — you may get rows A, B, D, E with no C. Always reconcile the rows you see against the products array, which lists every source with its key; a key present there and absent from the image is a product that could not be resolved, not a product without duplicates. DUPLICATE SOURCES ARE NOT DETECTED. Passing the same id or URL twice renders two identical rows, which look exactly like the duplicate you are hunting. De-duplicate your input list first — sourcing lists scraped from search results routinely contain the same product twice.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "minItems": 2,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "AliExpress product URLs or ids to compare — at least two."
+          },
+          "include_variant_images": {
+            "description": "Append the per-option (colour) images after the main gallery. Useful when listings differ only by variant range.",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          },
+          "max_images_per_product": {
+            "description": "Cap on images per row. Default 8.",
+            "type": "number"
+          },
+          "cell_size": {
+            "description": "Pixel size of each cell. Default 260; lower it for many products.",
+            "type": "number"
+          },
+          "ship_to_country": {
+            "description": "Destination country, needed to resolve products sold in one market only.",
+            "type": "string"
+          },
+          "supply_app_id": {
+            "description": "Defaults to AliExpress (159831080).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sources"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "dsers_product_split",
+      "description": "Splits one import draft into several products — by variant, by option (e.g. one product per colour), or by a custom subset you choose. Operates on drafts only, so nothing customer-facing changes. The three modes share almost the same body; only the selector differs. AFTER THE SPLIT the response does not name the drafts it created — re-list the import list to find them (this server exposes no listing tool yet), or work from dsers_product_import per product when you want a job_id you can act on.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "variant",
+              "option",
+              "custom"
+            ],
+            "description": "variant: split on the full value set of every option. option: split on one option, DSers keeps the rest. custom: split on the subset of values you list."
+          },
+          "payload_json": {
+            "type": "string",
+            "description": "Split body as JSON. VERIFIED shapes, captured from the DSers UI. variant and custom take the same form — custom simply lists fewer values: { \"importListId\": \"<id>\", \"variants\": { \"Color\": { \"data\": [\"Grey\", \"Blue\"] }, \"Size\": { \"data\": [\"M 62x50cm\"] }, \"Ships From\": { \"data\": [\"China Mainland\"] } }, \"isKeepUsvImages\": true, \"byLanguage\": \"EN\" }. option takes a single option name instead: { \"importListId\": \"<id>\", \"option\": \"Size\", \"isKeepUsvImages\": true, \"byLanguage\": \"EN\" }. importListId is provider_state.import_item_id from dsers_product_preview. The option names and values must match those in the preview exactly — they are the supplier's own labels ('Ships From', 'China Mainland'). isKeepUsvImages carries the per-variant images over to the new products."
+          }
+        },
+        "required": [
+          "mode",
+          "payload_json"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "dsers-mcp-community",
+    "version": "2.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": "DSers dropshipping automation server. It covers the whole merchant journey, not just\nproduct import: sourcing, duplicate detection, import and editing, publishing to a\nstore, order fulfilment, and reporting.\n\nTHE JOURNEY AND THE TOOL FOR EACH STEP\n1. Connect & discover — dsers_store_discover (stores, rules), dsers_plan_info (quotas).\n2. Source — dsers_supplier_inspect on supplier URLs or ids. Read-only, spends no quota.\n3. De-duplicate — dsers_dedupe_grid renders a visual contact sheet; identical photo sets\n   mean the same product resold by different sellers.\n4. Select — your judgement, on the prices, freight, stock and ratings from step 2.\n   dsers_rules_validate checks a pricing or content rule before you commit to it.\n5. Import & edit — dsers_product_import, then dsers_product_preview,\n   dsers_product_update_rules, dsers_product_visibility, dsers_product_delete.\n6. Publish — dsers_store_push. Check pricing_rule and push_supported first.\n7. Orders — dsers_orders_search → dsers_orders_check_fulfillable →\n   dsers_orders_edit_line_item → dsers_orders_fulfill → dsers_orders_place →\n   dsers_orders_batch_progress. Also dsers_orders_update, dsers_mapping_inspect\n   and dsers_mapping_set.\n8. Operate — dsers_orders_report, dsers_plan_info, dsers_csv_status, dsers_job_status.\n\nAUTH: If any tool returns an auth error, stop all operations and tell the user:\n\"Please run this in your terminal: npx @mounsecom/dsers-mcp login\"\nThis opens the official DSers website in the user's browser. Their password never passes through this tool. Sessions last ~6 hours; on expiry, ask the user to re-login. NEVER retry auth errors silently.\n\nMONEY: dsers_orders_place charges the payment method. It is the LAST step of the order\nchain, not the first, and it has no idempotency key — after a timeout, never call it\nagain with confirm=true; re-read the order status with dsers_orders_search instead.\nEvery gated write returns a confirmation payload on the first call: relay it to the user\nverbatim and only retry with confirm=true once they approve. Never set confirm yourself.\n\nEMPTINESS IS NOT SUCCESS. Several endpoints answer an empty result that looks like a\npass. dsers_orders_check_fulfillable returns an empty items array when it recognised\nnone of your ids just as when everything is fine, and it silently drops unknown ids from\na mixed list. dsers_orders_search in its default mode returns no order objects at all\nwhile reporting a non-zero count — use simplify=true, which is also the only mode\nreturning the orderId, storeId and items[].itemId the fulfilment tools need. Polling the\nwrong batch id returns an empty progress report rather than an error.\n\nUNITS: dsers_supplier_inspect returns price_range and freight[].price as INTEGERS in\nminor units (13897 = 138.97), while freight[].options[].amount and the freightInfo you\nsend to dsers_orders_edit_line_item are DECIMAL STRINGS in major units ('0.00' = free).\nMixing the two is a factor-of-100 error in your margins. The country on\ndsers_product_import localises the prices, so it must match the ship_to_country used\nwhile sourcing, or the cost you compared is not the cost you imported.\n\nIDS: sellerVariantId is the DSers pb_sku, the same value that appears as\nitems[].variantName on orders. supplyVariantId ('14:173#Cup Holder;200007763:201336100')\nis the AliExpress SKU, shared by dsers_supplier_inspect freight entries,\ndsers_mapping_set and dsers_orders_edit_line_item.\n\nQUOTA: dsers_product_import consumes importLimit and importDayLimit. To evaluate or\ncompare candidates, use dsers_supplier_inspect, which consumes none. Read the counters\nwith dsers_plan_info what='limits' — not all_type_limits, which is a 22 KB pricing table.\n\nRESPONSES: Default responses are compact — all variants shown with [name, sell, qty] columns, plus price_summary for quick stats. Use variant_detail='full' on dsers_product_preview when you need compare_at/cost columns. Batch imports return summary mode by default (~100 tokens/product); use dsers_product_preview on individual jobs for full details. Option values are truncated to 10 per option; set show_all_options=true before option_edits. dsers_supplier_inspect costs roughly 600 tokens per product, so work in batches of 10-15.\n\nRULES: Use dsers_product_update_rules to modify rules incrementally. Pricing/images/variant_overrides replace by family. Content fields merge individually (title_prefix preserved when setting description). option_edits always fully replaced. Clear a content field with '' or null. Do not mix flat parameters and rules_json for the same family — rules_json replaces that whole family and the flat values are dropped.\n\nPRICING CONFLICT: DSers stores may have their own Pricing Rule enabled (basic/standard/advanced). Check the pricing_rule field in dsers_store_discover. If enabled AND you set MCP pricing rules, push will be BLOCKED — not warned. The block returns two fix_options: (1) set pricing_rule_behavior='apply_store_pricing_rule' to accept DSers pricing, (2) disable the DSers Pricing Rule in store settings to use MCP pricing. If the pricing rule API is unreachable, push proceeds with a warning instead of blocking.\n\nSTORES: Only Shopify, WooCommerce and Wix stores can receive pushes; a CSV store cannot. The platform comes from the store's appid resolved through the DSers app catalogue, so check push_supported in dsers_store_discover and trust it when the store also carries a platform field. If platform is ABSENT the catalogue could not be read: treat push_supported: false as 'unconfirmed', ask the user which platform the store runs, and never tell them their store is unsupported on that alone. On a store object only id and name are always present — an absent field is not a false value.\n\nSAFETY: Push operations auto-check pricing and stock before sending to the store. Hard blocks (sell price < cost, zero price, all variants out of stock) prevent the push. Show the user the exact issue. Only use force_push=true after the user explicitly confirms they accept the risk.\n\nPASSTHROUGH BODIES: several order and mapping tools take a payload_json whose shape comes from captured DSers traffic. Where a tool documents that shape, follow it exactly. Where it says the shape is unverified or unknown, do not invent fields on the user's real data — ask them, or do that step in the DSers UI.\n\nERRORS: All errors return {Error, Cause, Action}. Follow the Action field.\n\nRATE LIMIT: 20 req/s. Excess requests queue automatically — no action needed.",
+  "durationMs": 10155,
+  "stderr": "Warning: No DSers credentials found.\nSet DSERS_EMAIL and DSERS_PASSWORD in your MCP client config,\nor run 'npx @mounsecom/dsers-mcp login' to authenticate via browser.\n\ntime=\"2026-11-10T09:08:31-05:00\" level=error msg=\"Error forwarding signal 15 to container ffad2a64320878c02cea04e5fdffe22b714498b01b632db0669b5a4d23e9fb88: container has already been removed\"\n"
+}

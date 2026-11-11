@@ -1,0 +1,907 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "gongsi-mcp",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha512-sSK7gTy81mtzxD0hPr3mXe61Im4FT/9J6MtnbUeaL4jaqEDxcq5QWZDXkzXKBSSOvPiAcAF9mx+u6W+0n/ep5w==",
+    "installed": "sha512-sSK7gTy81mtzxD0hPr3mXe61Im4FT/9J6MtnbUeaL4jaqEDxcq5QWZDXkzXKBSSOvPiAcAF9mx+u6W+0n/ep5w=="
+  },
+  "bin": "node_modules/gongsi-mcp/dist/src/cli.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T16:30:32.085Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "check_disclosure_duty",
+      "description": "공정거래법상 공시의무 대상 여부를 판정하고 공시기한·지연 시 예상 과태료를 계산합니다. 외부 API를 쓰지 않으므로 인증키 없이 동작합니다.\n\n판정 결과에는 항상 근거 조문과 계산식이 포함됩니다. 자본총계·자본금이 없으면 추정하지 않고 insufficient_data 를 반환하므로, 그때는 get_financials 로 재무수치를 먼저 조회하세요.\n\n⚠️ 거래금액 산정 방식(amountBasis)에 주의하세요 — 담보제공은 담보한도액, 부동산임대차는 연간임대료+보증금환산액, 보험은 보험료총액, 상품·용역은 분기 합계액입니다. 틀리면 판정이 뒤집힙니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "duty": {
+            "type": "string",
+            "enum": [
+              "large_internal_transaction",
+              "unlisted_material",
+              "group_status",
+              "public_interest_corp",
+              "omnibus_financial",
+              "goods_services_reduced"
+            ],
+            "description": "공시의무 유형. large_internal_transaction=대규모내부거래(법§26), unlisted_material=비상장사 중요사항(법§27), group_status=기업집단현황(법§28), public_interest_corp=공익법인(법§29), omnibus_financial=약관에 의한 금융거래 특례(고시§9), goods_services_reduced=상품·용역 20%↑ 감소(고시§9의2)"
+          },
+          "listing": {
+            "description": "상장 여부. 대규모내부거래 기한이 갈린다 (상장 3영업일 / 비상장 7영업일)",
+            "type": "string",
+            "enum": [
+              "listed",
+              "unlisted"
+            ]
+          },
+          "boardDate": {
+            "description": "이사회 의결일 (대규모내부거래·공익법인)",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "occurredDate": {
+            "description": "사유 발생일 (비상장사 중요사항)",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "quarterEnd": {
+            "description": "분기 종료일 (약관 금융거래·상품용역 감소)",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "year": {
+            "description": "연도 (기업집단현황)",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "quarter": {
+            "description": "분기. 지정하면 분기공시(종료 후 2개월), 생략하면 연1회(5/31)",
+            "anyOf": [
+              {
+                "type": "number",
+                "const": 1
+              },
+              {
+                "type": "number",
+                "const": 2
+              },
+              {
+                "type": "number",
+                "const": 3
+              },
+              {
+                "type": "number",
+                "const": 4
+              }
+            ]
+          },
+          "amount": {
+            "description": "거래금액 (원). 기준금액과 비교해 공시 대상 여부를 판정하고, 지연 시 과태료의 거래금액별 적용비율(고시 Ⅵ.2 — 100억원 미만이면 90~50%)에도 쓰인다. 약관 금융거래는 분기 일괄 거래금액, 상품·용역 감소 특례는 실제 거래금액을 넣는다",
+            "type": "number",
+            "minimum": 0
+          },
+          "amountBasis": {
+            "description": "거래금액 산정 방식 (고시§4③). ⚠️ 틀리면 판정이 뒤집힌다. collateral_limit=담보제공은 담보한도액, lease_annualized=부동산임대차는 연간임대료+보증금환산, insurance_premium_total=보험은 보험료총액, quarterly_sum=상품용역은 분기 합계액",
+            "type": "string",
+            "enum": [
+              "actual",
+              "collateral_limit",
+              "lease_annualized",
+              "insurance_premium_total",
+              "quarterly_sum"
+            ]
+          },
+          "totalEquity": {
+            "description": "자본총계 (원). 주총 승인된 최근 사업연도말 재무제표 기준",
+            "type": "number"
+          },
+          "paidInCapital": {
+            "description": "자본금 (원). 이사회 의결일 직전일 기준",
+            "type": "number"
+          },
+          "totalAssets": {
+            "description": "자산총액 (원). 비상장사 중요사항 중 고정자산 판정용",
+            "type": "number"
+          },
+          "materialItem": {
+            "description": "비상장사 중요사항 세부 항목. 임계 비율형: fixed_asset=고정자산 취득·처분(자산총액 10%), other_corp_stock=타법인 주식(자기자본 5%), gift=증여(1%), guarantee=담보·보증(5%), debt_relief=채무 면제·인수(5%), shareholding_change=최대·주요주주 지분 1%p 변동. 금액 무관 결정형: capital_change=증자·감자, cb_bw_issue=CB·BW 발행, business_transfer=영업양수도·합병·분할, stock_exchange_transfer=주식 포괄적 교환·이전, dissolution=해산, rehabilitation=회생절차, restructuring_procedure=기촉법 관리절차",
+            "type": "string",
+            "enum": [
+              "fixed_asset",
+              "other_corp_stock",
+              "gift",
+              "guarantee",
+              "debt_relief",
+              "shareholding_change",
+              "capital_change",
+              "cb_bw_issue",
+              "business_transfer",
+              "stock_exchange_transfer",
+              "dissolution",
+              "rehabilitation",
+              "restructuring_procedure"
+            ]
+          },
+          "shareholderType": {
+            "description": "shareholding_change 전용 — largest=최대주주(7영업일 공시) / major=주요주주(분기별 공시, 고시 §5의2④ 단서). 기한이 완전히 달라지므로 반드시 구분하세요",
+            "type": "string",
+            "enum": [
+              "largest",
+              "major"
+            ]
+          },
+          "shareChangePct": {
+            "description": "shareholding_change 전용 — 발행주식총수 대비 지분 변동 크기 (%p). 1 이상이면 공시 대상",
+            "type": "number"
+          },
+          "isFinancialCompany": {
+            "description": "금융업·보험업 영위 여부 (비상장사 중요사항 대상회사 판정용 — 영위하면 제외)",
+            "type": "boolean"
+          },
+          "specialRelated20pct": {
+            "description": "자산총액 100억 미만 회사의 대상 판정용 — 동일인·친족이 합산 20% 이상 소유한 회사(또는 그 회사가 50% 초과 소유한 자회사)인지 (고시 §2②2호)",
+            "type": "boolean"
+          },
+          "inLiquidationOrDormant": {
+            "description": "청산 절차 진행 중 또는 1년 이상 휴업 중인지 (고시 §2②2호 단서의 제외 요건)",
+            "type": "boolean"
+          },
+          "actualDisclosureDate": {
+            "description": "실제 공시일. 주면 기한 준수 여부와 지연일수를 함께 판정한다",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "today": {
+            "description": "오늘 날짜 (기본: 시스템 날짜). D-day 계산 기준",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "estimatePenaltyIfLate": {
+            "description": "지연이 확인되면 예상 과태료도 함께 산정할지 (기본 true)",
+            "type": "boolean"
+          },
+          "boardResolution": {
+            "description": "과태료 산정용: 이사회 의결을 실제로 거쳤는지. 대규모내부거래·공익법인(§26 계열)에서 의결 없이 공시하거나 미공시한 사건은 별표 9의 \"의결 X\" 칸(기본금액 5,000만~7,000만원)이 적용되어 금액이 크게 달라집니다. 생략하면 의결을 거친 것으로 가정하고 그 가정을 caveat 로 알립니다",
+            "type": "boolean"
+          },
+          "disclosureStatus": {
+            "description": "공시 이행 상태. not_disclosed(아직 공시 전)를 명시하면 기한 경과 시 자진시정 골든타임을 계산합니다. 생략하면 미공시로 단정하지 않습니다 — 기한만 조회하는 호출과 구분하기 위한 명시적 입력입니다",
+            "type": "string",
+            "enum": [
+              "not_disclosed",
+              "disclosed"
+            ]
+          },
+          "situation": {
+            "description": "거래 상황 서술 (예: \"계열사 발행어음이 만기 후 자동연장됨\", 500자 이내). 주면 유사한 공정위 공식 Q&A를 relatedOfficialQna 로 함께 돌려줍니다 — 규칙만으로 판정하기 어려운 경계사례(대상 여부·거래 성격)에 유용합니다",
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "duty"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "calc_business_days",
+      "description": "한국 영업일·공휴일 기준의 날짜 계산을 담당합니다. 날짜 하나를 주면 영업일 여부와 공휴일 명칭, 기한 말일이 비영업일일 때의 다음 최초 영업일을 돌려주고, N영업일/N달력일 기한 계산과 남은 영업일 세기도 지원합니다. 로컬 데이터라 인증키 없이 동작합니다.\n\n⚠️ 공휴일은 법령 개정으로 바뀝니다 — 예: 2027년부터 노동절(5/1)이 공휴일로 신설되어 2027-05-03(월)이 대체공휴일입니다. 모델의 자체 달력 지식은 최신 개정을 모를 수 있으므로, 기한·영업일·공휴일이 걸린 날짜 질문에는 반드시 이 도구를 호출하세요.\n\n- 결과에는 건너뛴 비영업일 목록(날짜·요일·공휴일 명칭)과 근거 조문이 동봉됩니다\n- 근로자의 날(5/1)은 관공서 공휴일이 아니어서 민법 기간계산과 고시 영업일 계산이 갈립니다 — 해당 시 notes 로 안내합니다 (2027년부터는 노동절 공휴일 신설로 차이가 사라집니다)\n- 공휴일 데이터가 없거나 미검증인 연도는 warnings 로 알립니다 — 경고가 있으면 결과를 단정하지 마세요\n- 공시유형이 특정된 기한 판정(대규모내부거래 등)은 check_disclosure_duty 가 근거 조문까지 계산합니다",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "description": "기준일 (YYYYMMDD). 단독으로 주면 이 날짜가 영업일인지, 아니라면 어느 공휴일인지와 다음 최초 영업일(기한 말일 조정 결과)을 돌려줍니다"
+          },
+          "add_business_days": {
+            "description": "기준일 다음 날부터 N영업일 후의 기한을 계산합니다 (예: 이사회 의결일 + 상장 3영업일 / 비상장·공익법인 7영업일)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120
+          },
+          "add_calendar_days": {
+            "description": "기준일 다음 날부터 N일(달력일) 후의 기한을 계산합니다 (예: 분기 종료 후 45일). 말일이 비영업일이면 다음 영업일로의 조정 결과를 함께 줍니다",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 370
+          },
+          "count_business_days_to": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "description": "기준일 다음 날부터 이 날짜까지의 영업일 수를 셉니다 (예: 오늘부터 기한까지 남은 영업일)"
+          }
+        },
+        "required": [
+          "date"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "disclosure_calendar",
+      "description": "\"올해(또는 지정 연도) 우리가 언제 무엇을 공시해야 하나\"에 답합니다. 기한이 달력으로 고정된 정기 공시의 마감일을 전부 계산해 D-day 와 함께 시간순으로 돌려줍니다. 로컬 룰·법령 데이터라 인증키 없이 동작합니다.\n\n- 담는 것: 기업집단현황 연1회(5/31)·분기(분기 종료 후 2개월), 약관 금융거래 분기(분기 종료 후 익월 10영업일), 상품·용역 20% 이상 감소(분기 종료 후 45일), 비상장 주요주주 지분변동 분기, 하도급대금 결제조건 반기(45일)\n- 마지막 날이 비영업일이면 다음 최초 영업일로 조정된 **실제 기한**을 줍니다 (대체공휴일 반영)\n- 각 항목에 그날 무엇을 쓰는지(items)와 **항목별 기준일·기준기간**이 붙습니다 — 분기 공시는 \"공시기한일의 직전 분기\" 기준이라 담당자가 가장 자주 틀리는 지점입니다\n- 같은 날 기한이 겹치는 지점(collisions)을 알려줍니다 — 예: 5월 31일은 연1회와 1분기가 같은 날입니다\n\n⚠️ **캘린더에 없다고 공시할 것이 없다는 뜻이 아닙니다.** 대규모내부거래 개별거래(의결 후 3/7영업일)와 비상장회사 중요사항(사유 발생 후 7영업일)은 사유 발생형이라 달력에 올릴 수 없습니다 — not_in_calendar 를 반드시 함께 전달하고, 그 건들은 check_disclosure_duty 로 판정하세요.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "description": "대상 연도. 생략하면 오늘이 속한 연도. **그 해에 기한이 도래하는** 공시를 담는다",
+            "type": "integer",
+            "minimum": 2020,
+            "maximum": 2100
+          },
+          "today": {
+            "description": "오늘 날짜 (기본: 시스템 날짜). D-day 계산 기준",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "duties": {
+            "description": "의무 키로 거르기 (group_status_annual, group_status_quarterly, omnibus_financial, goods_services_reduced, unlisted_major_shareholder, subcontract_payment_terms)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "from": {
+            "description": "기한 범위 시작 — 예: 이번 분기만 보고 싶을 때",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "to": {
+            "description": "기한 범위 끝",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "include_past": {
+            "description": "이미 기한이 지난 항목도 포함할지 (기본 true). false 면 남은 것만",
+            "type": "boolean"
+          },
+          "unconditional_only": {
+            "description": "해당 사유가 있을 때만 하는 조건부 의무를 빼고 무조건 의무만 볼지 (기본 false)",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "resolve_entity",
+      "description": "회사명, 종목코드(6자리), 법인코드(8자리), 법인등록번호(13자리), 기업집단명을 받아 corp_code·stock_code·법인등록번호·소속 기업집단으로 풀어줍니다. 다른 도구를 쓰기 전 회사를 특정할 때 먼저 호출하세요.\n\n동명 법인이 여럿이면 임의로 고르지 않고 status=\"ambiguous\" 와 후보 목록을 돌려줍니다 — 상호가 같아도 별개 법인일 수 있습니다(합병 전후 법인이 대표적). 이때는 후보의 corp_code 로 다시 호출하세요.\n\n기업집단포털과 대사하려면 fetchJurirNo=true 로 법인등록번호를 먼저 채워야 합니다 (DART 호출 1회). includeGroup=true 는 EGROUP_API_KEY 가 필요하며, 최초 1회는 전 기업집단을 순회하므로 포털 호출 ~103회를 소비합니다 (이후 1년간 캐시).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "해석할 값. 회사명(\"삼성전자\"), 종목코드(\"005930\"), 법인코드 8자리(\"00126380\"), 법인등록번호 13자리, 또는 기업집단명(\"삼성\")"
+          },
+          "type": {
+            "description": "해석 대상. auto(기본)면 회사 → 기업집단 순으로 시도한다",
+            "type": "string",
+            "enum": [
+              "company",
+              "group",
+              "auto"
+            ]
+          },
+          "includeGroup": {
+            "description": "회사를 찾은 뒤 소속 기업집단까지 조회할지 (기본 false). true 면 기업집단포털을 호출하며 EGROUP_API_KEY 가 필요하다",
+            "type": "boolean"
+          },
+          "fetchJurirNo": {
+            "description": "법인등록번호를 기업개황 API로 채울지 (기본 false, 호출 1회 소비). 기업집단포털과 대사하려면 필요하다",
+            "type": "boolean"
+          },
+          "yearMonth": {
+            "description": "기업집단 기준 공개년월 YYYYMM (미지정 시 최신 지정연도를 추정)",
+            "type": "string",
+            "pattern": "^\\d{6}$"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_disclosure",
+      "description": "공시 원문을 표 구조를 보존한 마크다운으로 돌려줍니다. 다른 회사의 기재 사례·문안을 참고하거나 공시 내용을 분석할 때 사용하세요.\n\n- 표가 그대로 마크다운 표로 나오므로 항목별 기재 내용을 바로 비교할 수 있습니다\n- board_date(이사회 의결일)가 추출되면 check_disclosure_duty 의 boardDate 로 그대로 쓸 수 있습니다\n- 원문은 영구 캐시됩니다 (접수된 공시는 불변, 정정은 새 접수번호)\n- HWP 첨부만 있는 공시는 body_unparsable 에러와 함께 뷰어 URL 을 안내합니다",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rcept_no": {
+            "type": "string",
+            "pattern": "^\\d{14}$",
+            "description": "DART 접수번호 14자리"
+          },
+          "format": {
+            "description": "markdown(기본) = 표 구조 보존. text = 공백 정규화된 평문",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "text"
+            ]
+          },
+          "force_refresh": {
+            "description": "캐시를 무시하고 재다운로드 (기본 false). 접수된 공시는 불변이므로 보통 불필요",
+            "type": "boolean"
+          },
+          "max_chars": {
+            "description": "본문 최대 길이 (기본 60,000자). 초과 시 truncated=true 로 잘라서 준다",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 200000
+          }
+        },
+        "required": [
+          "rcept_no"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_disclosures",
+      "description": "공시를 검색합니다. 공정위 기업집단 공시 프리셋이 내장되어 있습니다 (ftc_all=공정위 전체, internal_transaction=대규모내부거래, group_status=기업집단현황, unlisted_material=비상장사 중요사항, public_interest_corp=공익법인, subcontract=하도급 결제조건).\n\n- mode:\"page\"(기본) = 한 페이지씩 조회. mode:\"batch\" = 기간 전체 전수 수집 (중복 제거·건수 집계 포함)\n- batch 가 한 번에 처리하기 큰 범위면 range_too_large 에러와 함께 분할 구간을 안내합니다 — 안내된 구간대로 나눠 다시 호출하세요\n- report_name_contains 로 보고서명을 거를 수 있습니다 (선례 검색: preset+[\"자금차입\" 등])\n- 응답의 diagnostics 를 반드시 확인하세요 — truncated/partial_results 가 true 면 결과가 불완전합니다\n- 정정 이전 원본 접수분을 포함합니다 (last_report_only 기본 false — 지연 판정에 필수)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "회사명·종목코드(6자리)·corp_code(8자리)·법인등록번호(13자리). 동명 법인이 여럿이면 ambiguous_corp 에러와 후보 목록을 돌려줍니다",
+            "type": "string",
+            "minLength": 1
+          },
+          "corp_code": {
+            "description": "DART 법인코드 8자리 — query 대신 직접 지정",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "date_from": {
+            "description": "조회 시작일 YYYYMMDD (기본: 30일 전)",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "date_to": {
+            "description": "조회 종료일 YYYYMMDD (기본: 오늘)",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "preset": {
+            "description": "공정위 공시 프리셋. ftc_all=J 전체 / internal_transaction=대규모내부거래 / group_status=기업집단현황 / unlisted_material=비상장사 중요사항 / public_interest_corp=공익법인 / subcontract=하도급 결제조건",
+            "type": "string",
+            "enum": [
+              "ftc_all",
+              "internal_transaction",
+              "group_status",
+              "unlisted_material",
+              "public_interest_corp",
+              "subcontract"
+            ]
+          },
+          "pblntf_ty": {
+            "description": "DART 공시유형 원시 코드 (preset 과 동시 지정 불가)",
+            "type": "string",
+            "pattern": "^[A-J]$"
+          },
+          "pblntf_detail_ty": {
+            "description": "DART 공시상세유형 원시 코드 (preset 과 동시 지정 불가)",
+            "type": "string",
+            "pattern": "^[A-J]\\d{3}$"
+          },
+          "corp_cls": {
+            "description": "법인구분 Y=유가 K=코스닥 N=코넥스 E=기타(비상장 대부분)",
+            "type": "string",
+            "enum": [
+              "Y",
+              "K",
+              "N",
+              "E"
+            ]
+          },
+          "report_name_contains": {
+            "description": "보고서명 부분일치 필터 — 서버 필터가 아니라 수집 후 적용됩니다 (예: \"자금차입\", \"기재정정\")",
+            "type": "string",
+            "minLength": 1
+          },
+          "last_report_only": {
+            "description": "⚠️ 기본 false. true(최종보고서만)는 정정으로 대체된 원본 접수분을 지워 지연 판정이 불가능해집니다",
+            "type": "boolean"
+          },
+          "mode": {
+            "description": "page(기본)=한 페이지 조회. batch=적응형 분할 전수 수집 — 규모가 크면 range_too_large 와 분할 안내를 반환",
+            "type": "string",
+            "enum": [
+              "page",
+              "batch"
+            ]
+          },
+          "page": {
+            "description": "mode:\"page\" 의 페이지 번호 (기본 1)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "page_size": {
+            "description": "페이지당 건수 (기본·최대 100)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "limit": {
+            "description": "mode:\"batch\" 응답에 실을 최대 행수 (기본 200). 수집·집계는 전수로 하고 응답만 자릅니다",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "compact": {
+            "description": "true 면 schema+값 배열 형태로 토큰 30~40% 절감 (행이 많을 때 권장)",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "find_precedents",
+      "description": "\"다른 회사는 이 항목을 어떻게 썼나\"에 답합니다. 키워드로 같은 유형의 최근 공시를 찾아 회사당 1건씩 골라 원문(표 구조 보존 마크다운)을 함께 돌려줍니다.\n\n- 키워드는 보고서명 부분일치입니다: \"자금차입\", \"담보제공\", \"수익증권\", \"부동산임차\" 등\n- 기본은 대규모내부거래(J001)에서 찾습니다. preset 으로 다른 공정위 공시로 바꿀 수 있습니다\n- corp_cls 로 자사와 같은 상장구분의 문안만 볼 수 있고, exclude_corp 로 자사를 뺄 수 있습니다\n- 이 도구는 정정이 반영된 최종본 기준입니다 (문안 참고 목적 — 지연 판정에는 search_disclosures 사용)\n- 선례 1건당 원문 다운로드 1회를 소비합니다 (이미 읽은 공시는 캐시)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "report_name_contains": {
+            "type": "string",
+            "minLength": 1,
+            "description": "찾을 유형 키워드 — 보고서명 부분일치 (예: \"자금차입\", \"담보제공\", \"수익증권\", \"부동산임차\")"
+          },
+          "preset": {
+            "description": "검색 범위 프리셋 (기본 internal_transaction=대규모내부거래)",
+            "type": "string",
+            "enum": [
+              "ftc_all",
+              "internal_transaction",
+              "group_status",
+              "unlisted_material",
+              "public_interest_corp",
+              "subcontract"
+            ]
+          },
+          "count": {
+            "description": "가져올 선례 수 (기본 3). 건당 원문 다운로드 1회를 소비합니다",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "lookback_days": {
+            "description": "최대 며칠 전까지 거슬러 찾을지 (기본 180일, 최대 1825일=5년). 후보가 모이면 더 내려가지 않습니다. 훑은 구간 안에서는 항상 전수로 확인하며, 사례가 모이거나 시간 예산에 걸리면 멈춥니다 — \"3년치·5년치 사례\" 질문에 쓰세요. coverage 로 실제 훑은 구간과 그 구간이 전수인지 확인하세요",
+            "type": "integer",
+            "minimum": 7,
+            "maximum": 1825
+          },
+          "corp_cls": {
+            "description": "법인구분 필터 — 자사와 같은 구분(상장/비상장)의 문안만 보려면 지정",
+            "type": "string",
+            "enum": [
+              "Y",
+              "K",
+              "N",
+              "E"
+            ]
+          },
+          "exclude_corp": {
+            "description": "제외할 회사 (corp_code 8자리 또는 회사명) — 보통 자사",
+            "type": "string",
+            "minLength": 1
+          },
+          "one_per_company": {
+            "description": "회사당 1건만 골라 표현을 다양하게 (기본 true). false 면 최신순 그대로",
+            "type": "boolean"
+          },
+          "max_chars_per_doc": {
+            "description": "선례당 본문 최대 길이 (기본 8,000자)",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 30000
+          }
+        },
+        "required": [
+          "report_name_contains"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_group_structure",
+      "description": "공정위 지정 기업집단의 개요(동일인·대표회사·소속회사 수)와 소속회사 전수를 돌려줍니다. 소속회사 목록이 곧 공정위 공시의무의 모집단입니다. EGROUP_API_KEY 가 필요합니다.\n\n- include_financials=true 면 계열사별 자산·자본총액·자본금·부채·매출·당기순이익(단위: 원)을 함께 줍니다 — 자본총액·자본금은 check_disclosure_duty 의 기준금액 입력으로 그대로 쓸 수 있습니다\n- DART corp_code 조인은 법인등록번호 기준입니다 (이름 매칭은 표기 체계가 달라 불가능). 미조인 회사는 resolve_entity(fetchJurirNo=true) 로 채워집니다\n- 포털 데이터는 연 1회(매년 5/1) 갱신되며 연단위로 캐시됩니다\n- 집단명은 공정위 표기를 씁니다: \"SK\" 가 아니라 \"에스케이\", \"삼성\" 등",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "type": "string",
+            "minLength": 1,
+            "description": "기업집단명(\"삼성\", \"에스케이\") 또는 기업집단코드(\"K1000032\")"
+          },
+          "include_financials": {
+            "description": "계열사 재무현황 포함 (기본 false, 포털 호출 1회 추가). 자산총액·자본총액·자본금·부채·매출·당기순이익 (단위: 원). 자본총액·자본금은 check_disclosure_duty 의 totalEquity/paidInCapital 입력으로 쓸 수 있습니다",
+            "type": "boolean"
+          },
+          "join_dart": {
+            "description": "DART corp_code 조인 시도 (기본 true). 법인등록번호가 캐시에 채워진 회사만 조인됩니다 — joined 수가 적으면 resolve_entity(fetchJurirNo=true) 로 회사를 조회해 채우세요",
+            "type": "boolean"
+          },
+          "year_month": {
+            "description": "기준 공개년월 (미지정 시 최신 지정연도 추정 — 매년 5월 갱신)",
+            "type": "string",
+            "pattern": "^\\d{6}$"
+          },
+          "compact": {
+            "description": "true 면 계열사를 schema+값 배열로 (150개사 집단에서 토큰 절감)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "group"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_financials",
+      "description": "단일회사 재무제표를 조회합니다 (기본: 직전 연도 사업보고서의 재무상태표, 연결 없으면 별도로 자동 폴백).\n\n- key_metrics 의 total_equity(자본총계)·paid_in_capital(자본금)은 check_disclosure_duty 의 totalEquity/paidInCapital 입력으로 그대로 쓸 수 있습니다 (단위: 원)\n- 금액은 raw(원문)/value(정수 원)/display(표시 단위 환산) 세 값을 함께 줍니다\n- change 는 전기 대비 증감입니다 (손익·현금흐름은 누적 필드가 있을 때만 누적 기준)\n- 외부감사 대상이 아닌 회사는 DART 에 재무제표가 없을 수 있습니다 — 기업집단 소속사는 get_group_structure(include_financials=true)로 포털 재무를 확인하세요",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "회사명·종목코드·corp_code — resolve_entity 와 같은 규칙",
+            "type": "string",
+            "minLength": 1
+          },
+          "corp_code": {
+            "description": "DART 법인코드 8자리",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "year": {
+            "description": "사업연도 (기본: 직전 연도). 사업보고서는 보통 3월 말 제출이므로 없으면 그 전 해로 다시 시도",
+            "type": "string",
+            "pattern": "^\\d{4}$"
+          },
+          "report": {
+            "description": "보고서 종류 (기본 annual=사업보고서)",
+            "type": "string",
+            "enum": [
+              "annual",
+              "half",
+              "q1",
+              "q3"
+            ]
+          },
+          "fs_div": {
+            "description": "CFS=연결(기본) / OFS=별도. 연결이 없으면 별도로 자동 폴백합니다 (비상장 다수는 별도만 있음)",
+            "type": "string",
+            "enum": [
+              "CFS",
+              "OFS"
+            ]
+          },
+          "statement": {
+            "description": "재무제표 종류 (기본 BS=재무상태표). all 은 응답이 큽니다",
+            "type": "string",
+            "enum": [
+              "all",
+              "BS",
+              "IS",
+              "CIS",
+              "CF",
+              "SCE"
+            ]
+          },
+          "unit": {
+            "description": "display 표시 단위 (기본 million=백만원). raw/value 는 항상 원 단위 그대로",
+            "type": "string",
+            "enum": [
+              "won",
+              "thousand",
+              "million",
+              "hundred_million"
+            ]
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_ftc_qna",
+      "description": "공정위가 배포한 해설서·FAQ·매뉴얼에서 추출한 공식 질의응답 430건(전문 330 + 폐지 게시판 복원 제목 21 + 2026. 4. 27. 공시 업무 매뉴얼 주요 사례 79)을 검색합니다. \"이런 거래도 공시 대상인가?\" 같은 경계사례에서 규칙만으로 판정할 수 없을 때, 유사한 공정위 공식 답변을 근거로 제시하는 용도입니다. 로컬 데이터라 인증키 없이 동작합니다.\n\n- 검색어는 핵심 명사 위주가 잘 맞습니다: \"발행어음 자동연장\", \"자회사 설립 출자\", \"퇴직연금 거래금액\"\n- category 로 공시유형(대규모내부거래/비상장사 중요사항/기업집단현황/하도급)을 좁힐 수 있습니다\n- ⚠️ 구판 문서(2008~2015)에는 폐지된 기준(50억·기한 1일 등)이 실려 있습니다 — 각 결과의 caveats 를 반드시 함께 읽고, 같은 주제의 2026 매뉴얼 문답(lit26-*)이 있으면 그쪽을 우선하세요. 현행 수치 판정은 check_disclosure_duty 가 담당합니다\n- check_disclosure_duty 의 situation 입력으로도 같은 지식베이스가 검색됩니다",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 500,
+            "description": "검색어. 거래 상황을 키워드로: \"발행어음 자동연장\", \"자회사 설립 출자\", \"퇴직연금 거래금액\" 등. 질문 문장을 통째로 넣어도 됩니다"
+          },
+          "category": {
+            "description": "공시유형 필터. internal_transaction=대규모내부거래(J001), unlisted_material=비상장사 중요사항(J005), group_status=기업집단현황(J004), subcontract=하도급대금 결제조건(J009). 생략하면 전체에서 검색",
+            "type": "string",
+            "enum": [
+              "internal_transaction",
+              "unlisted_material",
+              "group_status",
+              "subcontract"
+            ]
+          },
+          "limit": {
+            "description": "최대 결과 수 (기본 5)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "audit_group_disclosures",
+      "description": "기업집단(또는 회사 목록)의 대규모내부거래(J001) 공시를 기간 단위로 감사해 기한 지연 후보를 찾습니다. 원본 접수분의 접수일과 원문에서 추출한 이사회 의결일을 대조합니다 (상장 3영업일 / 비상장 7영업일).\n\n- 지연 후보에는 지연일수·예상 과태료·자진시정 골든타임 상태·근거가 동봉됩니다 — \"후보\"이며 확정이 아닙니다\n- 약관 금융거래 특례 서식(분기 일괄, 의결일 없음)은 별도 분류로 나옵니다\n- 정정 제출분은 판정에서 제외하고 원본만 봅니다 (지연 판정의 성립 조건)\n- 범위가 크면 range_too_large 와 분할 구간을 안내합니다 — 원문 캐시는 영구라 재감사는 훨씬 빠릅니다\n- 집단 감사는 EGROUP_API_KEY 필요. coverage 의 미조인 회사는 감사에서 빠진 것이니 반드시 확인하세요\n\n⚠️ **이 감사는 \"미공시\"를 탐지하지 못합니다.** DART 에 접수된 공시만 조회하므로, 아예 공시하지 않은 거래는 기록 자체가 없어 이 도구로는 보이지 않습니다. 시행령 별표9 **기본금액** 기준으로 미공시는 의결 있음 5,000만원 / 의결 없음 7,000만원, 기한초과는 500만원 + 1일 10만원이며 어느 쪽도 최종 부과액이 아닙니다. 판정 범위는 J001 중 **트랙 A(의결형)** 뿐이고 트랙 B(약관특례)·J004·J005·J008·J009 는 밖입니다. **\"지연 후보 0건\"을 \"공시의무 이행에 문제 없음\"으로 답하지 마세요** — coverage.undetectable 과 coverage.not_judged 를 그대로 사용자에게 전달하세요. 정기 공시의 마감일 관리는 disclosure_calendar 를 쓰세요.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "description": "기업집단명(\"삼성\") 또는 집단코드(\"K1000032\"). companies 와 둘 중 하나 필수",
+            "type": "string"
+          },
+          "companies": {
+            "description": "회사 목록 — 회사명 또는 corp_code(8자리). 집단 전체 대신 특정 회사만 감사할 때",
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "description": "감사 기간 시작일 (접수일 기준)"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "description": "감사 기간 종료일"
+          },
+          "today": {
+            "description": "판정 기준일 (기본: 오늘). 자진시정 골든타임 계산에 쓴다",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "year_month": {
+            "description": "집단 소속회사 기준 공개년월 (기본: 최신 지정연도)",
+            "type": "string",
+            "pattern": "^\\d{6}$"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "audit_periodic_disclosures",
+      "description": "기업집단현황공시(J004)와 하도급대금 결제조건(J009)의 **정기 공시를 실제로 냈는지, 기한을 지켰는지** 회사별로 점검합니다. audit_group_disclosures(J001) 와 두 가지가 결정적으로 다릅니다.\n\n① **기한·접수 판정에 원문이 필요 없습니다** — 이 공시들은 기한이 달력으로 고정돼 있어 목록의 접수일만으로 계산됩니다. J001 감사의 60초 벽(원문 건당 1.5초)이 없습니다. 다만 **내용의 정확성은 보지 않습니다.**\n② **미제출을 볼 수 있습니다** — 기업집단현황공시는 공시대상회사면 무조건 하는 의무라 기한이 지났는데 접수분이 없으면 그 자체가 신호입니다. J001 감사가 원리상 못 하는 일입니다.\n\n- 기한별로 on_time / late_candidates / not_filed_candidates 를 회사 단위로 돌려줍니다\n- 아직 기한이 오지 않은 항목(due:false)은 미제출 판정을 하지 않습니다\n- 하도급대금(J009)은 원사업자·거래 있는 경우만의 의무라 **미제출을 신호로 쓰지 않습니다** (non_filing_is_signal:false)\n- 집단 감사는 EGROUP_API_KEY 필요. 회사당 1회 조회라 한 번에 80개사까지입니다\n\n- 응답의 **scope_caveats** 에 이 도구가 판정하지 않는 것들이 전부 나열됩니다 — \n  미제출 후보를 사용자에게 전달할 때 반드시 함께 전달하세요\n- '연1회공시및1/4분기용' 서식 1건은 연1회와 1분기 의무를 **동시에 이행**합니다 (한 접수분이 두 기한에 잡힙니다)\n- 기간 배정은 접수일 창 추정이라, 모호한 자리에는 ambiguous_assignment·possibly_filed_late 가 붙습니다\n- 대표회사 제출은 개별회사 의무를 대체하지 않습니다 (고시 §3⑤ 항목만 대표회사 책임)\n\n⚠️ 미제출 후보는 확정이 아닙니다 — 고시 §2① 단서(자산 100억원 미만 + 청산·휴업)로 공시대상회사가 아닐 수 있고, 포털 소속회사 스냅샷은 매년 5월 1일 기준 연 1회라 분기별 소속 상태를 판정하지 못합니다. 내용 점검은 check_j004_consistency 입니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "description": "기업집단명 (companies 와 동시 사용 불가)",
+            "type": "string",
+            "minLength": 1
+          },
+          "companies": {
+            "description": "회사명 또는 corp_code(8자리) 목록 (group 과 동시 사용 불가)",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "year": {
+            "type": "integer",
+            "minimum": 2020,
+            "maximum": 2100,
+            "description": "점검할 연도 — 그 해에 **기한이 도래하는** 정기공시를 본다"
+          },
+          "duties": {
+            "description": "점검할 의무 (기본: 기업집단현황 연1회·분기). subcontract_payment_terms 를 넣으면 하도급대금 결제조건도 본다",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "group_status_annual",
+                "group_status_quarterly",
+                "subcontract_payment_terms"
+              ]
+            }
+          },
+          "year_month": {
+            "description": "기업집단포털 기준월 YYYYMM. 생략하면 **점검 연도의 5월**(YYYY05)을 쓴다 — 포털 스냅샷이 매년 5월 1일 기준이라 과거 연도를 점검할 때 최신 스냅샷을 쓰면 모집단이 어긋난다",
+            "type": "string",
+            "pattern": "^\\d{6}$"
+          },
+          "today": {
+            "description": "오늘 날짜 (기본: 시스템 날짜). 기한 도래 여부 판정 기준",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          }
+        },
+        "required": [
+          "year"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assess_correction_risk",
+      "description": "\"정정하면 과태료 나온다\"는 속설을 과태료 고시 원문으로 진단합니다. 정정공시 자체는 위반행위가 아니며 (고시 Ⅱ의 위반 열거에 없음), 문제는 원 공시의 상태(누락·거짓·지연)입니다. 로컬 룰이라 인증키 없이 동작합니다.\n\n- errorType 별로 원 공시의 위반 성립 여부, 면제 경로(자진시정 골든타임·단순오류·불가항력), 권고를 근거 조문과 함께 돌려줍니다\n- originalDeadline 을 주면 골든타임(기한 만료 후 10영업일) 상태와 지연 감경 축소 일정(75%→50%→30%→20%)을 계산합니다\n- 거래 내용 자체가 변경된 경우(transaction_changed)는 정정이 아니라 새 공시의무입니다 — 재의결·재공시 경로를 안내합니다\n- 면제·감경은 모두 공정위 재량이므로 확정이 아닌 판단 재료입니다",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "errorType": {
+            "type": "string",
+            "enum": [
+              "trivial_error",
+              "minor_miscalculation",
+              "content_omission",
+              "false_content",
+              "transaction_changed"
+            ],
+            "description": "원 공시 오류의 성격. trivial_error=명칭·성명·날짜·금액 등 단순 오기·누락(오인 가능성 거의 없음), minor_miscalculation=단순 계산 실수·오기(사소한 부주의), content_omission=주요내용 누락, false_content=사실과 다른 기재, transaction_changed=거래의 주요내용 자체가 변경됨(정정이 아니라 새 공시의무)"
+          },
+          "regime": {
+            "type": "string",
+            "enum": [
+              "art26_29",
+              "art27_28"
+            ],
+            "description": "과태료 체계. art26_29=대규모내부거래·공익법인(약관특례·상품용역 감소 포함), art27_28=비상장사 중요사항·기업집단현황"
+          },
+          "originalDeadline": {
+            "description": "원 공시의 법정 기한 (YYYYMMDD). 주면 자진시정 골든타임과 지연 감경 축소 일정을 계산합니다",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          },
+          "crossConfirmable": {
+            "description": "오류의 사실내용이 해당 공시 또는 이전의 다른 공정거래법 공시 내용으로 확인 가능한지 — 사소한 부주의 면제(Ⅴ.1.나)의 성립 요건입니다",
+            "type": "boolean"
+          },
+          "newlyDesignatedWithin30d": {
+            "description": "위반 공시일이 공시대상기업집단 신규 지정·계열 편입 통지일부터 30일 이내인지 (Ⅴ.1.가)",
+            "type": "boolean"
+          },
+          "today": {
+            "description": "판정 기준일 (기본: 시스템 날짜)",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          }
+        },
+        "required": [
+          "errorType",
+          "regime"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_j004_consistency",
+      "description": "기업집단현황공시 원문에서 기계적으로 재검산 가능한 항목을 전부 다시 계산해 불일치를 찾습니다. 공시의무 위반 건수의 84%가 J004입니다 — 제출 전 자가점검 또는 제출본 사후 점검용입니다.\n\n- 재무현황: 유동+비유동=총계(자산·부채), 자산=부채+자본 항등식, 부채비율 재계산, 금융/비금융 소계·합계 재합산\n- 차이가 약 1,000배면 단위(원/천원/백만원) 오기 힌트를 답니다\n- include_generic_totals=true 면 그 외 표의 합계 행도 실험적으로 재합산합니다 (기본 꺼짐 — 병합 셀 표 오탐 가능)\n- compare_rcept_nos 로 개별회사 공시들을 주면 대표회사 취합분과 회사별 수치를 대사합니다\n- 문서 내적 정합성만 봅니다 — 원천 회계 데이터와의 일치(진실성)는 판정하지 않습니다\n- 불일치 발견 시 정정 판단은 assess_correction_risk 와 함께 쓰세요",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rcept_no": {
+            "type": "string",
+            "pattern": "^\\d{14}$",
+            "description": "점검할 기업집단현황공시(J004) 접수번호"
+          },
+          "compare_rcept_nos": {
+            "description": "대표회사 취합분과 대사할 개별회사 공시 접수번호 목록. 각 개별회사의 재무현황 행을 대표회사 취합 표의 같은 회사 행과 1백만원 단위로 대조합니다",
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{14}$"
+            }
+          },
+          "include_generic_totals": {
+            "description": "재무·손익 외 일반 표의 합계 재합산도 점검할지 (기본 false). ⚠️ 실험적 — 병합 셀·다층 구분 표에서 구조적 오탐이 발생할 수 있어 결과를 참고로만 쓰세요",
+            "type": "boolean"
+          },
+          "max_issues": {
+            "description": "반환할 이슈 최대 개수 (기본 100)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "rcept_no"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "detect_undisclosed_transactions",
+      "description": "기업집단현황공시(J004) 대표회사 연1회 서식의 **실제 거래내역**을 대규모내부거래(J001) 공시와 대조해 \"거래는 했는데 공시가 없는\" **미공시 후보**를 찾습니다. J001 감사(audit_group_disclosures)가 원리상 못 하는 일 — DART 접수분에 없는 거래를 보는 — 의 유일한 경로입니다.\n\n- 입력: rcept_no(J004 직접 지정) 또는 group(+year — 대표회사 연1회 서식을 자동 탐색)\n- 자금 차입은 **건별 차입일 근접 대조**입니다 (높은 신뢰도): 차입일 근방(−90~+30일)에 같은 유형 공시가 있으면 j001_filing_near_date, 검색창 안 어딘가에만 있으면 j001_filing_in_window_only (한도 의결 커버일 수도, **부분 공시 누락**일 수도 있음), 없으면 미공시 후보. 기준금액은 같은 문서의 재무현황 자본으로 계산하되 **근사치**이며, 거래금액 100억원 이상만 자본과 무관하게 확실합니다\n- 상품·용역은 연간 합계뿐이라 **(판매회사, 거래상대방) 연간 합산** ≥ 4×기준금액인 경우만(어느 분기 하나는 반드시 기준 이상) 신호로 쓰되, 이 유형의 공시의무는 **상대방이 총수일가 20% 이상 출자 계열사 등일 때만 성립**(법 §26①4호)하는데 지분을 확인할 수 없어 전부 **조건부 후보**(candidate_if_counterparty_qualified)입니다\n- 개별 차입이 기준 미달이어도 같은 상대방 연간 합산이 기준 이상이면 \"기준 미달\"로 단정하지 않습니다 (§4③ 동일 거래상대방·동일 거래대상 기준)\n- 회사명→corp_code 조인 실패·검색 예산 초과·수집 불완전 건은 not_judged 로 분리됩니다 — \"후보 아님\"이 아니라 확인하지 못한 것입니다\n\n⚠️ **모든 결과는 후보입니다 — 단정 금지.** 한도성 이사회 의결(연초 의결 → 연중 인출), 계열 금융회사 약관특례(트랙 B 분기 일괄공시), 보고서명 유형 분류 오차로 실제로는 공시된 거래일 수 있습니다. filing_near_date/in_window_only 도 \"그 유형 공시가 존재한다\"일 뿐 이 거래를 커버하는지는 대조하지 않았습니다. 응답의 **scope_caveats 를 반드시 사용자에게 함께 전달하세요.** 미공시 과태료 기본금액(5,000만~7,000만원)은 지연보다 훨씬 무거워 오판의 대가가 큽니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "description": "기업집단명 — 대표회사 연1회 J004 를 자동으로 찾는다 (rcept_no 와 동시 사용 불가)",
+            "type": "string",
+            "minLength": 1
+          },
+          "year": {
+            "description": "연1회 J004 가 **제출된** 연도 (기본: 올해). 거래내역은 통상 그 전년도(직전 사업연도) 것이다",
+            "type": "integer",
+            "minimum": 2021,
+            "maximum": 2100
+          },
+          "rcept_no": {
+            "description": "점검할 J004 접수번호 직접 지정 (group 없이 단독 사용). 거래현황 표가 있는 **대표회사 연1회 서식**이어야 한다 — 분기 개별 서식에는 거래내역이 없다",
+            "type": "string",
+            "pattern": "^\\d{14}$"
+          },
+          "today": {
+            "description": "오늘 날짜 (기본: 시스템 날짜). J001 검색창 상한",
+            "type": "string",
+            "pattern": "^\\d{8}$"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "server_info",
+      "description": "서버 버전, 인증키 설정 여부(값은 노출하지 않음), 오늘 사용한 API 호출 수와 잔여 예산, 캐시 규모(법인 인덱스·원문 캐시), 공휴일 데이터 검증 연도, Q&A 지식베이스 건수를 돌려줍니다. 로컬 조회만 하므로 인증키·API 호출 없이 동작합니다.\n\n\"키를 넣었는데 인식이 안 된다\", \"조회가 왜 느리냐/한도가 얼마 남았냐\", \"공휴일 데이터가 몇 년도까지 있냐\" 같은 질문의 진단 창구입니다. 개별 공시·재무 데이터 조회는 각 전용 도구를 사용하세요.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "gongsi-mcp",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 29051,
+  "stderr": "2026-11-10T16:31:00.823Z WARN server DART_API_KEY 미설정 — 공시 조회 도구는 동작하지 않습니다 (룰 엔진 도구는 정상)\n2026-11-10T16:31:00.824Z WARN server EGROUP_API_KEY 미설정 — 기업집단포털 도구는 동작하지 않습니다\n2026-11-10T16:31:00.825Z INFO server gongsi-mcp 서버 시작 (stdio)\n(node:1) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n"
+}

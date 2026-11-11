@@ -1,0 +1,145 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "x402-auction-mcp",
+  "version": "1.1.0",
+  "integrity": {
+    "dist": "sha512-BoJscxVKExJd6fsxnDhBh/fZV2Yn7lm81SJqInZjV3B21HdCO8iuF/34FStKuFlikys87og5QjT9Cm9uEr9d6A==",
+    "installed": "sha512-BoJscxVKExJd6fsxnDhBh/fZV2Yn7lm81SJqInZjV3B21HdCO8iuF/34FStKuFlikys87og5QjT9Cm9uEr9d6A=="
+  },
+  "bin": "node_modules/x402-auction-mcp/build/index.js",
+  "main": "build/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T18:29:56.712Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_auction_info",
+      "description": "[REQUIRED FIRST STEP] Retrieve comprehensive auction status including current Dutch auction pricing, fundraising progress, and token economics.\n    \n    WHEN TO USE:\n    - ALWAYS call this FIRST before any auction interaction\n    - When user asks about auction (price, status, progress)\n    - Before creating a bid (to show user current price)\n    - When explaining how the auction works\n    \n    Returns:\n    - auction_id, status (active/closed)\n    - current_price_ton (increases as auction progresses)\n    - total_raised_ton, target_ton, progress_percent\n    - tokens_per_ton (how many tokens per 1 TON at current price)\n    - min_ton, max_ton (bid limits per wallet)\n    - start_price_ton, ceiling_price_ton (price range)\n    \n    AGENT WORKFLOW:\n    1. Call this to check if auction is active\n    2. If status=\"active\", show user current price and progress\n    3. If status=\"closed\", inform user auction ended (no new bids)\n    4. Use current_price_ton to explain cost before bidding\n    \n    MECHANISM: Dutch ascending auction - price increases as more TON is raised toward target. Users lock in the price at time of bid (pay-as-bid model).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "create_auction_bid",
+      "description": "Place a bid in the x402 token auction.\n\nPREREQUISITE: Call get_auction_info first to verify auction is active.\n\nWHEN TO USE:\n- User wants to participate in the auction\n- User provides: wallet address + amount (1-100 TON)\n- Auction status is \"active\" (from get_auction_info)\n\nCONSTRAINTS:\n- ONE bid per wallet (duplicate calls return existing bid status)\n- Price locked at bid time (pay-as-bid model)\n- Payment window: 180 seconds\n- MUST include bid_id as payment comment/memo\n\nRESPONSE FORMAT (Structured Data):\n{\n  status: \"payment_required\" | \"completed\" | \"allocated\" | \"refunded\",\n  action_required: \"payment\" | \"wait\" | \"none\",\n  urgency: \"critical\" | \"high\" | \"normal\",\n  bid: { bid_id, ton_amount, estimated_token, expires_at, locked_price },\n  payment: { required, recipient, amount, comment_required, deeplink, expires_in_seconds },\n  auction: { auction_id, current_price_ton, progress_percent, mechanism },\n  next_step: \"send_payment\" | \"wait_for_allocation\" | \"check_wallet\"\n}\n\nWORKFLOW:\n1. Verify auction active (get_auction_info)\n2. Collect: amount (1-100) + wallet address\n3. Call create_auction_bid\n4. If status=\"payment_required\": Use payment.deeplink, show recipient + comment + expiry\n5. If urgency=\"critical\": Emphasize time sensitivity (expires_in_seconds < 60)\n6. If status=\"completed\"/\"allocated\": Inform user of current state\n\nERRORS:\n- no_active_auction (404): Auction not running\n- invalid_amount (422): Amount outside 1-100 range\n- auction_closed (410): Auction ended, no new bids",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ton_amount": {
+            "type": "number",
+            "description": "Amount of TON to bid. Range: 1-100 TON. This is maximum payment - partial refunds possible if oversubscribed or target not reached.",
+            "minimum": 1,
+            "maximum": 100,
+            "examples": [
+              1,
+              5,
+              10,
+              50,
+              100
+            ]
+          },
+          "wallet": {
+            "type": "string",
+            "description": "TON wallet address in normalized format. Examples: \"UQBlen9nrjWVN5K-O6yzLeNH5hMrQqAw-6LfW3RnISrMg0nw\" or \"EQAbc123...\". This address receives tokens if successful, or refunds if applicable.",
+            "pattern": "^(UQ|EQ)[A-Za-z0-9_-]{48}$"
+          }
+        },
+        "required": [
+          "ton_amount",
+          "wallet"
+        ]
+      }
+    },
+    {
+      "name": "check_bid_status",
+      "description": "Check status of a specific bid by its ID.\n\nWHEN TO USE:\n- User wants to verify payment status\n- User has bid_id and wants to check progress\n- Track bid through auction lifecycle\n\nBID STATUSES:\n1. payment_pending: Payment not received, window open\n   → Show payment instructions + urgency if expires_in < 60s\n   → Use payment.deeplink for quick payment\n\n2. expired: Payment window closed without payment\n   → Bid invalid, suggest new bid (price may have changed)\n\n3. completed: Payment confirmed, waiting for auction close\n   → Show locked price vs current auction price\n\n4. allocated: Auction succeeded, tokens distributed\n   → Show allocated_token amount + refund_ton (if any)\n\n5. refunded: Auction failed to reach target\n   → Full refund processed (minus transaction fee)\n\n6. auction_closed: Auction ended before payment\n   → Show final_price_ton and closed_at timestamp\n\nRESPONSE STRUCTURE:\n{\n  status: \"payment_pending\" | \"completed\" | \"allocated\" | \"refunded\" | \"expired\" | \"auction_closed\",\n  action_required: \"payment\" | \"wait\" | \"none\" | \"create_new_bid\",\n  urgency?: \"critical\" | \"high\" | \"normal\",\n  payment?: { required, recipient, deeplink, expires_in_seconds },\n  auction?: { status, prices },\n  next_step: \"send_payment\" | \"wait_for_allocation\" | \"check_wallet\" | \"create_new_bid\"\n}\n\nWORKFLOW:\n- payment_pending + expires_in < 300s: Emphasize urgency, use deeplink\n- completed: Reassure user, explain waiting for allocation\n- allocated: Celebrate success, show token amount\n- refunded: Explain auction failure, confirm refund\n- expired: Offer to create new bid if auction still active",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bid_id": {
+            "type": "string",
+            "description": "Unique bid ID returned when creating a bid. Format: \"bid_XXXXXXXXXX\" (e.g., \"bid_1234567890\"). Found in create_auction_bid response.",
+            "pattern": "^bid_[A-Za-z0-9]+$",
+            "examples": [
+              "bid_1234567890",
+              "bid_abc123def456"
+            ]
+          }
+        },
+        "required": [
+          "bid_id"
+        ]
+      }
+    },
+    {
+      "name": "get_my_bid",
+      "description": "Lookup bid by wallet address. Use to check participation without knowing bid_id.\n\nWHEN TO USE:\n- User asks \"do I have a bid?\" or \"what's my bid status?\"\n- BEFORE creating new bid (verify wallet doesn't already have one)\n- User wants to check participation but doesn't have bid_id\n- Check token allocation or payment status\n\nCONSTRAINT: One bid per wallet per auction\n\nRESPONSE STRUCTURE:\n{\n  bid_id, status, ton_amount, bid_price_ton, tx_hash, created_at,\n  action_required: \"payment\" | \"wait\" | \"none\" | \"create_new_bid\",\n  urgency?: \"critical\" | \"high\" | \"normal\",\n  payment?: { required, recipient, deeplink, expires_in_seconds },\n  allocation?: { success, oversubscribed, pricing_model },\n  refund?: { processed, transaction_fee_deducted },\n  next_step: \"send_payment\" | \"wait_for_allocation\" | \"check_wallet\" | \"create_new_bid\"\n}\n\nSTATUS HANDLING:\n- pending: Show payment instructions + deeplink (check urgency)\n- completed: Confirm payment, explain waiting for allocation\n- allocated: Show tokens received + refund_ton (if any)\n- refunded: Explain auction failure + refund amount\n- expired: Bid expired, suggest new bid if auction active\n\nIF NO BID (404 error):\n→ Normal: wallet hasn't participated yet\n→ Safe to proceed with create_auction_bid\n\nWORKFLOW:\n1. Call before create_auction_bid to check existing bid\n2. If 404: Wallet free, proceed with new bid\n3. If found: Show status, don't create duplicate\n4. For pending: Show payment link with urgency\n5. For completed/allocated: Show appropriate status message",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "description": "TON wallet address to check for existing bids. Normalized format: \"UQBlen...\" or \"EQAbc...\". Example: \"UQBlen9nrjWVN5K-O6yzLeNH5hMrQqAw-6LfW3RnISrMg0nw\".",
+            "pattern": "^(UQ|EQ)[A-Za-z0-9_-]{48}$",
+            "examples": [
+              "UQBlen9nrjWVN5K-O6yzLeNH5hMrQqAw-6LfW3RnISrMg0nw",
+              "EQAbc123..."
+            ]
+          }
+        },
+        "required": [
+          "wallet"
+        ]
+      }
+    },
+    {
+      "name": "get_recent_bids",
+      "description": "Get list of recent bids to show auction activity and social proof.\n\nWHEN TO USE:\n- User asks \"is anyone else bidding?\" or \"what's the activity like?\"\n- Before showing auction info (demonstrate real participation)\n- Show price examples from other bidders\n- Validate auction is active and legitimate\n\nRETURNS:\n{\n  bids: [\n    {\n      bidder: \"UQBl...f4Te\",  // Shortened for privacy\n      amount: \"5.0\",           // TON bid amount\n      price: \"0.50\",          // Price locked in (pay-as-bid)\n      time: \"2025-01-15T12:00:00Z\",\n      status: \"completed\" | \"allocated\" | \"pending\"\n    }\n  ],\n  current_price: \"0.52\"  // Current auction price for comparison\n}\n\nDATA INTERPRETATION:\n- bidder: Privacy-safe shortened address\n- amount: TON bid amount\n- price: Locked price (pay-as-bid model)\n- time: ISO timestamp\n- status: Current bid state\n\nWORKFLOW:\n1. Call with limit=10-20 for quick overview\n2. Show 3-5 recent bids as examples\n3. Highlight price variations (different users lock different prices)\n4. Use as social proof: \"X bids totaling Y TON\"\n5. Compare bid prices vs current_price to show price movement\n\nPRESENTATION EXAMPLES:\n- \"15 bids in the last hour\"\n- \"Typical bid range: 5-10 TON\"\n- \"Prices locked: 0.45-0.52 TON per token (current: 0.50)\"\n- Never show full wallet addresses",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Number of recent bids to return. Range: 1-100. Default: 20. Use 10-20 for quick context, 50-100 for detailed analysis.",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "examples": [
+              10,
+              20,
+              50,
+              100
+            ]
+          }
+        },
+        "required": []
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "x402-auction-mcp",
+    "version": "1.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 12371,
+  "stderr": "x402 Auction MCP Server running on stdio\n"
+}

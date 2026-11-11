@@ -1,0 +1,482 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@jspatrick/scriverse-mcp",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha512-oa9ZSOoueeR2JbJtorlhtNUZZN7c7H/mWwLVCUG0xdK9DRoE2ChccD+nQ9o/he15EVnpkuWWyzGymR4d4k67Hg==",
+    "installed": "sha512-oa9ZSOoueeR2JbJtorlhtNUZZN7c7H/mWwLVCUG0xdK9DRoE2ChccD+nQ9o/he15EVnpkuWWyzGymR4d4k67Hg=="
+  },
+  "bin": "node_modules/@jspatrick/scriverse-mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T13:49:04.385Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "scriverse_schema",
+      "description": "查看 Scriverse CLI 的资源类型、字段说明、请求示例和禁止操作。在执行任何 create/update/restore 写操作之前，应先用本工具确认字段规范。action=list 返回整体契约概览；action=show 需要提供 type 返回单个资源类型的详细规范。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "show"
+            ],
+            "description": "list：整体契约概览；show：单个资源类型详情"
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "action=show 时的资源类型：work 或 volume / chapter / draft / setting / character / race / organization / timeline-track / timeline-event / relationship / foreshadow / chapter-outline"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_work",
+      "description": "管理 Scriverse 作品元数据：list 列出作品，get 读取作品详情，create/update 创建或更新作品元数据（会生成版本历史），history 查看作品版本历史，restore 恢复到指定版本。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "create",
+              "update",
+              "history",
+              "restore"
+            ],
+            "description": "作品操作类型"
+          },
+          "workId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "作品 ID；除 list、create 外必填"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "create/update 请求体字段：title*（string（自动去首尾空格，至少 1 字，最多 200 字））：作品名；author（string（最多 200 字））：作者名；description（string（最多 10000 字））：作品简介；language（string（最多 30 字））：语言代码，如 zh-CN；coverUrl（string（URL 格式），可为 null）：封面图片 URL；tags（数组 (string)）：标签列表；editorAutoIndentEnabled（boolean）：编辑器自动缩进开关；editorTypewriterModeEnabled（boolean）：编辑器打字机模式开关。update 时字段均可选，changeNote 与 expectedVersionNo 只能放 input 内。* 为必填；冗余字段会被拒绝"
+          },
+          "version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "action=restore 时必填"
+          },
+          "expectedVersionNo": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "可选乐观锁：当前最新版本号，不匹配时服务端拒绝写入"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_resource",
+      "description": "管理单部作品下的可版本化资源（设定库）：分卷、章节、想法、世界观设定、人物、种族、组织、\n时间轴、时间线事件、人物关系、伏笔、章节大纲。\nlist 时 id 是作品 ID（章节大纲用章节 ID 也可，见 schema）；get/update/history/restore 时 id 是资源 ID；\ncreate 时 id 是归属 ID（多数资源为作品 ID，chapter-outline 为章节 ID）。\nupdate 支持可选 changeNote 写入版本说明（volume 不支持）；写操作前建议先用 scriverse_schema 确认字段。\ncreate/update 的 input 会按服务端字段规范做 strict 校验：未知/冗余字段会被直接拒绝（例如人物扩展属性请写 attributes.details 的 {label, value} 结构）。\n\n各类型必填字段速查（update 时字段全部可选，均支持 input 内 expectedVersionNo 乐观锁；\n完整逐字段格式用 scriverse_schema action=show type=<类型> 获取）：\nvolume: title；chapter: volumeId + title；draft: draftType + title + content；setting: title + category + content；character: name；race: name；organization: name；timeline-track: name；timeline-event: name；relationship: fromCharacterId + toCharacterId + category；foreshadow: title；chapter-outline: 无必填。\n人物扩展属性必须写 attributes.details=[{label,value}]（label/value 均为必填非空字符串，\n如 [{\"label\":\"身高\",\"value\":\"176cm\"}]），attributes/profile/currentState 内不得自造其他键。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "volume",
+              "chapter",
+              "draft",
+              "setting",
+              "character",
+              "race",
+              "organization",
+              "timeline-track",
+              "timeline-event",
+              "relationship",
+              "foreshadow",
+              "chapter-outline"
+            ],
+            "description": "资源类型"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "create",
+              "update",
+              "history",
+              "restore"
+            ],
+            "description": "资源操作类型"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "按 action 而定的 ID：作品 ID / 章节 ID / 资源 ID"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "create/update 的 JSON 请求体；写入前按服务端字段规范做 strict 校验，未知/冗余字段会被直接拒绝。各类型必填字段见工具描述末尾速查，完整逐字段格式用 scriverse_schema action=show type=<类型> 获取"
+          },
+          "changeNote": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "可选版本说明，最多 500 字；仅 update 支持，volume 不支持"
+          },
+          "version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "action=restore 时必填"
+          },
+          "expectedVersionNo": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "可选乐观锁：当前最新版本号，不匹配时服务端拒绝写入"
+          }
+        },
+        "required": [
+          "type",
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_manuscript",
+      "description": "读取或导出作品完整正文。format=json 返回结构化 JSON；format=markdown/txt 默认直接返回纯文本，也可用 outputPath 写入本地文件；format=docx/epub 为二进制格式，必须提供 outputPath（建议绝对路径）保存到本地后返回文件信息。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "作品 ID，通常以 work_ 开头"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "markdown",
+              "txt",
+              "docx",
+              "epub"
+            ],
+            "description": "导出格式，默认 json"
+          },
+          "outputPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "导出文件保存路径；markdown/txt 可选，docx/epub 必填"
+          }
+        },
+        "required": [
+          "workId",
+          "format"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_search",
+      "description": "在单部作品内按关键词混合搜索章节、人物、设定等资源，返回相关片段。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "作品 ID，通常以 work_ 开头"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "搜索关键词"
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "可选资源类型过滤；取值范围见 scriverse_schema 或 CLI 帮助"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "返回条数上限，1 到 100"
+          }
+        },
+        "required": [
+          "workId",
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_audit",
+      "description": "读取单部作品的审计日志，包含操作者、动作与时间，用于回答谁改了什么。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "作品 ID，通常以 work_ 开头"
+          }
+        },
+        "required": [
+          "workId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_writing",
+      "description": "action=progress 查询作品写作进度统计；action=goal 更新写作目标，需要提供 input 请求体。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "progress",
+              "goal"
+            ],
+            "description": "progress：查询进度；goal：更新目标"
+          },
+          "workId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "作品 ID，通常以 work_ 开头"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=goal 时必填。字段：dailyGoal*（number（整数，≥0，≤1000000））：每日字数目标；targetTotal*（number（整数，≥0，≤100000000））：全书总字数目标；deadline*（string，可为 null）：截止日期，YYYY-MM-DD（* 为必填；冗余字段会被拒绝）"
+          }
+        },
+        "required": [
+          "action",
+          "workId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_chapter",
+      "description": "action=move 移动单个章节到其他分卷或位置；action=batch 批量调整整部作品的章节结构。两者都需要 input 请求体，字段规范先用 scriverse_schema 查询 chapter。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "move",
+              "batch"
+            ],
+            "description": "move：移动章节；batch：批量结构调整"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "move 时为章节 ID；batch 时为作品 ID"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "move：volumeId*（string（自动去首尾空格，至少 1 字，最多 200 字））：目标分卷 ID；sortOrder*（number（整数，≥0））：在分卷内的排序序号；expectedVersionNo（number（整数，＞0））：可选乐观锁：当前最新版本号，不匹配时服务端拒绝写入。batch：chapters*（数组 [{id*（string（自动去首尾空格，至少 1 字，最多 200 字））：章节 ID，expectedVersionNo*（number（整数，＞0））：该章节当前版本号}]，至少 1 项，最多 200 项）：要操作的章节及其当前版本号；action*（多选一结构（见字段说明））：批量动作；type=move|setType|setAnalysisExclusion|renumberTitles|delete。* 为必填；冗余字段会被拒绝"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_annotation",
+      "description": "管理章节批注：list 列出单个章节的批注（id 为章节 ID），list-work 跨章节列出整部作品的批注（id 为作品 ID），create 在章节上新建批注（id 为章节 ID），update 修改批注（id 为批注 ID），delete 删除批注（id 为批注 ID，可带 expectedVersionNo 乐观锁）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "list-work",
+              "create",
+              "update",
+              "delete"
+            ],
+            "description": "批注操作"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "按 action 而定的 ID"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "create：kind*（枚举 note|todo）：批注类型：note|todo；startLine*（number（整数，＞0））：起始行号（从 1 开始）；endLine*（number（整数，＞0））：结束行号（从 1 开始）；note*（string（自动去首尾空格，至少 1 字，最多 2000 字））：批注内容。update：note（string（自动去首尾空格，至少 1 字，最多 2000 字））：新的批注内容；status（枚举 open|resolved）：批注状态：open|resolved；expectedVersionNo（number（整数，＞0））：可选乐观锁：当前最新版本号，不匹配时服务端拒绝写入。* 为必填；update 至少提供 note 或 status；冗余字段会被拒绝"
+          },
+          "expectedVersionNo": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "action=delete 时的可选乐观锁"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_ai_rename",
+      "description": "修改一个 AI 对话的标题。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "AI 对话 ID"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "新标题，最多 200 字"
+          }
+        },
+        "required": [
+          "conversationId",
+          "title"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "scriverse_ai_questions",
+      "description": "处理 AI 写作过程中向用户发起的提问：list 按状态列出提问，get 读取单个提问详情，answer 回答提问（input 支持 {selectedOption, customAnswer} 或批量 {answers: [...最多 5 项]}），reject 拒绝提问使其过期。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "get",
+              "answer",
+              "reject"
+            ],
+            "description": "提问操作"
+          },
+          "workId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "作品 ID，通常以 work_ 开头"
+          },
+          "questionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "提问 ID；除 list 外必填"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "answered",
+              "rejected",
+              "expired"
+            ],
+            "description": "action=list 时的状态过滤"
+          },
+          "conversationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "action=list 时可选，按对话过滤"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "action=list 时的条数上限"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=answer 时必填。两种形式之一：{selectedOption?: 整数≥0（预设选项下标，从 0 起）, customAnswer?: 1..3000 字}（至少提供其一，可同时提供）；或批量 {answers: [同上结构]}（1..5 条）。冗余字段会被拒绝"
+          }
+        },
+        "required": [
+          "action",
+          "workId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "scriverse-mcp",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": "这是 Scriverse（本地长篇小说 AI 工作台）的 CLI 代理 MCP Server，所有工具都作用于已登录的远程 Scriverse 服务。工具与 scriverse CLI 子命令一一对应；执行任何写操作（create/update/restore/answer/delete）前，先用 scriverse_schema 查看对应资源的字段规范与示例；create/update 的 input 会按服务端字段规范做 strict 校验，未知/冗余字段会被直接拒绝，不会提交。写操作会生成版本历史，可用 history 查询、restore 回滚。用户管理、作品成员管理、系统管理、AI 供应商管理、永久删除等操作不在 CLI 契约内，本 Server 也不提供。",
+  "durationMs": 14287,
+  "stderr": "scriverse-mcp: 未找到 CLI 登录配置；请先执行 npx scriverse auth login，或在 MCP 配置中同时提供 SCRIVERSE_SERVER 与 SCRIVERSE_API_KEY 环境变量。在此之前工具调用将返回登录错误。\nscriverse-mcp: version 0.2.0 listening on stdio (cli: /pkg/node_modules/@musnows/scriverse/dist/cli.js)\n"
+}

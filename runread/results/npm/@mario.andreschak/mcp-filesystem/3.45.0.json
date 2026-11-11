@@ -1,0 +1,400 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@mario.andreschak/mcp-filesystem",
+  "version": "3.45.0",
+  "integrity": {
+    "dist": "sha512-krOo132PSPoDeUOzcz6M80uLPL/J8JcAvhCSMh/+4q3y/LlSbbNtK5eMbcZBBV5rnvzYomzHZamPwOCWZgGeQw==",
+    "installed": "sha512-krOo132PSPoDeUOzcz6M80uLPL/J8JcAvhCSMh/+4q3y/LlSbbNtK5eMbcZBBV5rnvzYomzHZamPwOCWZgGeQw=="
+  },
+  "bin": "node_modules/@mario.andreschak/mcp-filesystem/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T13:54:51.845Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read one text file with \"path\", or up to 25 files in input order with mutually exclusive \"paths\". Optional \"from\"/\"to\" (1-based, inclusive) and \"pattern\" settings apply to every target. Media files (images, audio, video) are detected automatically and returned as MCP media content items; read them with \"path\" alone (\"pattern\"/\"from\"/\"to\" do not apply to binary media, and the large-file rule below is waived for them, up to 32 MB). FLUJO persists the bytes as a run resource and re-attaches them to the conversation as a real media input, so a model that accepts that modality perceives the file directly; a model that does not receives the run-resource URI and can still pass it to other tools. For large NON-MEDIA files (> 100 KB) read WHOLE (no \"from\"/\"to\"), a \"pattern\" is REQUIRED: the server greps the file and returns only matching lines (with a little surrounding context) so you can follow up with targeted \"from\"/\"to\" reads. Pass pattern \"*\" to force-read the entire large file anyway. Single text reads return { path, from, to, totalLines, content, truncated, contentHash, matches? } unchanged; media reads return { path, mediaType, mimeType, size, encoding } alongside the media item. Batch reads return { files }, with one ordered success or { requestedPath, path?, error } record per input; individual failures do not discard successful reads. Batch output is limited to 1,000,000 serialized characters. Pass contentHash back as \"expectedHash\" on a follow-up edit_file/write_file to guard against the file changing in between (TOCTOU).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path. Relative paths resolve against the FLUJO data directory; absolute paths are used as-is."
+          },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 25,
+            "items": {
+              "type": "string"
+            },
+            "description": "File paths to read in input order. Mutually exclusive with \"path\"."
+          },
+          "from": {
+            "type": "number",
+            "description": "Optional 1-based first line to return (inclusive)."
+          },
+          "to": {
+            "type": "number",
+            "description": "Optional 1-based last line to return (inclusive)."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Case-insensitive substring to grep for. Required to read a large file whole without a \"from\"/\"to\" range; matching lines (plus context) are returned instead of the full body. Use \"*\" to read the whole large file anyway."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Create or write a text file (parent directories are created). \"mode\": \"overwrite\" (default) replaces the whole file, or a line range when \"startLine\"/\"endLine\" (1-based inclusive) are given; \"append\" adds content at the end; \"insert\" inserts content before \"startLine\". Optionally pass \"expectedHash\" (the contentHash from a prior read_file) to reject the write if the file changed on disk since it was read (TOCTOU guard); ignored for a whole-file overwrite. Returns { path, bytesWritten, mode, ... }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path. Relative paths resolve against the FLUJO data directory; absolute paths are used as-is."
+          },
+          "content": {
+            "type": "string",
+            "description": "The content to write/insert/append."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "overwrite",
+              "append",
+              "insert"
+            ],
+            "description": "Write mode (default \"overwrite\")."
+          },
+          "startLine": {
+            "type": "number",
+            "description": "For \"insert\": line to insert before. For \"overwrite\": first line of the range to replace (1-based)."
+          },
+          "endLine": {
+            "type": "number",
+            "description": "For \"overwrite\": last line (inclusive, 1-based) of the range to replace."
+          },
+          "expectedHash": {
+            "type": "string",
+            "description": "Optional SHA-256 (contentHash from read_file). For append/insert/range-overwrite modes, the write is rejected if the file no longer hashes to this value (TOCTOU guard)."
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "edit_file",
+      "description": "Edit a text file two ways (mutually exclusive): (1) \"edits\": [{ oldText, newText, startLine?, endLine? }] literal find/replace — each replaces the unique occurrence of oldText. startLine/endLine are an optional disambiguation HINT (if exactly one match starts in that range it wins); a wrong/missing range still works as long as oldText is unique in the file. Include enough surrounding context to make oldText unique. Or (2) \"diff\": a unified diff string (\"@@ -a,b +c,d @@\" hunks) applied atomically — hunks are relocated to where their context actually matches, so slightly-off @@ line numbers still apply, and CRLF files are handled. Fails with no partial write only when text is missing/ambiguous or a hunk context is not found. Optionally pass \"expectedHash\" (the contentHash from a prior read_file) to reject the edit if the file changed on disk since it was read (TOCTOU guard). Returns { path, editsApplied|applied, diff:{added,removed} }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path. Relative paths resolve against the FLUJO data directory; absolute paths are used as-is."
+          },
+          "edits": {
+            "type": "array",
+            "description": "List of literal { oldText, newText } edits applied in order (optionally scoped with startLine/endLine).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "oldText": {
+                  "type": "string",
+                  "description": "Exact text to find."
+                },
+                "newText": {
+                  "type": "string",
+                  "description": "Replacement text."
+                },
+                "startLine": {
+                  "type": "number",
+                  "description": "Optional 1-based first line to scope this edit to."
+                },
+                "endLine": {
+                  "type": "number",
+                  "description": "Optional 1-based last line (inclusive) to scope this edit to."
+                }
+              },
+              "required": [
+                "oldText",
+                "newText"
+              ]
+            }
+          },
+          "diff": {
+            "type": "string",
+            "description": "A unified diff to apply atomically. Mutually exclusive with \"edits\"."
+          },
+          "startLine": {
+            "type": "number",
+            "description": "Optional default 1-based first line to scope all literal edits to."
+          },
+          "endLine": {
+            "type": "number",
+            "description": "Optional default 1-based last line (inclusive) to scope all literal edits to."
+          },
+          "expectedHash": {
+            "type": "string",
+            "description": "Optional SHA-256 (contentHash from read_file). If provided and the freshly-read file no longer hashes to it, the edit is rejected with no changes written (TOCTOU guard)."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_dir",
+      "description": "List the entries of a directory. Returns { path, entries: [{ name, type, size }] } where type is \"file\" | \"directory\" | \"other\".",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path. Relative paths resolve against the FLUJO data directory; absolute paths are used as-is."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "file_browser_ui",
+      "description": "Open an interactive file browser in the chat so the USER can pick a file. This returns IMMEDIATELY without a selection — the browser is shown to the user and the file they choose arrives afterwards as a follow-up user message (e.g. \"Selected file: <path>\"). After calling this tool you MUST stop and wait for that message; do not guess a path or continue until the user has selected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Optional starting directory for the browser (defaults to the FLUJO data directory)."
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dir_tree",
+      "description": "Return a recursive, depth-limited directory tree as nested JSON. Returns { path, depth, tree }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path. Relative paths resolve against the FLUJO data directory; absolute paths are used as-is."
+          },
+          "depth": {
+            "type": "number",
+            "description": "Maximum recursion depth (default 3, max 10)."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "search",
+      "description": "Search a directory tree. Match file/dir NAMES against \"namePattern\" (substring, case-insensitive) and/or file CONTENT against \"content\" (substring, case-insensitive). Content search DOES look inside every text file, returning each matching line with its 1-based line number; likely-binary and very large files are skipped for speed. Returns { matches: [{ path, line?, text? }], truncated }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path. Relative paths resolve against the FLUJO data directory; absolute paths are used as-is."
+          },
+          "namePattern": {
+            "type": "string",
+            "description": "Optional case-insensitive substring to match against entry names."
+          },
+          "content": {
+            "type": "string",
+            "description": "Optional case-insensitive substring to match inside text files."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_file_info",
+      "description": "Stat a path. Returns { path, type, size, isFile, isDirectory, createdAt, modifiedAt }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path. Relative paths resolve against the FLUJO data directory; absolute paths are used as-is."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "create_directory",
+      "description": "Create a directory (recursively). Succeeds if it already exists. Returns { path, created }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path. Relative paths resolve against the FLUJO data directory; absolute paths are used as-is."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "move",
+      "description": "Move or rename a file/directory from \"source\" to \"destination\". Returns { source, destination }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Existing path to move."
+          },
+          "destination": {
+            "type": "string",
+            "description": "Target path."
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "delete",
+      "description": "Delete a file or directory. Pass \"recursive\": true to remove a non-empty directory. Returns { path, deleted }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path. Relative paths resolve against the FLUJO data directory; absolute paths are used as-is."
+          },
+          "recursive": {
+            "type": "boolean",
+            "description": "Remove directories and their contents recursively."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_allowed_directories",
+      "description": "Returns the list of directories that this filesystem MCP server is currently allowed to access. The list is the merged result of server-level roots (configured via FLUJO MCP settings), MCP-node-level roots (set in the FlowBuilder), and the FLUJO_FS_ROOTS environment variable ceiling. When no roots are configured at all, returns the FLUJO data directory as the default (so the file browser is usable out of the box).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "@mario.andreschak/mcp-filesystem",
+    "version": "0.1.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 5669,
+  "stderr": ""
+}

@@ -1,0 +1,187 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "lipdub-mcp",
+  "version": "0.1.1",
+  "integrity": {
+    "dist": "sha512-yVwsa3kQiWPm1BswxCEofCFB70WavrRZdBQ6mSssDrNDDPGMKtSO4wWdFsF2/tK04SMkVQKnRj5Ib4M+/22M7Q==",
+    "installed": "sha512-yVwsa3kQiWPm1BswxCEofCFB70WavrRZdBQ6mSssDrNDDPGMKtSO4wWdFsF2/tK04SMkVQKnRj5Ib4M+/22M7Q=="
+  },
+  "bin": "node_modules/lipdub-mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.4.3",
+    "sdk": "1.30.0",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T16:43:31.129Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "lipdub_check_connection",
+      "description": "Verify that this server can reach LipDub and report which account it is using.\n\nCall this first if any other LipDub tool fails with an authentication error, or when\na user asks whether LipDub is set up.\n\nDoes not use credits and does not start anything.\n\nCredit balance is not available through the API — direct the user to https://app.lipdub.ai\nto see it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Check LipDub connection",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "lipdub_create_render",
+      "description": "Start a LipDub 2 render: make the person in a source video appear to speak a\ndifferent audio track, with matched lip movement.\n\nUSES CREDITS. Each render charges the account and cannot be undone or refunded.\nCost scales with the length of the source video. Confirm with the user first, then\ncall again with confirm_spend set to true.\n\nSupply both sides as direct, publicly downloadable URLs:\n- video_url — a video of ONE person speaking, face clearly visible.\n- audio_url — the audio you want them to appear to say.\n\nLipDub 2 does NOT translate, transcribe or generate speech. If the user wants\nanother language, produce that audio first with a separate text-to-speech or voice\ntool, host it at a URL, and pass that URL as audio_url.\n\nLinks must return the media file itself, with two exceptions: YouTube links work\n(youtube.com, youtu.be or youtube-nocookie.com), because they are resolved for you.\nGoogle Drive and Dropbox share pages, and anything behind a login, will fail.\n\nReturns immediately with a render_id — the render is NOT finished. Rendering takes\nseveral minutes for a short clip, and longer for longer videos. Next step: call lipdub_wait_for_render with\nthat render_id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "video_url": {
+            "description": "URL to the source video (one person, face visible). .mp4, .mov or .avi, or a YouTube link.",
+            "type": "string",
+            "maxLength": 2048
+          },
+          "audio_url": {
+            "description": "Direct URL to the audio the person should appear to say (.mp3, .wav, .m4a, .aac, .ogg, .flac, .mp4 or .mov). You must supply finished audio; LipDub 2 does not generate or translate speech.",
+            "type": "string",
+            "maxLength": 2048
+          },
+          "output_filename": {
+            "description": "Optional name for the finished file, e.g. 'ceo-welcome-spanish.mp4'. If omitted, a name is derived from video_url. This name is also shown as the project name in the user's LipDub web app, so make it meaningful.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "callback_url": {
+            "description": "Optional https URL to be called when the render finishes. For automated pipelines; in a chat session use lipdub_wait_for_render instead.",
+            "type": "string",
+            "maxLength": 2048
+          },
+          "confirm_spend": {
+            "default": false,
+            "description": "Whether the user has personally approved spending credits on this render. Defaults to false deliberately, as a safety gate — it is not a misconfiguration. Set it to true only after you have asked the user and they have agreed. Setting it yourself without asking spends their money without consent.",
+            "type": "boolean"
+          },
+          "video_id": {
+            "description": "Advanced. A LipDub shot id from a previous upload, instead of video_url.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "audio_id": {
+            "description": "Advanced. A LipDub audio upload id from a previous upload, instead of audio_url.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create LipDub render (uses account credits)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "lipdub_get_render",
+      "description": "Check a LipDub render once, right now, and return its download link if it has\nfinished. This does NOT wait — it answers immediately with whatever the current\nstatus is. To wait for a render to finish, use lipdub_wait_for_render instead.\n\nTakes the render_id from lipdub_create_render.\n\nFree and never rate-limited — check as often as you need.\n\nstatus is one of:\n- preparing — LipDub is downloading your source files (usually under 2 minutes)\n- queued — waiting for a render slot\n- rendering — generating the video\n- succeeded — done; download_url is included\n- failed — see failure_reason\n\ndownload_url is a temporary signed link that expires. Give it to the user or\ndownload it promptly; do not save it for later.\n\nIf the render is not finished yet, prefer lipdub_wait_for_render — it waits for you\ninstead of making you check repeatedly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "render_id": {
+            "type": "string",
+            "description": "The render_id from lipdub_create_render. A plain number is also accepted."
+          }
+        },
+        "required": [
+          "render_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Check LipDub render status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "lipdub_wait_for_render",
+      "description": "Wait for a LipDub render to finish, then return its download link. Use this straight\nafter lipdub_create_render instead of checking in a loop — it uses far less context.\n\nThis call blocks for up to max_wait_seconds (default 45,\nmaximum 600) while tracking the render for you. A render\ntakes several minutes for a short clip, and longer for longer videos, so expect to call this several times — that\nis normal and costs nothing.\n\nIf the render is still going when the wait is up, this returns normally with\nstill_running set to true. That is NOT an error and NOT a failure — the render is\nfine and is still going. When it happens: tell the user it is still in progress,\ngive them the render_id so they can come back to it, and call this tool again to\nkeep waiting.\n\nWaiting and status checks are free and never rate-limited.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "render_id": {
+            "type": "string",
+            "description": "The render_id from lipdub_create_render."
+          },
+          "max_wait_seconds": {
+            "default": 45,
+            "description": "How long to wait before returning. Returning early with still_running set to true is normal, not a failure. The default of 45 stays under the 60-second request timeout most MCP clients use; only raise it if your client is configured to wait longer.",
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 600
+          }
+        },
+        "required": [
+          "render_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Wait for LipDub render to finish",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "lipdub_list_renders",
+      "description": "List recent LipDub renders on this account, newest first.\n\nUse this when:\n- you have lost a render_id, for example because earlier conversation was trimmed\n  away and a render is still running or already finished\n- the user asks what they have rendered recently\n\nReturns a short summary of each. Call lipdub_get_render with one of the returned\nrender_ids to get its download link.\n\nFree and never rate-limited.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 10,
+            "description": "How many renders to return.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List recent LipDub renders",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "lipdub-mcp",
+    "version": "0.1.1"
+  },
+  "protocolVersion": null,
+  "instructions": "LipDub 2 makes a person in a video appear to speak a different audio track, with\nmatched lip movement.\n\nYou supply two things: a source video of a person speaking, and the audio you want\nthem to appear to say. LipDub 2 does NOT translate, transcribe or generate speech —\nbring your own finished audio, from a text-to-speech or voice tool, or a real\nrecording.\n\nBoth inputs are given as public URLs, not local file paths.\n\nRenders take several minutes for a short clip, and longer for longer videos, and consume credits from the\nuser's LipDub account. Checking status is free and never rate-limited, so check as\noften as you like.\n\nNormal flow:\n1. Ask the user to approve the charge, then call lipdub_create_render with a\n   video_url and an audio_url. Keep the render_id it returns.\n2. Call lipdub_wait_for_render. It waits for a few minutes and then returns; if the\n   render is not done yet it says so and you simply call it again. That is normal.\n3. Use lipdub_get_render for a single immediate status check without waiting, or to\n   fetch a fresh download link later.\n4. When the status is \"succeeded\", give the user the download link — it expires.\n\nIf you lose a render_id, lipdub_list_renders will find it. If anything fails with an\nauthentication error, lipdub_check_connection will tell you whether the key is the\nproblem.\n\nThis tool generates synthetic video of a real person. Only use it on material the\nuser has the rights and consent to alter, and never to impersonate someone.",
+  "durationMs": 24780,
+  "stderr": "{\"level\":\"warn\",\"message\":\"no API key configured; tools will return setup instructions until LIPDUB_API_KEY is set\"}\ntime=\"2026-11-10T11:43:55-05:00\" level=error msg=\"Error forwarding signal 15 to container f26b4af21166ddb204e7d43690407cecfc4a3544f8690e75ebab98022ee4431a: container has already been removed\"\n"
+}

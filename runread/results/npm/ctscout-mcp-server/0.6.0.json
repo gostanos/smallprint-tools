@@ -1,0 +1,363 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "ctscout-mcp-server",
+  "version": "0.6.0",
+  "integrity": {
+    "dist": "sha512-7pa2e5Pr4Tkm3swBSp6KdxhuBQLbfty+fPjVUTRwqGDQCO6+hj+P+IwfhNE8/6gLAW699RBWsVwPsgRyQ4qfsQ==",
+    "installed": "sha512-7pa2e5Pr4Tkm3swBSp6KdxhuBQLbfty+fPjVUTRwqGDQCO6+hj+P+IwfhNE8/6gLAW699RBWsVwPsgRyQ4qfsQ=="
+  },
+  "bin": "node_modules/ctscout-mcp-server/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T16:14:34.424Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "ctscout_search_company",
+      "description": "Search ctscout.dev's domain-attribution warehouse by organization name. Returns apex domains attributed to that organization based on Certificate Transparency log analysis (OV/EV cert subjects matched to entity names).\n\nArgs:\n  - company_name (string, required): organization name. Partial matches work — 'Goldman' matches 'Goldman Sachs'. Min 2 chars, max 200.\n  - strict_match_org_only (boolean, optional): suppress semantic candidates and return only authoritative warehouse org matches.\n  - org_match_field ('verbatim' | 'normalized', optional): raw cert-subject substring matching, or the research normalizer's key of the query against the normalized column (legal forms stripped at the edges, '&'/'and' and hyphen/space unified, a leading 'The' dropped, a generic tail like 'Holdings' kept). Leave unset for automatic verbatim-then-normalized fallback.\n  - org_match_mode ('substring' | 'word', optional): use word-boundary matching to reduce noise from short/common names.\n  - purpose ('underwriting' | 'corporate_family', optional): choose tight operational-attribution defaults or broader corporate-family defaults. Explicit matching controls override the preset.\n  - response_format ('markdown' | 'json', default 'markdown'): output format.\n\nReturns (on success, structuredContent follows the declared outputSchema; an error result — 401, 429, timeout — is isError with no structuredContent, so never dereference snapshot on a failed call):\n  - \"Attributed\" means the organization is what the evidence names for that domain, not an ownership claim. On /scan that evidence is the OV/EV certificate subject on both tiers; multi-signal attribution (DNS, RDAP, IP/ASN, homepage, favicon) exists only in a deep-dive job result (ctscout_submit_deep_dive, Pro). \"Candidate\" means a semantic name-similarity guess that is NOT an attribution.\n  - In markdown: a snapshot line, then a table of (domain, attributed to, cert count, subdomain count). When nothing is attributed but match_type is 'semantic', a table of candidate organizations is rendered instead, labelled as candidates.\n  - In JSON, structured as:\n    {\n      \"domains\": [                        // attributed pairs; empty when nothing is attributed\n        {\n          \"org\": string,                  // attributed organization: the OV/EV certificate subject (both tiers)\n          \"apex_domain\": string,          // e.g. \"gs.com\"\n          \"cert_count\": number,           // # of distinct certs observed for this pair\n          \"subdomain_count\": number,      // # of distinct subdomains\n          \"first_seen\": string | null,    // warehouse observation time — NOT the CT log SCT / issuance time\n          \"last_seen\": string | null      // warehouse observation time — NOT the CT log SCT / issuance time\n        }\n      ],\n      \"total\": number,                    // total matching rows in warehouse\n      \"truncated\": boolean,               // true if response is capped\n      \"upgrade_hint\": string,             // present when truncated\n      \"source\": \"warehouse\",              // both tiers read the daily warehouse snapshot\n      \"match_type\": \"exact\" | \"semantic\" | \"none\",   // 'semantic' = domains empty, candidates offered\n      \"org_match_strategy\": string,       // which matching pass produced the answer\n      \"empty_reason\": string,             // present on empty results: why nothing was attributed\n      \"candidates\": [                     // only when match_type is 'semantic'; NOT attributions\n        { \"org\": string, \"similarity\": number, \"top_apex_domain\": string | null }\n      ],\n      \"snapshot\": string | null,          // warehouse/D1 sync date (YYYY-MM-DD) the answer was read from (API version 2026-09-05+); null only when the API could not determine it\n      \"snapshot_source\": \"scan\" | \"unavailable\"   // 'scan' = API carried the date; 'unavailable' = it did not (snapshot is null). null means unknown freshness, never \"current\"\n    }\n\nExamples:\n  - Use when: \"Find all domains attributed to Cloudflare\" -> { company_name: \"Cloudflare\" }\n  - Use when: \"Which domains are attributed to Goldman?\" -> { company_name: \"Goldman Sachs\" }\n  - Don't use when: You have a specific domain and want to find the organization it's attributed to — use ctscout_lookup_domain instead.\n\nAuth & limits:\n  - Requires an API key in CTSCOUT_API_KEY. Get a free key (no email) at https://ctscout.dev.\n  - Free tier: 10 queries/day, top 5 results from a daily snapshot. The response's \"snapshot\" field carries that snapshot's sync date (the API reports it since X-API-Version 2026-09-05); when it is null the API could not determine it — treat freshness as unknown, never as current.\n  - Pro tier: 3,000 lookups/month included, up to 25 rows, a 12-month window; deep-dive jobs (20/day) for multi-signal attribution. $49/month, subscribed from https://ctscout.dev/#tiers.\n\nError handling:\n  - HTTP 401: API key missing or invalid.\n  - HTTP 429: a quota on this key is exhausted, on either tier; the error quotes the API's own detail, which names the cap and when it resets. Tier allowances: https://ctscout.dev/#tiers.\n  - \"No domains found\": try a shorter or different company name (see legal-vs-brand caveat below).\n\nLegal-vs-brand caveat (important):\n  - The cert subject (O field) uses LEGAL entity names, not brand names.\n  - \"Travelers Insurance\" → 0 results because the legal name is \"The Travelers Companies, Inc.\"\n  - \"Hartford Financial\" → 0 results; legal names are \"Hartford Fire Insurance Company\" or \"The Hartford Financial Services Group\".\n  - If a brand-name search returns nothing, retry with variants like \"X Companies\", \"X Group\", \"X Inc\", \"X Corporation\", or \"The X\". The empty-result markdown output includes these suggestions automatically when the input looks brand-shaped.\n\nCoverage caveat:\n  - Best for established US/EU tech companies with OV/EV certs.\n  - Limited coverage on small private companies, cyber MGAs, and entities using only DV (Let's Encrypt) certs.\n  - Warehouse size (organizations, org-domain pairs, last sync) is not stated here because it changes daily; read the live figures at https://ctscout.dev/stats before treating a miss as meaningful.\n\nCorrections:\n  - Wrong attribution? Open an issue at https://github.com/minghsuy/ctscout-mcp/issues. Missing entity? Email pro@ctscout.dev. Include the name queried, the result returned and why it is wrong.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "company_name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "description": "Company / organization name to search for. Partial matches work (e.g. 'Goldman' matches 'Goldman Sachs'). Case-insensitive."
+          },
+          "strict_match_org_only": {
+            "description": "Optional, default false. When true, suppress the semantic-name fallback and return only authoritative warehouse organization matches.",
+            "type": "boolean"
+          },
+          "org_match_field": {
+            "description": "Optional, default 'verbatim'. 'verbatim' substring-matches the raw cert subject. 'normalized' compares the research normalizer's key of the query against the normalized column: GLEIF legal forms stripped at the edges, spelled out or abbreviated ('Aktiengesellschaft' and 'AG', 'Incorporated' and 'Inc.'), diacritics folded, lowercased; '&' and 'and' unify; a hyphen and a space no longer split ('Coca-Cola' and 'Coca Cola'), nor does a leading 'The'; a generic tail like 'Holdings' or 'Group' is part of the name and stays. A query that normalizes to nothing (a bare legal form) matches nothing. Leave unset to try verbatim first and retry normalized after an empty result; set 'normalized' only to skip the verbatim attempt.",
+            "type": "string",
+            "enum": [
+              "verbatim",
+              "normalized"
+            ]
+          },
+          "org_match_mode": {
+            "description": "Optional, default 'substring'. Use 'word' for short or common-token names to avoid unrelated substring matches. Applies only to verbatim matching.",
+            "type": "string",
+            "enum": [
+              "substring",
+              "word"
+            ]
+          },
+          "purpose": {
+            "description": "Optional persona preset. 'underwriting' defaults to a tight operational attack-surface set; 'corporate_family' defaults to a broad brand, regional, and family set. Explicitly supplied matching controls always win.",
+            "type": "string",
+            "enum": [
+              "underwriting",
+              "corporate_family"
+            ]
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: 'markdown' for human-readable summary, 'json' for the raw API response (useful for programmatic processing).",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "company_name"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ctscout_search_company_batch",
+      "description": "Look up apex domains for up to 10 organization names in a single call, via ctscout.dev's /scan/batch endpoint. Each name is matched exactly like ctscout_search_company; results come back in input order.\n\nArgs:\n  - company_names (string[], required): 1–10 organization names. Partial matches work — 'Goldman' matches 'Goldman Sachs'. Each 2–200 chars.\n  - response_format ('markdown' | 'json', default 'markdown'): output format.\n\nReturns (on success, structuredContent follows the declared outputSchema; an error result — 401, 429, timeout — is isError with no structuredContent, so never dereference snapshot on a failed call):\n  - \"Attributed\" and \"candidate\" mean exactly what they mean in ctscout_search_company: what the evidence names (the OV/EV certificate subject on /scan, both tiers) vs a semantic name-similarity guess that is NOT an attribution.\n  - In markdown: a snapshot line, then one section per company (heading + the same attributed-domains table as ctscout_search_company; a candidate-organizations table when that name's match_type is 'semantic'), followed by remaining quota. Names that failed render an error line instead of a table.\n  - In JSON, the batch envelope:\n    {\n      \"results\": [\n        { \"query\": {...}, \"domains\": [...], \"total\": number, \"match_type\": \"exact\"|\"semantic\"|\"none\", \"candidates\"?: [...] },   // same per-result fields as ctscout_search_company\n        { \"query\": {...}, \"error\": { \"code\": number, \"message\": string } }\n      ],\n      \"remaining_quota\": number | null,  // null = no remaining count reported (Pro today); a per-day request guard still applies\n      \"snapshot\": string | null,         // sync date shared by every result in the batch (API version 2026-09-05+); null (unknown freshness) only when the API could not determine it\n      \"snapshot_source\": \"scan\" | \"unavailable\"\n    }\n\nPartial-failure semantics (important):\n  - This is a 207-style mixed-result envelope, NOT all-or-nothing: one name can fail (its result carries an \"error\" object with no \"domains\") while the rest succeed.\n  - Quota debits by the number of names in the batch — every name counts once, even zero-result ones. No free riders.\n\nExamples:\n  - Use when: \"Look up Cloudflare, Fastly, and Akamai\" -> { company_names: [\"Cloudflare\", \"Fastly\", \"Akamai\"] }\n  - Don't use when: you have a single name (use ctscout_search_company) or a specific domain (use ctscout_lookup_domain).\n\nAuth & limits:\n  - Requires an API key in CTSCOUT_API_KEY, same as ctscout_search_company.\n  - Oversized batches (>10 names) are rejected with a validation error before any network call and without a partial quota debit.\n  - This MCP batch tool intentionally accepts names only. For matching modifiers such as strict_match_org_only, purpose, or org_match_mode, use individual ctscout_search_company calls or the REST /scan/batch endpoint.\n\nLegal-vs-brand and coverage caveats are identical to ctscout_search_company — brand names may need legal-entity variants (\"X Companies\", \"X Group\", \"The X\"), and coverage is best for established US/EU entities with OV/EV certs.\n\nCorrections:\n  - Wrong attribution? Open an issue at https://github.com/minghsuy/ctscout-mcp/issues. Missing entity? Email pro@ctscout.dev. Include the name queried, the result returned and why it is wrong.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "company_names": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 200
+            },
+            "description": "Company / organization names to look up in one call (1–10). Each is matched exactly as in ctscout_search_company (partial, case-insensitive). Results come back in input order; individual names can fail independently (partial-failure envelope), so a failed name doesn't sink the batch."
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: 'markdown' for a per-company summary, 'json' for the raw batch envelope (useful for programmatic processing).",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "company_names"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ctscout_lookup_domain",
+      "description": "Reverse-lookup ctscout.dev's domain-attribution warehouse: given one or more apex domains, return the organization(s) attributed to each.\n\nArgs:\n  - domains (string[], required): apex domains to look up. Each between 3 and 253 chars. Max 10 per call. Examples: [\"gs.com\"], [\"coalition.com\", \"at-bay.com\"].\n  - response_format ('markdown' | 'json', default 'markdown'): output format.\n\nReturns (on success, structuredContent follows the declared outputSchema — the same one as ctscout_search_company; a failed call is isError with no structuredContent):\n  - In markdown: a snapshot line, then a table of (domain, attributed to, cert count, subdomain count). Only domains found in the warehouse appear; a missing domain means no attribution in this snapshot, not a negative finding.\n  - In JSON: the same structure as ctscout_search_company, including \"snapshot\" / \"snapshot_source\". The 'domains' array contains one entry per attributed (domain, org) pair found. Reverse lookups never return semantic candidates.\n\nExamples:\n  - Use when: \"Who is gs.com attributed to?\" -> { domains: [\"gs.com\"] }\n  - Use when: \"Are coalition.com and at-bay.com attributed to the same parent?\" -> { domains: [\"coalition.com\", \"at-bay.com\"] }\n  - Don't use when: You have a company name and want to enumerate its domains — use ctscout_search_company instead.\n\nCoverage caveat:\n  - Returns 0 results if domain isn't in the warehouse. Either the domain is not in our index, or no OV/EV certs have been issued for it. DV-only domains (Let's Encrypt etc.) are typically not indexed.\n  - When a domain IS in the warehouse but the attributed org is a subsidiary (e.g. an Allianz brand domain), the 'org' field shows the cert-subject organization which may differ from the brand on the homepage.\n\nAuth & limits: same as ctscout_search_company.\n\nCorrections:\n  - Wrong attribution? Open an issue at https://github.com/minghsuy/ctscout-mcp/issues. Missing entity? Email pro@ctscout.dev. Include the domain queried, the result returned and why it is wrong.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 253
+            },
+            "description": "Apex domains to look up (e.g. ['gs.com', 'goldmansachs.com']). Returns the organization(s) attributed to each domain, plus any sibling domains in the warehouse attributed to the same orgs. Max 10."
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: 'markdown' for human-readable summary, 'json' for the raw API response.",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "domains"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ctscout_submit_deep_dive",
+      "description": "Queue an asynchronous Pro deep dive on ctscout.dev: the full multi-signal attribution run (CT warehouse + DNS, RDAP, homepage, IP/ASN corroboration) executed by a batch worker, via POST /jobs. Returns a job receipt immediately, NOT results.\n\nAsynchronous, Pro only:\n  - The call returns as soon as the job is queued ({job_id, status: \"queued\", submitted_at}). Nothing is attributed yet.\n  - Poll with ctscout_get_job using the returned job_id. Wait about 30 s before the first poll, then back off toward 5 min between polls; the batch worker picks up queued jobs every few minutes and a deep dive can take several minutes to run.\n  - Requires a Pro API key. A free key gets HTTP 403 with the API's upgrade text (Pro is $49/month from https://ctscout.dev/#tiers). Quota: 20 submissions per key per day (HTTP 429 over). Submitting is not idempotent — a retry queues a second job.\n\nArgs:\n  - company_name (string, optional): organization name, matched exactly as in ctscout_search_company (partial, case-insensitive; 2–200 chars).\n  - seed_domain (string[], optional): known apex domains to pivot from, max 10. At least one of company_name / seed_domain is required; both may be given. Validated exactly like /scan.\n  - response_format ('markdown' | 'json', default 'markdown'): a receipt with polling guidance, or the raw 202 body.\n\nReturns (on success, structuredContent follows the declared outputSchema; a failed call — 401, 403, 429, timeout — is isError with no structuredContent):\n    {\n      \"job_id\": string,        // opaque; pass to ctscout_get_job\n      \"status\": \"queued\",\n      \"submitted_at\": string,\n      \"poll\": \"/jobs/<id>\"     // informational\n    }\n\nWhat the finished result contains (read it with ctscout_get_job):\n  - The deep-dive result shape (a /scan never carries it): \"domains\" of attributed apex domains, each with \"attributed_to\", an \"enrichment\" object (confidence_band, weight_total, matched_via, evidence, signal_health, vlm_status, vlm_override) and the underlying discovery evidence under \"base\"; plus \"entity\", \"run_metadata\", \"source\" and \"signals_degraded\".\n  - Plus \"snapshot\": the warehouse date (YYYY-MM-DD) the deep dive read from. It is present on every deep-dive result because the batch worker sets it, together with \"worker_version\" and \"signals_attempted\"; a /scan answer carries its own snapshot from the API.\n  - \"Attributed\" means the organization is what the evidence names for that domain (certificate subject, corroborated by the enrichment signals), not an ownership claim. \"Candidate\" means a semantic name-similarity guess that is NOT an attribution; a deep dive reports attributions with a confidence band, never bare candidates.\n  - Visual brand verification (VLM) is NOT included in v1: vlm_status stays \"pending\" or \"skipped\" and never vetoes a band.\n\nExamples:\n  - Use when: \"Run a full attribution deep dive on CNA Financial\" -> { company_name: \"CNA Financial\" }\n  - Use when: \"Deep-dive from these seed domains\" -> { seed_domain: [\"cna.com\", \"cnasurety.com\"] }\n  - Don't use when: you want an answer now — ctscout_search_company / ctscout_lookup_domain are synchronous. Don't resubmit while a job is queued or running; poll it.\n\nCorrections:\n  - Wrong attribution? Open an issue at https://github.com/minghsuy/ctscout-mcp/issues. Missing entity? Email pro@ctscout.dev. Include the job id, the spec submitted and why the result read with ctscout_get_job is wrong.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "company_name": {
+            "description": "Organization name to deep-dive, matched exactly as in ctscout_search_company. Give company_name, seed_domain, or both.",
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200
+          },
+          "seed_domain": {
+            "description": "Known apex domains of the organization to pivot from (e.g. ['gs.com']). Max 10. Give company_name, seed_domain, or both.",
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 253
+            }
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: 'markdown' for a submission receipt with polling guidance, 'json' for the raw 202 body ({job_id, status, submitted_at, poll}).",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "company_name"
+            ]
+          },
+          {
+            "required": [
+              "seed_domain"
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ctscout_get_job",
+      "description": "Read the state of an asynchronous Pro deep dive submitted with ctscout_submit_deep_dive, via GET /jobs/{id}. Read-only and free to repeat: polling debits no quota.\n\nPolling:\n  - status is \"queued\" | \"running\" | \"done\" | \"failed\". Only \"done\" carries \"result\"; \"failed\" carries a short \"error\".\n  - Back off: about 30 s before the first poll, then longer waits up to 5 min. A deep dive runs on a batch worker that picks up queued jobs every few minutes.\n  - Pro only, and job ids are scoped to the submitting key: HTTP 404 means not your job or an unknown id.\n\nArgs:\n  - job_id (string, required): the id returned by ctscout_submit_deep_dive.\n  - response_format ('markdown' | 'json', default 'markdown'): output format.\n\nReturns (on success, structuredContent follows the declared outputSchema; a failed call — 401, 403, 404, timeout — is isError with no structuredContent, so never dereference snapshot on a failed call):\n  - In markdown: the job status lines; once done, the deep-dive attribution table (domain, attributed to, confidence band, signals, evidence) under a snapshot line. No /scan output carries this table.\n  - In JSON, structured as:\n    {\n      \"job_id\": string,\n      \"kind\": \"deep_dive\",\n      \"status\": \"queued\" | \"running\" | \"done\" | \"failed\",\n      \"submitted_at\": string, \"started_at\": string | null, \"finished_at\": string | null,\n      \"result\": {                       // only when status is \"done\"; the deep-dive shape (see below), never returned by /scan\n        \"entity\": {...}, \"domains\": [ { \"domain\": string, \"attributed_to\": string, \"enrichment\": {...}, \"base\": {...} } ],\n        \"run_metadata\": {...}, \"source\": \"live-enriched\" | \"cache-only\", \"signals_degraded\": boolean,\n        \"snapshot\": string,             // warehouse date (YYYY-MM-DD) the deep dive read from — present, the batch worker sets it\n        \"worker_version\": string, \"signals_attempted\": ...\n      },\n      \"error\": string,                  // only when status is \"failed\"\n      \"snapshot\": string | null,        // copy of result.snapshot once done; null (unknown) before that\n      \"snapshot_source\": \"scan\" | \"unavailable\"   // 'scan' = the API response carried the date\n    }\n  - \"Attributed\" means the organization is what the evidence names for that domain, not an ownership claim. \"Candidate\" means a semantic name-similarity guess that is NOT an attribution. Deep dives return attributions with a confidence band (verified / likely / possible / insufficient), never bare candidates. When \"signals_degraded\" is true some signals errored: absence of their evidence is not evidence of absence.\n  - Visual brand verification (VLM) is NOT included in v1: vlm_status stays \"pending\" or \"skipped\" and never vetoes a band.\n\nExamples:\n  - Use when: \"Is my deep dive abc123 finished?\" -> { job_id: \"abc123\" }\n  - Don't use when: you have no job_id — submit first with ctscout_submit_deep_dive, or use the synchronous tools.\n\nCorrections:\n  - Wrong attribution? Open an issue at https://github.com/minghsuy/ctscout-mcp/issues. Missing entity? Email pro@ctscout.dev. Include the spec the job ran on, the result returned and why it is wrong.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "The job_id returned by ctscout_submit_deep_dive."
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: 'markdown' for the job status and, once done, the deep-dive attribution table (band, signals, evidence); 'json' for the raw job record.",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ctscout_lookup_lei",
+      "description": "Read the ctscout research product's entity index: one LEI's record (GET /lei/{lei}), or the LEIs filed under a legal name (GET /lei?name=). Free, and it debits no quota — every answer is a precomputed object published by the ctscout-research refresh, not a live query.\n\nArgs (exactly one of lei / name; passing both is rejected before any network call):\n  - lei (string, optional): an ISO 17442 LEI — 18 uppercase alphanumerics plus 2 check digits, e.g. '549300NDMY0KJK0ZLW17'.\n  - name (string, optional): a legal entity name, 1–200 chars, e.g. 'Cloudflare, Inc.'.\n  - response_format ('markdown' | 'json', default 'markdown'): output format.\n\nReturns (on success, structuredContent follows the declared outputSchema; a failed call — 400, 404, 503, timeout — is isError with no structuredContent, so never dereference snapshot on it). One tool, two answer shapes; `name_match` is the discriminator, present only on the by-name answer:\n  - By LEI:\n    {\n      \"lei\": string, \"legal_name\": string,   // GLEIF's legal name\n      \"country\": string,                     // GLEIF's country\n      \"isin_count\": number,                  // ISINs mapped to this LEI in GLEIF's ISIN-to-LEI file\n      \"apex_count\": number,                  // apex domains attributed to this LEI\n      \"first_seen\": string, \"last_seen\": string,   // warehouse observation window over those apexes\n      \"sample_domains\": [string],            // hash-chosen sample, whatever size the export published — NOT a ranking, not a complete list\n      \"vendors_confirmed\": [string]          // vendor SLUGS: pass one to ctscout_vendor_customers\n    }\n  - By name:\n    {\n      \"query\": string,\n      \"name_match\": \"exact\" | \"normalized\" | \"none\",\n      \"normalizer_mismatch\": null | { \"index\": string, \"lookup\": string },   // null: the API's normalizer keyed the index. Set: the two versions differ, so a \"none\" may be a spelling miss under this API. Absent: an API that predates the check.\n      \"leis\": [string],                      // capped at \"limit\" (20)\n      \"lei_count\": number,                   // matches BEFORE the cap — can exceed leis.length\n      \"limit\": number, \"truncated\": boolean\n    }\n  - Both also carry \"as_of\" / \"product_version\" (the export version), \"snapshot_dates\" (the dated GLEIF / ISIN / ELF / Wikidata snapshot and the PSL bundle each join read), and this server's \"snapshot\" / \"snapshot_source\" (\"product\" when the API reported the version, \"unavailable\" when it did not — then snapshot is null and freshness is unknown, never \"current\").\n\nWhat name_match: \"none\" means (important):\n  - It does NOT mean this company has no LEI. The name index is keyed by the research normalizer's form of the GLEIF legal name; the two spellings the route tries (the lowercased, trimmed query and its locale-suffix normalization) are not the index's normalizer, so a real entity can miss on a spelling.\n  - Retry with the exact GLEIF legal name, or look the entity up by LEI. Do not report a \"none\" as an absent LEI.\n\nVocabulary: a domain is ATTRIBUTED to an entity — that is what the certificate and DNS evidence names, not an ownership claim. A vendor in vendors_confirmed is CONFIRMED, which has a specific meaning: a vendor is confirmed when a hostname it certified resolves onto a domain it certifies and the customer's own www does not, or another organization certifies the apex.\n\nExamples:\n  - Use when: \"What does ctscout know about LEI 549300NDMY0KJK0ZLW17?\" -> { lei: \"549300NDMY0KJK0ZLW17\" }\n  - Use when: \"Which LEIs are filed under 'Cloudflare, Inc.'?\" -> { name: \"Cloudflare, Inc.\" }\n  - Don't use when: you want the domains attributed to a company by cert subject — that is ctscout_search_company against the warehouse, a different index with different coverage.\n\nCoverage & freshness:\n  - The product covers LEIs with at least one attributed apex in the research build, so a 404 means \"not in this published version\", not \"no such LEI\". An entity has an LEI at all only where a regulator or a counterparty required one, so an absent LEI is not an absent entity either.\n  - The export is republished by the ctscout-research refresh, so these answers move on that cadence — slower than the /scan warehouse, which syncs daily. Read \"snapshot\" for the version actually answered from.\n  - Before the first publish the route answers HTTP 503 and this tool returns a plain \"not published yet\" error. That is expected, not a fault in the query.\n\nCorrections:\n  - Wrong attribution? Open an issue at https://github.com/minghsuy/ctscout-mcp/issues. Missing entity? Email pro@ctscout.dev. Include the LEI or name queried, the result returned and why it is wrong.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "lei": {
+            "description": "A single LEI (ISO 17442: 18 uppercase alphanumerics + 2 check digits), e.g. '549300NDMY0KJK0ZLW17'. Give lei or name, not both.",
+            "type": "string",
+            "pattern": "^[A-Z0-9]{18}[0-9]{2}$"
+          },
+          "name": {
+            "description": "A legal entity name to look up in the name index, e.g. 'Cloudflare, Inc.'. Give lei or name, not both.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: 'markdown' for the record or the name-match list, 'json' for the raw API response.",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "lei"
+            ]
+          },
+          {
+            "required": [
+              "name"
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "ctscout_vendor_customers",
+      "description": "Read the ctscout research product's vendor objects: the free summary for a vendor slug (GET /vendors/{slug}), or the per-customer enumeration (GET /vendors/{slug}/customers, which needs an API key). Debits no quota either way — both are precomputed objects published by the ctscout-research refresh.\n\nArgs:\n  - slug (string, required): the vendor slug, one lowercase segment, e.g. 'cloudflare'. The values in a LEI record's vendors_confirmed are exactly these slugs.\n  - enumerate (boolean, optional, default false): false = the free summary; true = the per-customer enumeration, which requires an active ctscout.dev API key (any tier) in CTSCOUT_API_KEY. A missing, invalid or revoked key gets HTTP 401 and this tool explains that the summary is still available with enumerate: false.\n  - response_format ('markdown' | 'json', default 'markdown'): output format.\n\nCandidates and confirmed are two different claims and are NEVER summed:\n  - Candidate = an apex domain this vendor certified a hostname for. Fan-out alone is not a vendor relationship: an organization certifying hundreds of its own product sites looks identical.\n  - Confirmed = the DNS-confirmed subset of the candidates. The definition: a vendor is confirmed when a hostname it certified resolves onto a domain it certifies and the customer's own www does not, or another organization certifies the apex.\n  - Confirmed is a SUBSET of candidates, so adding the two double-counts. The markdown keeps them in separate tables and the JSON in separate fields; report them apart.\n\nReturns (on success, structuredContent follows the declared outputSchema; a failed call — 400, 401, 404, 503, timeout — is isError with no structuredContent):\n  - enumerate: false (the summary):\n    {\n      \"slug\": string, \"vendor_name\": string,\n      \"vendor_apex\": string | null,          // null when the vendor's brand token matches no label it certifies\n      \"customers\": { \"candidates\": number, \"confirmed\": number },\n      \"countries_top\": [ { \"country\": string, \"confirmed\": number } ],   // CONFIRMED customers only\n      \"co_use\": [ { \"slug\": string, \"confirmed\": number } ],             // see below\n      \"sample_customers\": [string]           // hash-chosen sample of the CONFIRMED customers, whatever size the export published\n    }\n  - enumerate: true (the enumeration):\n    {\n      \"slug\": string,\n      \"confirmed\": [ { \"apex\": string, \"attributed_to\": string | null, \"lei\": string | null } ],\n      \"candidates\": [ same row shape ],\n      \"counts\": { \"candidates\": number, \"confirmed\": number },   // what the research build holds\n      \"capped\": boolean,                     // true = the build itself kept a subset of the candidates\n      \"truncation_note\": string              // written by THIS server, only when it dropped rows to fit the character limit; counts and capped still describe the API's answer\n    }\n  - Both also carry \"as_of\" / \"product_version\", \"snapshot_dates\", and this server's \"snapshot\" / \"snapshot_source\" (\"product\" | \"unavailable\"; null snapshot means unknown freshness, never \"current\").\n\nReading the fields honestly:\n  - co_use counts THIS vendor's confirmed customers that the other vendor also certifies — a candidate there, not a mutual confirmation.\n  - countries_top counts confirmed customers that resolved to an LEI; candidates and LEI-less customers are not in it.\n  - attributed_to is GLEIF's legal name when the apex resolves to one LEI, the single non-vendor certificate organization otherwise, and null when neither holds. It is an attribution, not an ownership claim.\n\nExamples:\n  - Use when: \"How many customers does Cloudflare have in the index?\" -> { slug: \"cloudflare\" }  (report candidates and confirmed separately)\n  - Use when: \"List Cloudflare's confirmed customers\" -> { slug: \"cloudflare\", enumerate: true }\n  - Don't use when: you have a company and want its vendors — read vendors_confirmed from ctscout_lookup_lei instead.\n\nCoverage & freshness:\n  - A 404 means the slug is not in the published version, not that the vendor does not exist. The export is republished by the ctscout-research refresh, so these answers move on that cadence rather than the daily /scan warehouse sync.\n  - Before the first publish the routes answer HTTP 503 and this tool returns a plain \"not published yet\" error. That is expected, not a fault in the query.\n\nCorrections:\n  - Wrong attribution? Open an issue at https://github.com/minghsuy/ctscout-mcp/issues. Missing entity? Email pro@ctscout.dev. Include the slug queried, the customer row in question and why it is wrong.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,80}$",
+            "description": "The vendor's slug, e.g. 'cloudflare'. The slugs in a LEI record's vendors_confirmed are exactly these values."
+          },
+          "enumerate": {
+            "default": false,
+            "description": "Optional, default false. false returns the free vendor summary (counts, top countries, co-use, a customer sample). true returns the per-customer enumeration from GET /vendors/{slug}/customers, which requires an active ctscout.dev API key (any tier).",
+            "type": "boolean"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "Output format: 'markdown' for the counts (or the two customer tables), 'json' for the raw API response.",
+            "type": "string",
+            "enum": [
+              "markdown",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "ctscout-mcp-server",
+    "version": "0.6.0"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 2381,
+  "stderr": "ctscout-mcp-server: CTSCOUT_API_KEY is not set. The free /lei and /vendors tools (ctscout_lookup_lei, and ctscout_vendor_customers without enumerate) still work; every other tool will return an error until a key is configured. Get a free key at https://ctscout.dev (no email, no signup).\nctscout-mcp-server v0.6.0 running via stdio (api=https://ctscout.dev)\n"
+}

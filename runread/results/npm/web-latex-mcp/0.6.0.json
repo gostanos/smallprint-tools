@@ -1,0 +1,842 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "web-latex-mcp",
+  "version": "0.6.0",
+  "integrity": {
+    "dist": "sha512-jQQ346BZTFKCx+K8Jf8ivviTlrOBEbVqA3R1nU1UUCRGqk2GHUCseRLW7uCa9LWfsMkhP6v560LKcXDH5BVNJQ==",
+    "installed": "sha512-jQQ346BZTFKCx+K8Jf8ivviTlrOBEbVqA3R1nU1UUCRGqk2GHUCseRLW7uCa9LWfsMkhP6v560LKcXDH5BVNJQ=="
+  },
+  "bin": "node_modules/web-latex-mcp/dist/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T18:24:21.576Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "list_projects",
+      "description": "List every project this server knows about — from the environment and from the workspace registry — with its local path, its mode (\"git\", a clone of a remote; \"local\", a directory edited in place) and whether it is there yet. Start here: if nothing is registered, the result says how to add one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "project_sync",
+      "description": "Clone the project if it is not present locally, otherwise fast-forward pull (ff-only). If the local and remote histories have diverged, reports the divergence instead of merging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "description": "Project id. Defaults to the configured default project.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "auto = clone if missing else ff-only pull (default).",
+            "type": "string",
+            "enum": [
+              "auto",
+              "clone",
+              "pull"
+            ]
+          },
+          "gitUrl": {
+            "description": "Register a new project at this Overleaf git URL (requires project id).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "register_project",
+      "description": "Register a LaTeX project and persist it to the workspace, so it survives a restart and is available to other sessions — no need to set WEB_LATEX_MCP_PROJECTS. Two kinds: pass `gitUrl` for a git-hosted project (Overleaf, GitHub, any remote), which is cloned immediately and can be synced and pushed — the intended path for Claude Desktop, where editing env config is awkward: just paste the git URL in the chat. Or pass `path` for a directory already on this machine, compiled and edited IN PLACE — the right choice for a .tex that lives in a repo of your own, since cloning that repo to reach one file leaves two copies of the document to drift apart. Exactly one of the two. Tokens are never stored; they are resolved per host at git time (see the auth docs).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project id used in tool calls and as the clone dir name."
+          },
+          "gitUrl": {
+            "description": "Git remote URL (Overleaf, GitHub, or any git host) — stored tokenless. Give this OR `path`.",
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "description": "A project that already exists on this machine, to compile and edit IN PLACE — no clone, no remote, no second copy. Give the directory, or **a file inside it** (e.g. \"~/proposals/eurohpc.md\" or \"paper/main.tex\") and the folder holding it is registered; a .tex named this way also becomes the LaTeX `rootFile`. The project is always the whole folder — every file in it is readable and editable, so point at a document in its own directory rather than one sitting loose in your home folder. Use this for a document that lives in a repo of your own, or nowhere in particular: the server reads and writes exactly these files, so what you compile is what your editor has open. Give this OR `gitUrl`. Git tools (status/diff/commit/push/sync) do not apply to a local project.",
+            "type": "string",
+            "minLength": 1
+          },
+          "rootFile": {
+            "description": "Explicit LaTeX root file (e.g. main.tex). Auto-detected when omitted.",
+            "type": "string",
+            "minLength": 1
+          },
+          "followSymlinks": {
+            "description": "Local projects only. Let reads and writes follow a symlink that leaves the directory — for the layout where a shared file is linked into the project (`refs.bib -> ~/lab/refs.bib`, `figs/ -> ~/lab/figs`). Default false, and off is the safe answer: a link is followed to wherever it points, so a `notes.tex -> ~/.ssh/id_rsa` would be readable and writable. Set it only when the links in that directory are ones YOU put there — if it is a git working tree, a co-author can commit a symlink (git stores one as mode 120000) and a later pull brings it in. Paths the server picks up on its own (a compile log, a synctex record) are refused either way.",
+            "type": "boolean"
+          },
+          "branch": {
+            "description": "Branch to clone/track. Defaults to the remote.",
+            "type": "string",
+            "minLength": 1
+          },
+          "username": {
+            "description": "HTTPS username override (otherwise a per-host default is used).",
+            "type": "string",
+            "minLength": 1
+          },
+          "tokenEnv": {
+            "description": "Name of the env var holding this project’s token (overrides host defaults).",
+            "type": "string",
+            "minLength": 1
+          },
+          "clone": {
+            "description": "Clone the project right away if it is not present locally (default true).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "set_credential",
+      "description": "Store a git token in your OS credential helper (macOS Keychain / Windows Credential Manager / libsecret), so the server can authenticate without the token ever being written to its config or the project registry. Ideal for Claude Desktop: paste your Overleaf token here instead of editing the JSON config. Give a `host` (e.g. git.overleaf.com) or a `project` id to derive it from. Requires `confirm: true`. Reports whether a credential helper actually kept it (some Linux setups have none configured — set the token via an env var there).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The token / password to store (e.g. your Overleaf Git authentication token, created at https://www.overleaf.com/user/settings)."
+          },
+          "project": {
+            "description": "Derive the host (and default username) from this registered project’s git URL.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host to store the credential for, e.g. git.overleaf.com. Alternative to `project`.",
+            "type": "string",
+            "minLength": 1
+          },
+          "username": {
+            "description": "HTTPS username. Defaults to the host convention (e.g. `git` for Overleaf).",
+            "type": "string",
+            "minLength": 1
+          },
+          "confirm": {
+            "description": "Must be true — storing a secret in your OS keychain is an explicit action.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "credential_portal",
+      "description": "Open a small loopback web page where the user types a git token, so the secret is entered on their machine and stored in the OS keychain **without ever passing through the chat** (useful when the transcript is cloud-synced). Returns a 127.0.0.1 URL (and auto-opens the browser). The token is POSTed straight to this local server and never returned to Claude. Give a `host` (e.g. git.overleaf.com) or a `project`. After the user submits, **call this tool again** with the same host/project to read the result: it reports `stored`, `not-persisted` (no credential helper kept it), or `awaiting-entry` if they haven’t yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "description": "Derive the host (and default username) from this registered project’s git URL.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host to store the credential for, e.g. git.overleaf.com. Alternative to `project`.",
+            "type": "string",
+            "minLength": 1
+          },
+          "username": {
+            "description": "HTTPS username. Defaults to the host convention (e.g. `git` for Overleaf).",
+            "type": "string",
+            "minLength": 1
+          },
+          "open": {
+            "description": "Also open the portal in the OS browser (default true).",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_files",
+      "description": "List files in a project, optionally filtered to .tex / .bib / prose documents / assets. Works on a local project as well as a clone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "filter": {
+            "description": "tex -> .tex, bib -> .bib, docs -> prose documents (.md/.markdown/.txt/.rst/.org), assets -> images/pdf, all (default).",
+            "type": "string",
+            "enum": [
+              "tex",
+              "bib",
+              "docs",
+              "assets",
+              "all"
+            ]
+          },
+          "subdir": {
+            "description": "Restrict listing to a subdirectory of the project.",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_file",
+      "description": "Read a text file from the project (optionally a line range). Pass `ref` to read a committed version at any git ref (e.g. the remote side of a conflict) instead of the working tree. Binary/large files are not returned inline — their path is reported instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path relative to the project root."
+          },
+          "startLine": {
+            "description": "1-based first line (inclusive).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "endLine": {
+            "description": "1-based last line (inclusive).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "ref": {
+            "description": "Read a committed version instead of the working tree, at this git ref — the remote default branch (e.g. \"origin/master\" or \"origin/main\"), a commit sha, or \"HEAD~1\". Use it to see the remote/other side of a conflict. Line range still applies; out-of-band-edit tracking does not (a ref read never updates baselines).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Create a new file or fully overwrite an existing one. Prefer edit_file for surgical changes to existing files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path relative to the project root."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full file content to write."
+          },
+          "createDirs": {
+            "description": "Create missing parent directories (default false).",
+            "type": "boolean"
+          },
+          "overrideExternalChanges": {
+            "description": "Overwrite even if the file changed on disk since it was last read through this server (e.g. edited directly by the user). Prefer re-reading first; only set this to deliberately discard those on-disk changes.",
+            "type": "boolean"
+          },
+          "confirmBibEdit": {
+            "description": "Required to write a .bib file directly. Add references via add_citation instead; only set this after the user approves a manual bibliography change.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "edit_file",
+      "description": "Apply surgical string-replacement edits to a file. Each oldString must match uniquely unless replaceAll is set. Edits apply atomically — if any fails, the file is left untouched. Preferred over write_file for existing files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path relative to the project root."
+          },
+          "overrideExternalChanges": {
+            "description": "Apply even if the file changed on disk since it was last read through this server (e.g. edited directly by the user). Prefer re-reading first to see those changes.",
+            "type": "boolean"
+          },
+          "confirmBibEdit": {
+            "description": "Required to edit a .bib file directly. Add references via add_citation instead; only set this after the user approves a manual bibliography change.",
+            "type": "boolean"
+          },
+          "edits": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "oldString": {
+                  "type": "string",
+                  "description": "Exact text to replace (include enough context to be unique)."
+                },
+                "newString": {
+                  "type": "string",
+                  "description": "Replacement text."
+                },
+                "replaceAll": {
+                  "description": "Replace every occurrence (default false).",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "oldString",
+                "newString"
+              ]
+            },
+            "description": "Surgical string replacements, applied in order and atomically."
+          }
+        },
+        "required": [
+          "path",
+          "edits"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "delete_file",
+      "description": "Delete a file from the project working tree. Commit afterwards to persist it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path relative to the project root."
+          },
+          "overrideExternalChanges": {
+            "description": "Delete even if the file changed on disk since it was last read through this server (e.g. edited directly by the user).",
+            "type": "boolean"
+          },
+          "confirmBibEdit": {
+            "description": "Required to delete a .bib file. Only set this after the user approves it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "compile",
+      "description": "Compile the project locally (latexmk by default, or tectonic) and return success, the PDF path, and structured errors/warnings (each attributed to its source .tex file when known — an error also carries the 5 source lines around it, so you rarely need a read_file to interpret it) plus a de-noised log tail — only errors, warnings, and the output summary, not the font/memory dump (pass rawLog: true for the unfiltered tail). Does not touch the Overleaf remote. TikZ externalization (\\tikzexternalize) needs system calls: retry with restrictedShellEscape: true (preferred) or shellEscape: true — the latter lets the .tex run ARBITRARY shell commands, so only enable it for a trusted project. Shell escape is never enabled automatically; when a compile fails for lack of it, the result carries a hint. A failure caused by a package the local TeX installation does not have names it in missingPackages, so you can act on it without parsing the log.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "rootFile": {
+            "description": "Root .tex file. Auto-detected when omitted.",
+            "type": "string"
+          },
+          "engine": {
+            "description": "Default pdflatex.",
+            "type": "string",
+            "enum": [
+              "pdflatex",
+              "xelatex",
+              "lualatex"
+            ]
+          },
+          "clean": {
+            "description": "Force a full rebuild.",
+            "type": "boolean"
+          },
+          "timeoutSec": {
+            "description": "Compile timeout (default 120s).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "restrictedShellEscape": {
+            "description": "Pass -shell-restricted, allowing only TeX's allow-listed helper binaries to run. This is the safer way to enable TikZ externalization (\\tikzexternalize) and is enough for most setups. Default false. Prefer this over shellEscape.",
+            "type": "boolean"
+          },
+          "shellEscape": {
+            "description": "Pass -shell-escape, letting the .tex run ARBITRARY shell commands during compilation. Default false. SECURITY: only enable for a project you trust — the document comes from a shared remote others can write to. Never enabled automatically; try restrictedShellEscape first, and enable this only when the caller explicitly wants it.",
+            "type": "boolean"
+          },
+          "rawLog": {
+            "description": "Return the raw, unfiltered log tail instead of the de-noised default. Default false: logTail keeps only errors, warnings, and the \"Output written on\" summary, dropping the font/memory noise. The full log is always at logPath.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "viewer",
+      "description": "Start (if needed) a local viewer for the compiled PDF and return its URL. The page renders the PDF with pdf.js (zoom/scroll/search, select-to-comment) and hot-reloads on every compile, preserving your page and scroll position. For clients without a PDF surface (e.g. Claude Desktop) it auto-opens your browser; in VSCode pass target:\"vscode\" (or set WEB_LATEX_MCP_VIEWER_TARGET=vscode) to get the URL to open as a Simple Browser tab. The server binds to loopback only and starts on demand. Run compile to populate it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "target": {
+            "description": "Where you intend to open the viewer: \"browser\" (default — auto-opens your OS browser) or \"vscode\" (returns the URL to open as a Simple Browser editor tab; never auto-opens a browser). Defaults to WEB_LATEX_MCP_VIEWER_TARGET, else \"browser\".",
+            "type": "string",
+            "enum": [
+              "browser",
+              "vscode"
+            ]
+          },
+          "open": {
+            "description": "For target \"browser\": also open the URL in the default browser (default true). Ignored for \"vscode\".",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_comments",
+      "description": "List the comments the user attached to the compiled PDF in the viewer. Each comment has the note, the selected PDF text (`quote`), and — when SyncTeX resolved it — the source `file`/`line` plus a snippet of surrounding source. Use these to make the requested edits, then call resolve_comments so the viewer marks them done. Default lists only open comments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "includeResolved": {
+            "description": "Include already-resolved comments too (default false: only open ones).",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "resolve_comments",
+      "description": "Mark PDF review comments as resolved after addressing them, so the viewer dims their markers. Pass specific `ids` (from list_comments) or omit to resolve every open comment for the project. Does not edit files or push.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "ids": {
+            "description": "Comment ids to mark resolved. Omit to resolve every open comment.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "status",
+      "description": "Show branch, sync state (ahead/behind vs the tracked remote — a non-zero \"behind\" means origin moved since the last sync and a push may conflict), and staged/unstaged/untracked files. Counts reflect the last fetch; run project_sync to refresh them. Also splits the uncommitted changes into this session's and other sessions', and lists the other agent sessions currently working on the project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "diff",
+      "description": "Show the unified diff plus per-file added/removed line counts, for review before committing. Pass `ref` (e.g. \"HEAD~3\", \"origin/master\") to diff against a commit instead, so work already committed this session can still be reviewed as a whole.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "description": "Limit the diff to a single file.",
+            "type": "string"
+          },
+          "staged": {
+            "description": "Show staged (cached) changes instead of working tree.",
+            "type": "boolean"
+          },
+          "ref": {
+            "description": "Diff the working tree against this git ref instead of the index — \"HEAD~3\" to review a session that already committed a few times, a commit sha, or \"origin/master\" for what this branch has that the remote does not. A two-dot range (\"HEAD~3..HEAD\") diffs two commits. Cannot be combined with `staged`. On a clone shared by several sessions this spans everyone's commits: it answers \"what changed\", not \"what did I change\".",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "commit",
+      "description": "Stage and commit changes locally. Does NOT push — use the push tool, after reviewing with status/diff, to send commits to Overleaf. By default commits only this session's own edits, so parallel sessions working on different parts of the paper do not commit each other's half-finished work; pass scope \"all\" to commit everything in the clone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Commit message."
+          },
+          "paths": {
+            "description": "Limit the commit to these paths. Defaults to every change in scope.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope": {
+            "description": "Which changes to commit. \"session\" (the default when this session has tracked changes) commits only what this session edited, leaving other sessions' in-flight work uncommitted in the working tree. \"all\" commits every change in the clone, including other sessions' and any made outside this server.",
+            "type": "string",
+            "enum": [
+              "session",
+              "all"
+            ]
+          },
+          "allowEmpty": {
+            "description": "Allow a commit with no changes.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "push",
+      "description": "Safely push committed changes to the Overleaf remote. Default (direct) mode pull-rebases onto the latest remote before pushing and never force-pushes; on success it reports the new tip (pushedSha) and the remote commits it rebased over (rebasedOver). A conflict means someone touched the same lines: it aborts the rebase (clone back to pre-push state, nothing half-merged) and returns status \"conflict\" with a full 3-way payload — per file base/ours/theirs plus a marker `hunks` view, and top-level conflictPaths, remoteHead, mergeBase, and remoteCommits (all in the result text, not just structuredContent). It never auto-resolves. To resolve, retry with `resolutions` (the full merged content per conflicted file; the set is validated and missing/extra files are named), optionally passing expectedRemoteHead (the reported remoteHead) so the push is refused if the remote moved again. `.bib` files need confirmBibEdit. Read any side directly with read_file(path, ref) using remoteHead/mergeBase. Branch mode commits to a local review branch and lands it only on approve=true. Requires confirm=true. See docs/CONCURRENCY.md.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "description": "Project id. Defaults to the configured default.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "direct (default) = safe pull-rebase-then-push. branch = commit to a local review branch and land it only on approval. See docs/CONCURRENCY.md.",
+            "type": "string",
+            "enum": [
+              "direct",
+              "branch"
+            ]
+          },
+          "message": {
+            "description": "Commit message. In direct mode, used to commit uncommitted work before pushing. In branch mode (without approve), the message for the review branch commit.",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Branch mode: the local feature branch name.",
+            "type": "string"
+          },
+          "base": {
+            "description": "Branch mode: branch to land onto (defaults to the clone default, e.g. master).",
+            "type": "string"
+          },
+          "approve": {
+            "description": "Branch mode: set true to land an already-reviewed branch onto the base and push.",
+            "type": "boolean"
+          },
+          "resolutions": {
+            "description": "Resolve a prior \"conflict\" result: for each conflicted file, the full merged file content (both sides reconciled). Providing this re-runs the rebase, applies the merges, and pushes (direct mode only). Every conflicted file must be included.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          },
+          "confirmBibEdit": {
+            "description": "Required to include a .bib file among `resolutions` (mirrors the write/edit guard).",
+            "type": "boolean"
+          },
+          "expectedRemoteHead": {
+            "description": "With `resolutions`: the `remoteHead` from the conflict you merged against. If the remote has advanced past it, the push is refused instead of merging over what just landed.",
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be set to true to confirm pushing (or staging a review branch)."
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "discard",
+      "description": "Revert the working tree to the last commit (and remove untracked files), optionally limited to paths. Destructive — requires confirm=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "paths": {
+            "description": "Limit the discard to these paths. Defaults to all changes.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be true — discarding permanently loses uncommitted changes."
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "reset_to_remote",
+      "description": "Recover from a push conflict without dropping to raw git: fetch, then hard-reset the local clone to origin/<branch> and remove untracked files, leaving a clean working tree at exactly what is on the remote so you can re-apply your edits onto the current remote. Destructive — it permanently discards local commits ahead of the remote and any uncommitted changes, and reports exactly what it discarded. Never merges or pushes. Requires confirm=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "description": "Project id. Defaults to the configured default.",
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be true — this permanently discards local commits and uncommitted changes to rewind onto the remote."
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "search_references",
+      "description": "Look a publication UP on DBLP — the external computer-science bibliography at dblp.org, over the network. It does NOT search the project: it never reads the project’s .bib and never changes anything. To search the references the project already has, use list_references instead. Reach for this to find a paper’s canonical metadata — to check an entry the project cites, or to add one it does not. Each result carries a DBLP `key`; pass that key to add_citation to append the entry, fetched from DBLP rather than written by hand. DBLP rate-limits: call it one paper at a time, never in parallel bursts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Free-text query: title words, authors, venue — e.g. \"deep residual learning he\"."
+          },
+          "maxResults": {
+            "description": "Max hits to return (default 10).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "add_citation",
+      "description": "Fetch a reference from DBLP by its record key and append it to the bibliography. This is the only sanctioned way to add to a .bib file: the BibTeX is fetched from DBLP server-side, never hand-written, so entries are verifiable. Find the key with search_references first. No-op (alreadyPresent) if the cite key is already in the file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "DBLP record key from search_references (e.g. \"conf/cvpr/HeZRS16\"), or a dblp.org URL."
+          },
+          "bibFile": {
+            "description": "Target .bib path. Optional when the project has exactly one .bib file.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_references",
+      "description": "Parse the references OUT OF THE PROJECT (not from the internet) and return them structured — cite key, type, title, authors, year, venue, DOI/arXiv, and the file and line each one sits on. Reads three shapes of bibliography: a BibTeX .bib (fields are exact, @string macros resolved), a LaTeX thebibliography of \\bibitem entries, and a reference list written as prose in a markdown or plain-text document. Use this instead of read_file + regex to answer \"does this reference exist?\" or \"find the entry for Author 2025\" — pass `filter` to search. To look a paper UP on DBLP instead, use search_references. Read-only, and it needs no git remote, so it works on a local project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "description": "A single file to read references from — a .bib, a .tex with a thebibliography, or a markdown/plain-text document with a reference list. Omit to scan the whole project.",
+            "type": "string"
+          },
+          "filter": {
+            "description": "Case-insensitive substring; keeps entries whose key, title, authors, venue, year or raw text contains it. Use it to answer \"is Author 2025 in here?\" without reading the file.",
+            "type": "string"
+          },
+          "maxResults": {
+            "description": "Cap on entries returned (default 200). Narrow with `filter` rather than raising it.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "check_citations",
+      "description": "Cross-reference what the document CITES against what the bibliography DEFINES, in one call: keys cited with no entry (these break the build), entries never cited, cite keys defined twice, and BibTeX entries missing a field their type requires. Reads \\cite / \\citep / \\textcite / \\autocite and friends in .tex, and pandoc `[@key]` in markdown, against .bib files and \\bibitem lists. This is the regex diff you would otherwise write by hand. It does NOT check whether a reference is factually correct — that is search_references against DBLP, or the verify-citations skill. Pass `bibliographyProject` to check a draft against a SHARED bibliography that lives in another registered project. Read-only; no git remote needed, so it works on a local project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "documents": {
+            "description": "Files whose citations to collect (.tex, or markdown/plain-text using pandoc `[@key]`). Omit to use every .tex and prose document in the project.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bibliography": {
+            "description": "Files holding the reference entries — a .bib, or a .tex with a thebibliography. Omit to use every bibliography the project has. Resolved inside `bibliographyProject` when that is set, otherwise inside `project`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bibliographyProject": {
+            "description": "Check against ANOTHER registered project’s bibliography — a shared group .bib the draft cites but does not contain. `documents` still resolve in `project` and `bibliography` in this one, each sandboxed to its own project. Findings are then limited to entries this draft actually cites: a shared bibliography is not dead weight for one draft, so uncitedEntries comes back empty (run check_citations inside that project to audit it).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "server_info",
+      "description": "Report the web-latex-mcp server version and runtime configuration (workspace root, whether the workspace is local to the launch dir, whether the clone dir was git-excluded from the host repo, and the configured compiler). Use this to confirm which version of the MCP server is running.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_skills",
+      "description": "List the LaTeX procedures bundled with this server — formatting a project, normalizing a .bib, verifying citations against DBLP, preparing an arXiv submission, summarizing a paper — each with what it does and when to use it. Pass `skill` to get one back in full and follow it. Worth calling when a request sounds like one of these: the bundled procedure knows this server’s tools and guardrails, so it beats improvising.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skill": {
+            "description": "Name of one skill to fetch in full — the result then carries its complete procedure, ready to follow. Omit to get the catalogue (name + description) instead.",
+            "type": "string",
+            "minLength": 1
+          },
+          "project": {
+            "description": "With `skill`: the project id the procedure should be applied to.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "doctor",
+      "description": "Report the local toolchain a compile depends on: the configured compiler, which engines are installed, the TeX distribution and its age, the package manager and the repository it would install from, where a package can be installed without root, git, and whether the workspace is writable. Read-only and local — pass checkRepository: true to also test the repository over the network. Call this when a compile fails for a reason that is about the machine rather than the document (missing package, unknown engine), instead of discovering each limitation by failing into it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checkRepository": {
+            "description": "Also reach the package repository over the network to confirm it answers (default false — every other check is local). Worth it when an install failed and you need to know whether the repository itself is the problem; it times out after ~8s rather than hanging.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "web-latex-mcp",
+    "version": "0.6.0"
+  },
+  "protocolVersion": null,
+  "instructions": "When reading, writing, editing, or reviewing LaTeX (.tex) files through this server, follow the project's LaTeX writing guide below.\n\n# Writing Academic Articles in LaTeX\n\nA style and conventions guide for drafting research papers in this repository.\nThese are the rules Claude should follow when writing or editing `.tex` files\nthrough the WebLatexMCP server, and that human contributors should follow too.\n\n---\n\n## Tense\n\nUse the present tense throughout the paper.\n\n## Writing style\n\nThe reading must flow. If the reader has to stop and re-read a sentence, it is\nnot clear enough — prefer the simpler phrasing.\n\nAvoid overusing \"we\" and \"our\". These words are impactful when reserved for key\ncontributions (\"our contributions are...\") and diluting when applied to\neverything (\"our parameters are...\" → \"the parameters are...\"). Reserve the\nfirst person for what is genuinely yours; let the rest of the paper speak\nplainly.\n\n## Sections\n\nIntroduce each section with a short header sentence that signposts its\nsubsections. For example:\n\n> In \\autoref{sec:exp:details}, we present the experimental details, and compare\n> against state-of-the-art models in \\autoref{sec:exp:sota}.\n\n## Figures and tables\n\n- Every figure and table is referred to in the text. An unreferenced float is a\n  red flag.\n- Position figures and tables next to where they are discussed.\n- Prefer the **top** of the page for placement (`[t]`), occasionally the bottom;\n  avoid floats drifting far from their discussion.\n- Captions start with a short title in **bold**, then the explanation.\n- The explanation is descriptive: it says what the figure or table shows — the\n  axes, the conditions, what each curve, column, or panel is. Do not comment on\n  the figure in the caption. Interpretation, comparison, and the conclusions\n  drawn from it belong in the body text, not the caption.\n- Use descriptive labels: `\\label{tab:sota_results}`, `\\label{fig:overview}`.\n- The caption test: a reader who only reads the title and then looks at the\n  figures, tables, and their captions should still understand them. Write\n  captions to pass this test.\n- For table design, follow the conventions in Markus Püschel's guide:\n  <https://people.inf.ethz.ch/markusp/teaching/guides/guide-tables.pdf>\n  (in short: `booktabs` rules, no vertical lines, aligned numbers).\n\n## Equations\n\n- Introduce every notation you use.\n- Drop any notation you introduce but never use.\n- Equations are part of the sentence: punctuate them. End with a period if the\n  sentence ends there, a comma if it continues.\n- Textual subscripts and superscripts use `\\text` or `\\textit`, otherwise the\n  letters are typeset as a product and become hard to read. Write\n  `L_\\textit{image}`, not `L_{image}`.\n\n```latex\nThe image loss is defined as\n\\begin{equation}\n  L_\\textit{image} = \\frac{1}{n} \\sum_i \\| x_i - \\hat{x}_i \\|_2^2,\n\\end{equation}\nwhere $\\hat{x}_i$ is the reconstruction.\n```\n\n## Bibliography\n\n- **Never hand-write or invent references.** Do not fabricate BibTeX entries or\n  `\\cite` keys for works you cannot verify. The only sanctioned way to add a\n  reference is the `add_citation` tool, which fetches the BibTeX from DBLP\n  server-side — use it when the author asks for a citation. If a passage seems to\n  need a citation and you cannot find the work on DBLP, flag it for the author\n  rather than guessing — a hallucinated reference is worse than a missing one.\n- **`.bib` files are protected.** Direct `write_file` / `edit_file` /\n  `delete_file` on a `.bib` file is refused; add references through\n  `add_citation`. Any other change to a `.bib` (removing or fixing an entry)\n  needs the author's explicit approval and the `confirmBibEdit: true` flag.\n- Harmonize the reference style consistently across the whole file:\n  - Strip noise: conference location and date, editors, URL/DOI, volume number,\n    page ranges, etc.\n  - Use venue acronyms instead of full names (optional, but be consistent — all\n    or none).\n- BibTeX key format: `firstauthorYEARpaperacronym`, e.g. `chambon2024pointbev`.\n  If the paper has no acronym, use the first word of the title.\n\n## Citations\n\n- **Never cite in the abstract.** Indexing engines strip bibliographies; bracketed\n  references become bare numbers with no meaning. As a rare exception, if a work is\n  central to the abstract's argument, use plain text only: \"(Dosovitskiy et al., 2020)\".\n- **Cite on first mention in the main text.** The first time a method, baseline, or\n  architecture is named, add `\\cite{}`.\n- **Re-anchor at major section boundaries.** Papers are not read linearly — readers\n  jump straight to the Method or Experiments. Re-cite a method at its first appearance\n  in each new major section: Related Work, Method, and Experiments/Implementation Details.\n\n  ```latex\n  % Method section\n  The architecture uses a standard ResNet-50 \\cite{he2016resnet} backbone.\n\n  % Experiments section\n  The model is optimized with AdamW \\cite{loshchilov2017adamw} at a learning rate\n  of $10^{-4}$.\n  ```\n\n- **Do not re-cite within the same section.** Once a method is established, use its\n  name alone for the rest of the section. Never bracket the same method twice in the\n  same paragraph:\n\n  ```latex\n  % ✗\n  Unlike NeRF \\cite{mildenhall2020nerf}, our method is faster.\n  Furthermore, NeRF \\cite{mildenhall2020nerf} requires static scenes.\n\n  % ✓\n  Unlike NeRF \\cite{mildenhall2020nerf}, our method is faster.\n  Furthermore, NeRF requires static scenes.\n  ```\n\n## Acronyms and abbreviations\n\n- Define an acronym at its **first appearance**: full term first, acronym in\n  parentheses, as in \"bird's-eye view (BEV)\". Every occurrence after that uses\n  the acronym alone.\n- Define it **once**. Re-introducing \"bird's-eye view (BEV)\" in a later section\n  tells the reader they missed something — check the whole paper for duplicate\n  definitions.\n- The abstract is read on its own: if the acronym appears there, define it in\n  the abstract and again at its first appearance in the body, then never after.\n- Only introduce an acronym worth reusing. A term that appears once or twice\n  stays spelled out — an acronym the reader has to look back for costs more than\n  the words it saves.\n\n## English usage\n\n- \"i.e.,\" and \"e.g.,\" — dot, dot, comma. Not italicized.\n- \"ground truth\" as a noun (no hyphen); \"ground-truth\" as an adjective, as in\n  \"the ground-truth annotation\".\n- Hyphens and dashes:\n  - **Hyphen** (`-`): compound words (\"well-known\"), prefixes (\"re-evaluate\"),\n    word breaks.\n  - **En dash** (`--`): ranges (\"2010--2015\") and connections\n    (\"Paris--London flight\").\n  - **Em dash** (`---`): parenthetical punctuation — like this — in place of\n    parentheses or commas for emphasis. Use sparingly: it has become a tell of\n    LLM-generated text, so do not overuse it.\n\n## LaTeX commands\n\n- Use `\\autoref{}` for cross-references, not `\\ref{}` or `\\cref{}`.\n- For quotation marks, the opening quote uses backticks: `` `single' `` and\n  ` ``double'' `.\n\n---\n\n## Working with Claude through the MCP server\n\nThis repository lets Claude read, edit, compile, and commit `.tex` files\ndirectly. To get clean, reviewable results:\n\n- Write **one sentence per line** in the source. LaTeX flows them into normal\n  paragraphs, but it keeps `git diff`s small and lets Claude edit surgically\n  instead of rewriting whole blocks.\n- Ask for **targeted changes** (\"tighten the second paragraph of the intro\",\n  \"fix the punctuation on the loss equations\") rather than \"rewrite this\n  section\" — the diffs stay reviewable.\n- Have Claude **compile after editing** and report errors; LaTeX failures are\n  usually localized and the log points to the offending line.\n- **Review the diff before pushing.** Treat edits like a collaborator's pull\n  request: read `git diff`, then commit and push deliberately.\n\n---\n\n_Contributions to this guide are welcome. Keep examples minimal and compilable._\n\n---\n\nWhen committing or pushing changes through this server, follow the concurrency and safe-push rules below.\n\n# Concurrent Editing and Safe Pushing\n\nWhy this server pushes the way it does — the model behind safe pushing, the editing\nhabits that keep merges clean, and the limits we can't engineer away. This is the\n_why_; for the exact tool arguments and result fields, see [`tools.md`](tools.md)\n(the tool descriptions and their `conflict` results are self-contained — an MCP-only\nclient can resolve without a shell).\n\n---\n\n## The setup: three concurrency models\n\nAn Overleaf project's Git bridge is an ordinary Git remote — in practice a single\ndefault branch (`main`; older projects may still use `master`). But the people\nediting the document are not all using Git:\n\n- **Web-editor users** type in Overleaf's real-time editor. Their keystrokes are\n  reconciled by operational transforms (OT) and committed back to the Git history\n  **opaquely** — you see commits appear on `main`, not the individual edits.\n- **AI agents** (Claude, through this server) clone the repo, edit files, commit,\n  and push over Git.\n- **Several agent sessions at once** — one person running a session per section,\n  say — each a separate server process, all editing the _same_ local clone.\n\nSo we are bridging concurrency models: OT inside Overleaf, Git against the remote,\nand a shared working tree between sibling sessions. The web side can advance `main`\nat any moment, without warning, so every push has to assume the remote may have\nmoved since we last looked. And the working tree can change under a session at any\nmoment, so no session may assume the files on disk hold only its own work.\n\nThe rest of this document covers the remote (agent ↔ web) half. For the local half,\nsee [**parallel sessions**](#parallel-sessions-on-one-clone) below.\n\n## The core rule\n\n**Always `pull --rebase` before pushing. Never force-push.**\n\nRebasing replays our local commits on top of whatever is currently on `main`, so\nwe add our work _after_ everyone else's instead of on top of a stale base. A\nforce-push would overwrite commits made on the web side — silently destroying\nother people's work. There is no situation in this workflow where force-pushing is\ncorrect. The `push` tool enforces this automatically.\n\n## Surgical edits are a concurrency strategy, not just style\n\nGit merges at **line granularity**. Two commits that change _different_ lines merge\ncleanly with no human involvement; two commits that change the _same_ line\nconflict. That single fact drives how we edit:\n\n- **One sentence per line.** LaTeX flows lines into paragraphs, so this costs\n  nothing in the rendered PDF, but it makes each sentence an independent unit that\n  Git can merge on its own. A web user rewording sentence 3 while the agent fixes\n  sentence 7 produces zero conflicts.\n- **Only modify lines within the stated edit scope.** Never reflow, rewrap, or\n  re-indent untouched regions. Reflowing a paragraph rewrites every line in it, so\n  a one-word fix turns into a whole-paragraph diff that collides with any\n  concurrent edit anywhere in that paragraph. A localized edit touches only the\n  lines it must.\n\nSurgical, localized edits are therefore the primary way we avoid conflicts in the\nfirst place — the conflict never has to be resolved because it never happens. (This\nis also why the [writing guide](writing-guide.md) asks for one sentence per line and\ntargeted changes.)\n\n## Structural mitigation: split the paper into section files\n\nConflicts can only happen when two people touch the same file. The most effective\nstructural defense is to make that rare:\n\n```latex\n% main.tex\n\\input{sections/intro}\n\\input{sections/method}\n\\input{sections/experiments}\n\\input{sections/related-work}\n```\n\nWith each section in its own file, people working in different sections touch\ndifferent files, which essentially never conflict. Combined with one-sentence-per-\nline editing _within_ a file, this keeps the conflict surface tiny.\n\n## Conflict policy: fail safe, never auto-resolve\n\nA rebase conflict means the agent and a human edited the **same lines**. There is\nno safe automatic answer — picking either side risks discarding someone's intended\nchange. So we do **not** auto-resolve. On any conflict `push`:\n\n1. **Aborts the rebase**, returning the local clone to exactly its pre-push state —\n   nothing half-merged is left behind.\n2. **Surfaces all three sides** — the merge-base, our version, and the version that\n   landed on the remote — as a structured `status: \"conflict\"` result (also rendered\n   into the result _text_, so a client that drops structured fields can still read it).\n3. **Stops**, and waits for a human to adjudicate.\n\nFailing safe and asking a human beats merging wrong. A conflict is information, not\nan error to be papered over.\n\n**Resolving it stays in the tools — no shell needed.** You reconcile the three sides\nand hand the merged content back through the same `push` tool; the merged text always\noriginates from the caller, nothing is auto-merged. If redoing your edits is easier\nthan computing a line-by-line merge, you can instead rewind the clone to the current\nremote and re-apply. The exact arguments (the `resolutions` array, the\n`expectedRemoteHead` guard, `reset_to_remote`) and the fields on a `conflict` result\nare documented in [`tools.md`](tools.md#reviewable-safe-pushes) — this document only\ncovers the policy: **the resolution always comes from a human, never from an\nauto-merge.**\n\n## The sync-lag caveat\n\nOverleaf's Git bridge does **not** instantly reflect in-flight web edits. Someone\ncan be typing in the web editor right now, and those changes will not appear in the\nGit history until the bridge commits them. This means even a _clean_ push — one that\nrebased without conflict — can land on top of live edits that simply had not been\ncommitted yet. This is a limitation of the bridge, not something the tools can\ndetect; no `pull --rebase` can rebase onto a commit that doesn't exist yet.\n\nWe cannot eliminate this, only shrink the window:\n\n- **Keep the push window short.** The tool fetches and `pull --rebase`s\n  _immediately_ before the actual `git push`, so the gap between \"this is the\n  current `main`\" and \"pushed\" is as small as possible.\n- **For high-stakes pushes, coordinate timing.** Before a large or structural push,\n  it is worth asking collaborators to pause web edits for a moment, or pushing when\n  the document is quiet.\n\n## Parallel sessions on one clone\n\nEverything above is about the _remote_. This section is about the _local_ clone, when\none person runs several agent sessions on the same paper — one per section, say — and\neach is a separate server process sharing a single working tree.\n\nTwo things break if that is left unmanaged. Git has no tolerance for two processes\nrewriting an index at once, so operations must be serialised across processes, not\njust within one. And `git add` cannot tell whose change is whose, so one session\ncommitting would sweep up another's half-written paragraph under its own message.\n\n### Naming your sessions\n\nSet `WEB_LATEX_MCP_SESSION` per session to something meaningful — `intro`,\n`experiments` — and it becomes what peers see in `status`. Without it a session still\nworks and is still isolated, but it shows up to the others under a generated id.\n\n### Serialising across processes\n\nEvery mutating operation takes a lock file beside the clone for the duration, on top\nof the in-process mutex. A session that crashes cannot release its lock, so a lock is\nreclaimed once its owning process is gone, or once it stops being refreshed. Callers\nwait rather than fail; only a genuinely stuck holder produces an error, and it names\nthe session holding it.\n\n### Committing only your own work\n\nEach session keeps a **shadow** of every file it has touched, holding `HEAD + only\nthis session's edits`, while the working tree holds everyone's. `commit` stages the\nshadow directly rather than running `git add`, so the commit contains that session's\nlines and leaves its peers' edits sitting uncommitted on disk, exactly where they\nwere.\n\nThe shadow is maintained from the _change_, not the result: when a session writes a\nfile, what is folded into its shadow is the difference its own write made, three-way\nmerged, never the whole file it happened to read. That is what keeps a peer's lines\nout of it. After HEAD moves — a peer commits, a pull lands, a push rebases — each\nsession carries its shadow onto the new HEAD by three-way merge, lazily, on its next\ncall. No session has to be running for another to make progress.\n\nTwo consequences worth knowing:\n\n- `commit` reports `leftUncommitted` — what is still dirty that it deliberately did\n  not take. A file can appear there even though the commit included part of it; that\n  is the two-sessions-one-file case, working as intended.\n- `commit scope: \"all\"` is the escape hatch: it commits the whole working tree, other\n  sessions' work included. Use it deliberately, not as a default.\n\n### When two sessions edit the same lines\n\nSame file, different paragraphs, is the case this is built for and it merges silently.\nSame _lines_ is a genuine collision, and it is treated exactly like a rebase conflict:\nsurfaced, never guessed at. The file is flagged (`conflictedChanges` in `status`,\n`conflicted` on a commit result) and excluded from commits, and it stays flagged —\nlater edits do not quietly clear it, because that session's shadow is anchored to a\nbase the file has since moved past, and committing it would revert whatever landed in\nbetween.\n\nThere are two honest ways out, and both are the caller's decision: commit with\n`scope: \"all\"` to take the working tree as it stands, or discard those files to give\nup that session's version.\n\n### Pushing with peers around\n\nA push has to rebase, and a rebase needs a clean tree. So `push` refuses while a live\npeer session has uncommitted work, naming who to wait for — the alternative would be\nsweeping their in-flight paragraph into the push or rewriting the tree underneath\nthem. Changes nobody owns (edited outside the server, or left by a session that has\nsince exited) do not block it.\n\nThe practical rhythm: sessions commit as they finish a piece, and whoever pushes does\nso when the others are between edits.\n\n### What this does not do\n\n- **It is one machine only.** All of it rests on a shared filesystem. Two people on\n  two laptops see none of it, and coordinate through the remote as they always did.\n- **It attributes, it does not lock.** No session is prevented from editing any file.\n  Splitting the paper into per-section files remains the real defence — it makes\n  collisions rare rather than merely legible.\n- **A session that dies leaves its edits behind.** They stay in the working tree, but\n  the record of whose they were is eventually collected; they then show up as\n  unattributed changes, committable with `scope: \"all\"`.\n\n## Optional review flow for larger edits\n\nFor a big or risky change, you do not have to push straight to `main`. The `push`\ntool's **branch mode** stages the work on a **local** feature branch (never pushed —\nthe Overleaf bridge only reliably syncs the default branch) and returns its full diff\nagainst `main` for a human to read. Only on explicit approval does it rebase onto a\nfreshly fetched `main`, fast-forward, and push — with the same abort-and-surface behavior\nif the rebase conflicts. This is the right mode when you want eyes on the change\nbefore it reaches the shared document.\n\n---\n\n> Note: this server is branch-agnostic — it rebases onto whatever the clone's default\n> branch actually is. This document says `main` throughout because that is Overleaf's\n> current default; older projects may still use `master`, and everything here applies\n> unchanged to either.\n\n_Read alongside the [LaTeX writing guide](writing-guide.md): the editing habits it\nprescribes are what make these merges clean. For the tool-by-tool mechanics, see\n[`tools.md`](tools.md)._\n\n---\n\nThe user can leave review comments on the compiled PDF in this server’s local `viewer` (they select text and attach a note). When the user asks you to apply, address, resolve, or act on their PDF comments / feedback / review notes — e.g. “resolve my comments”, “apply my PDF feedback”, “address the comments” — run this loop for the relevant project:\n1. Call `list_comments` to get the open comments (each has the note, the selected `quote`, and the source `file`/`line` with a snippet).\n2. Make the requested change at each comment’s `file`/`line`, using the `quote` to pin the exact spot when the line is approximate.\n3. `compile` to confirm it still builds (the viewer hot-reloads).\n4. Call `resolve_comments` (all, or the specific `ids` you handled) so the viewer clears them.\nMake all the edits before resolving, and ask rather than guess when a comment is ambiguous.",
+  "durationMs": 23013,
+  "stderr": "[web-latex-mcp] server ready on stdio as session \"session-33f4e7ce\" (writing guide loaded) (concurrency guide loaded) (6 skills as prompts)\n[web-latex-mcp] client smallprint-runread v1\n"
+}

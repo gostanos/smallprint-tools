@@ -1,0 +1,709 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "deckpipe-mcp",
+  "version": "0.3.8",
+  "integrity": {
+    "dist": "sha512-5WC6HM4OcZOsFNXQzM45e480KePb6d+HuCDQj6lfSsUqp7ONnPTNYfxc83MekIaioGYITV9B0XdEtDm9KEtDZA==",
+    "installed": "sha512-5WC6HM4OcZOsFNXQzM45e480KePb6d+HuCDQj6lfSsUqp7ONnPTNYfxc83MekIaioGYITV9B0XdEtDm9KEtDZA=="
+  },
+  "bin": "node_modules/deckpipe-mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T16:16:10.030Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "create_deck",
+      "description": "Create a new slide deck. Returns viewer_url (owner link with edit key) and share_url (read-only).\n\nEach slide is a canvas slide — you write the HTML/CSS/JS directly. Slide shape:\n{ layout: \"canvas\", content: { html (required), css?, js?, static_render_only? } }\n\nDesign checklist:\n- Design at 1920×1080. The viewer scales to fit.\n- Pick concrete pixel values: h1 ≈ 96–128px, body ≈ 24–32px, padding ≈ 96–144px, gap ≈ 32–64px. Designs sized for a 16px browser look tiny at HD.\n- ONE IDEA PER SLIDE. If a slide has a headline + lede + tags + callout + quote + attribution, split it into two or three. Whitespace is a design element. For editorial decks, prefer 20 sparse slides over 12 dense ones unless the user asked for dense.\n- BUILD ONE REPRESENTATIVE SLIDE FIRST. Pick a content-heavy slide (not the cover), preview_slide it, look at the actual screenshot, calibrate density, THEN author the rest at that bar. Don't preview the cover and assume the body slides will be fine.\n- If the brief is vague (\"hi-fi\", \"make it visual\"), ASK for a reference (Apple keynote / Pentagram case study / NYT Magazine / investor pitch / status update) and a slide count before committing.\n- Define shared styles ONCE in deck.stylesheet (typography, color tokens, .card/.grid/.hero classes). Reference them from each slide's html.\n- Mark commentable elements with data-dp-anchor=\"<stable-id>\" so feedback threads survive edits.\n- Optional \"js\" runs (root, slide) on slide enter — return a cleanup function. Set static_render_only: true to freeze animations in print/PDF and screenshots.\n- VERIFY BEFORE COMMITTING: call preview_slide with your draft html/css/js and read both the screenshot and the render report. After creation, call get_slide_screenshot on any slide you didn't preview — it returns the image inline so you can SEE what reviewers see.\n\nIMPORTANT:\n- To modify this deck later, use update_deck. NEVER create a new deck to make changes — it loses the URL and comment history.\n- To iterate: get_deck (read state + comments) → get_slide_screenshot (see actual render) → update_deck → reply_to_comment.\n- Check the \"warnings\" array and fix issues with a follow-up update_deck call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Deck title"
+          },
+          "agent_name": {
+            "type": "string",
+            "description": "Your agent name (e.g. \"Acme Strategy Agent\"). Shown as author on comments you post. Set this once at deck creation."
+          },
+          "stylesheet": {
+            "type": "string",
+            "description": "Global CSS adopted by every canvas slide via shadow-root adoptedStyleSheets. Define your design system once (typography, components, color tokens) and reference classes from each slide."
+          },
+          "head": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string",
+                  "enum": [
+                    "link",
+                    "script",
+                    "style"
+                  ]
+                },
+                "attrs": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tag"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Array of <link>/<script>/<style> entries injected into the page head. Use for Google Fonts links, icon-font stylesheets, or trusted CDN scripts your js depends on."
+          },
+          "slides": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "layout": {
+                  "type": "string",
+                  "const": "canvas",
+                  "description": "Always \"canvas\". (25 legacy templated layouts exist but are deprecated for new content — see CLAUDE.md to re-enable.)"
+                },
+                "content": {
+                  "type": "object",
+                  "properties": {
+                    "html": {
+                      "type": "string",
+                      "description": "Required. Slide markup. Designed at 1920×1080, mounted in a shadow root."
+                    },
+                    "css": {
+                      "type": "string",
+                      "description": "Optional per-slide CSS, scoped to this slide. For shared styles use deck.stylesheet instead."
+                    },
+                    "js": {
+                      "type": "string",
+                      "description": "Optional JS. Runs on slide enter with (root, slide). Return a cleanup function. Don't rely on exact text strings — reviewers can edit text inline."
+                    },
+                    "static_render_only": {
+                      "type": "boolean",
+                      "description": "If true, \"js\" is skipped in print/PDF and screenshots. Use for animations that should freeze on export."
+                    }
+                  },
+                  "required": [
+                    "html"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "required": [
+                "layout",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Array of canvas slides. Each slide is HTML/CSS/JS the agent authors."
+          }
+        },
+        "required": [
+          "title",
+          "slides"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "clone_deck",
+      "description": "Duplicate an existing deck into a BRAND-NEW deck — the way to start from a template.\n\nThe source can be ANY deck you have the ID of; there's no separate \"template\" type. The clone gets its own deck_id, viewer_url, and edit key. It copies the source's slides, stylesheet, head, and fonts verbatim, with fresh slide IDs. It does NOT inherit the source's comments — the clone starts with a clean review history, and the source deck is left untouched.\n\nTypical flow: clone_deck (from your template) → update_deck (replace the placeholder content with the real thing). NEVER edit the source template in place when you mean to make a copy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source_deck_id": {
+            "type": "string",
+            "description": "ID of the deck to clone from (your template). E.g. \"dk_a1b2c3d4\"."
+          },
+          "title": {
+            "type": "string",
+            "description": "Title for the new deck. Defaults to \"Copy of <source title>\"."
+          },
+          "agent_name": {
+            "type": "string",
+            "description": "Author name for comments you post on the clone. Defaults to the source deck's agent_name."
+          }
+        },
+        "required": [
+          "source_deck_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "get_deck",
+      "description": "Retrieve a deck by ID. Returns all slides with their current content, including any edits made by the user in the viewer.\n\nEach slide includes a comments[] array with open comments. Each comment has: id, content_path (e.g. \"title\", \"bullets[2]\", \"slide\" for general), status, messages[] thread, and created_at.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deck_id": {
+            "type": "string",
+            "description": "The deck ID (e.g. \"dk_a1b2c3d4\")"
+          }
+        },
+        "required": [
+          "deck_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "update_deck",
+      "description": "Update an existing deck. Two parameters for two purposes:\n\n1. \"slide_operations\" — structural changes (insert, delete, move, replace). The ONLY way to add new slides.\n2. \"slides\" — content edits to existing slides by index (partial merge of the content object). Does NOT add slides.\n\nslide_operations execute first, then slides content edits apply to the resulting array.\n\nslide_operations examples:\n- Insert: { \"op\": \"insert\", \"index\": 5, \"slide\": { \"layout\": \"canvas\", \"content\": { \"html\": \"<div class=\\\"slide\\\">...</div>\", \"css\": \"...\", \"js\": \"...\" } } }\n- Delete: { \"op\": \"delete\", \"index\": 2 }\n- Move: { \"op\": \"move\", \"from\": 0, \"to\": 3 }\n- Replace: { \"op\": \"replace\", \"index\": 4, \"slide\": { \"layout\": \"canvas\", \"content\": { \"html\": \"...\" } } }\n\nslides (content edit) examples:\n- Replace the html of slide 0: { \"index\": 0, \"content\": { \"html\": \"<div class=\\\"slide\\\">new markup</div>\" } }\n- Tweak the css of slide 2: { \"index\": 2, \"content\": { \"css\": \".card { border-radius: 24px; }\" } }\n- Both are PARTIAL merges into the existing content object — other fields (js, static_render_only, etc.) are preserved.\n\nEditing existing decks that use the deprecated templated layouts is supported (the REST API still accepts them); just patch their content fields directly. New slides should be canvas.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deck_id": {
+            "type": "string",
+            "description": "Deck ID to update"
+          },
+          "title": {
+            "type": "string",
+            "description": "New deck title"
+          },
+          "stylesheet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Replace the deck-level global CSS string used by canvas slides. Pass null to clear."
+          },
+          "head": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tag": {
+                      "type": "string",
+                      "enum": [
+                        "link",
+                        "script",
+                        "style"
+                      ]
+                    },
+                    "attrs": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "body": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "tag"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replace the deck-level head entries. Pass null to clear."
+          },
+          "slide_operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "delete",
+                    "insert",
+                    "move",
+                    "replace"
+                  ],
+                  "description": "Operation type: \"insert\" adds a new slide, \"delete\" removes one, \"move\" reorders, \"replace\" swaps layout+content"
+                },
+                "index": {
+                  "type": "number",
+                  "description": "Target slide index. Required for insert (position to insert at), delete, and replace."
+                },
+                "from": {
+                  "type": "number",
+                  "description": "Source index. Only for move."
+                },
+                "to": {
+                  "type": "number",
+                  "description": "Destination index. Only for move."
+                },
+                "slide": {
+                  "type": "object",
+                  "properties": {
+                    "layout": {
+                      "type": "string",
+                      "const": "canvas",
+                      "description": "New slides must use the canvas layout. Templated layouts are deprecated for new content."
+                    },
+                    "content": {
+                      "type": "object",
+                      "properties": {
+                        "html": {
+                          "type": "string",
+                          "description": "Required slide markup, designed at 1920×1080."
+                        },
+                        "css": {
+                          "type": "string"
+                        },
+                        "js": {
+                          "type": "string"
+                        },
+                        "static_render_only": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "html"
+                      ],
+                      "additionalProperties": true,
+                      "description": "Canvas content object — { html, css?, js?, static_render_only? }."
+                    }
+                  },
+                  "required": [
+                    "layout",
+                    "content"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The new slide to add. Required for insert and replace."
+                }
+              },
+              "required": [
+                "op"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Structural changes: add, remove, reorder, or replace slides. Use this to INSERT NEW SLIDES — do not recreate the deck."
+          },
+          "slides": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "number",
+                  "description": "Zero-based slide index (post-operations)"
+                },
+                "content": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "Partial content to merge"
+                }
+              },
+              "required": [
+                "index",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Content edits by index (applied after slide_operations)"
+          }
+        },
+        "required": [
+          "deck_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "delete_deck",
+      "description": "Delete a deck permanently.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deck_id": {
+            "type": "string",
+            "description": "Deck ID to delete"
+          }
+        },
+        "required": [
+          "deck_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "upload_image",
+      "description": "Host an image (PNG/JPG/WebP/GIF/SVG, max 10MB) and get back a URL for use in <img src> on a canvas slide.\n\nProvide the image ONE of three ways — use the simplest one available:\n- path: an absolute path to a local image file. This server runs locally, so it reads the file directly — no encoding needed. Easiest when the image is already on disk.\n- url: a remote image URL. The server fetches and re-hosts it. Best when you found an image online or already have a hosted URL.\n- image_data: base64-encoded bytes (with filename + content_type). The fallback when you only have raw bytes in hand.\n\nPass exactly one of path / url / image_data.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to a local image file to upload. Only available when the MCP server runs on your machine."
+          },
+          "url": {
+            "type": "string",
+            "description": "Remote image URL to fetch and re-host (http/https). Preferred over base64 when you have a URL."
+          },
+          "image_data": {
+            "type": "string",
+            "description": "Base64-encoded image data. Requires filename + content_type. Use only when you have raw bytes and no path/url."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Filename with extension (e.g. \"photo.jpg\"). Required with image_data."
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "image/png",
+              "image/jpeg",
+              "image/webp",
+              "image/gif",
+              "image/svg+xml"
+            ],
+            "description": "MIME type. Required with image_data."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "search_images",
+      "description": "Search Unsplash for stock photos. Each result includes everything you need to embed the image with proper attribution — no round-trip required.\n\nReturned per result:\n- url           — 1920px wide, ready for <img src=\"\"> on a canvas slide\n- url_full      — 2400px wide, for full-bleed hero images\n- url_thumb     — 400px wide, for thumbnails or low-priority spots\n- alt           — Unsplash's alt text, drop into <img alt=\"\">\n- photographer  — { name, profile_url } (UTM params already attached)\n- attribution_html — pre-built credit snippet (\"Photo: <a>Name</a> / <a>Unsplash</a>\") — drop near the image\n- download_location — Unsplash tracking URL. You don't need to call it. Deckpipe fires the download ping server-side when it sees the URL in your slide HTML on create_deck/update_deck.\n\nUse the \"queries\" parameter to search for multiple terms in one call (e.g. one per slide) instead of making separate calls — results are grouped by query.\n\nAttribution is required by Unsplash terms. Drop attribution_html into a small caption near every image you use (a footer line, a corner overlay, etc.). Do not strip the UTM params from photographer.profile_url.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Single search query (e.g. \"modern office workspace\"). Use this OR queries, not both."
+          },
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "description": "Multiple search queries in one call (max 5). Results grouped by query. More efficient than separate calls."
+          },
+          "per_page": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Results per query (default 5, max 30)"
+          },
+          "orientation": {
+            "type": "string",
+            "enum": [
+              "landscape",
+              "portrait",
+              "squarish"
+            ],
+            "description": "Filter by orientation. Use \"landscape\" for full_image/image_and_text, \"portrait\" for image_gallery."
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "list_layouts",
+      "description": "Describe the slide layouts and deck-level customization fields. New content uses a single layout — \"canvas\" — where you author HTML/CSS/JS directly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "list_comments",
+      "description": "List comments on a deck. Returns comment objects with: id, slide_id, content_path (e.g. \"title\", \"bullets[2]\", \"slide\"), status (\"open\"/\"resolved\"), messages[] thread, created_at, updated_at.\n\nUse the \"since\" parameter with an ISO timestamp to only fetch comments added or updated since your last check.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deck_id": {
+            "type": "string",
+            "description": "The deck ID"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved"
+            ],
+            "description": "Filter by status. Defaults to showing all. Use \"open\" to see only unresolved feedback."
+          },
+          "slide_id": {
+            "type": "string",
+            "description": "Filter to a specific slide by its stable slide_id (e.g. \"sld_a1b2c3d4\")"
+          },
+          "since": {
+            "type": "string",
+            "description": "ISO timestamp. Only return comments created or updated since this time. Use this to poll for new feedback efficiently."
+          }
+        },
+        "required": [
+          "deck_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "reply_to_comment",
+      "description": "Reply to a comment thread. Keep replies concise — summarize what you changed, don't repeat the feedback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deck_id": {
+            "type": "string",
+            "description": "The deck ID"
+          },
+          "comment_id": {
+            "type": "string",
+            "description": "The comment ID to reply to (e.g. \"cmt_a1b2c3d4e5f6\")"
+          },
+          "body": {
+            "type": "string",
+            "description": "Your reply message"
+          },
+          "author_name": {
+            "type": "string",
+            "description": "Your agent name. Defaults to the agent_name set at deck creation, or \"Agent\" if none was set."
+          }
+        },
+        "required": [
+          "deck_id",
+          "comment_id",
+          "body"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      }
+    },
+    {
+      "name": "preview_slide",
+      "description": "Render a single canvas slide without persisting anything. Returns a PNG screenshot (base64) plus a render report (JS errors, console errors, text overflows, font load status, failed network requests).\n\nUse this to iterate on slide html/css/js BEFORE calling create_deck or update_deck. The render runs through the real viewer pipeline at 1920×1080 — exactly what reviewers will see. Catches:\n- JS errors thrown by your \"js\"\n- console.error / console.warn output\n- elements that are off-canvas (bounding rect extends past 1920×1080) or clipped (overflow: hidden/scroll/auto with overflowing content). Each entry in report.overflows includes a \"reason\" field: \"off_canvas\" or \"clipped\".\n- Google Fonts that didn't load (typo in font name, missing head entry)\n- failed image / asset requests\n\nThe overflows list does NOT report benign rendering bleed (italic descenders, negative letter-spacing on serif headings, etc.) when nothing is actually clipped. If the report comes back clean but the screenshot looks wrong, trust the screenshot — overflows is a syntactic check, the image is the visual truth.\n\nCommon workflow:\n1. Draft html/css/js for one slide.\n2. preview_slide → READ THE SCREENSHOT, then inspect report.overflows and report.js_errors.\n3. Fix issues, preview again.\n4. Once clean, include the slide in create_deck (or update_deck).\n\nThe screenshot is the slide alone — no viewer chrome.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "Slide HTML (the markup that would go in content.html)."
+          },
+          "css": {
+            "type": "string",
+            "description": "Optional per-slide CSS, scoped to this slide."
+          },
+          "js": {
+            "type": "string",
+            "description": "Optional per-slide JS. Runs with (root, slide). Skipped if static_render_only=true (which screenshot mode forces)."
+          },
+          "static_render_only": {
+            "type": "boolean",
+            "description": "Set true to skip your \"js\" during the preview render. Useful to isolate CSS/HTML issues."
+          },
+          "stylesheet": {
+            "type": "string",
+            "description": "Deck-level CSS to adopt (mirrors deck.stylesheet). Use this so the preview matches your actual design system."
+          },
+          "head": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string",
+                  "enum": [
+                    "link",
+                    "script",
+                    "style"
+                  ]
+                },
+                "attrs": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tag"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Deck-level head entries (Google Fonts links, etc.). Same shape as deck.head."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "description": "Image format. Defaults to png."
+          }
+        },
+        "required": [
+          "html"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "get_slide_screenshot",
+      "description": "Render a specific slide of an existing deck and return the PNG inline (base64) so you can see exactly what reviewers see. Also returns a render report (JS errors, text overflows, font load status). Results are cached on deck.updated_at — instant for unchanged slides.\n\nUse after update_deck to verify a change actually rendered the way you intended, or to inspect a slide a reviewer commented on. The screenshot is the slide alone, at 1920×1080, no viewer chrome.\n\nThe render report's overflow list is a syntactic check, not a visual one. Each overflow entry now includes a \"reason\" field (\"off_canvas\" or \"clipped\") so you know whether something is actually getting cut off. The image is ground truth — read it before iterating.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deck_id": {
+            "type": "string",
+            "description": "The deck ID (e.g. \"dk_a1b2c3d4\")"
+          },
+          "slide_index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based slide index."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "description": "Image format. Defaults to png."
+          }
+        },
+        "required": [
+          "deck_id",
+          "slide_index"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    },
+    {
+      "name": "resolve_comment",
+      "description": "Resolve a comment, marking it as addressed. Only resolve when explicitly asked — let the user confirm satisfaction first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deck_id": {
+            "type": "string",
+            "description": "The deck ID"
+          },
+          "comment_id": {
+            "type": "string",
+            "description": "The comment ID to resolve"
+          }
+        },
+        "required": [
+          "deck_id",
+          "comment_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "deckpipe",
+    "version": "0.3.8"
+  },
+  "protocolVersion": null,
+  "instructions": "deckpipe is a slide deck rendering engine. You author each slide as HTML/CSS/JS — deckpipe renders it inside a sandboxed 1920×1080 shadow root and gives every deck a shareable viewer URL with built-in commenting.\n\nWORKFLOW\n- Use create_deck for NEW decks. Use update_deck to modify EXISTING decks.\n- START FROM A TEMPLATE: to base a new deck on an existing one, use clone_deck (any deck ID works as a template) to get a fresh deck with its own URL + edit key and no inherited comments, then shape it with update_deck. Don't hand-copy slides through create_deck, and never edit the template itself when you mean to make a copy.\n- NEVER recreate a deck to make changes. Recreating loses the URL, edit key, and comment history. Always update in place.\n- CALIBRATE DENSITY FIRST: before authoring a whole deck, build ONE representative content-heavy slide via preview_slide and look at the actual screenshot. The cover/title is the wrong slide to calibrate on — pick one that carries real text. If the user hasn't specified slide count or a reference style (Apple keynote / Pentagram case study / NYT Magazine / investor pitch / status update), ASK before committing — those signals are what tell you how much whitespace to use.\n- ITERATE BEFORE COMMITTING: use preview_slide to render an HTML/CSS/JS draft and get a screenshot + render report. Both preview_slide and get_slide_screenshot return the actual rendered PNG inline — read it. The image is ground truth.\n- SWEEP FOR OVERFLOWS AFTER CREATING: after create_deck, call get_slide_screenshot on every slide that carries dense text, large headlines, charts, or images. Read the \"overflows\" list. Any entry with reason:\"off_canvas\" or reason:\"clipped\" is a real bug — fix with update_deck before declaring the deck done. Pay special attention to slides where headlines + body + footer compete for vertical space.\n- Round trip on an existing deck: get_deck (read state + open comments) → get_slide_screenshot (see how a slide actually renders) → update_deck (make changes) → reply_to_comment (explain what you changed).\n- Check the \"warnings\" array in every create/update response.\n\nCONTENT DENSITY\n- One idea per slide. If a slide is carrying a headline + lede + tag row + callout + pull-quote + attribution, you have three slides compressed into one — split it.\n- Whitespace is a design element, not wasted space. Editorial decks read better at 20 sparse slides than 12 dense ones. Prefer breathing room unless the user explicitly asked for an information-dense format.\n- Headlines ≤ 8 words. One concept per paragraph. Strip ornamentation before the final pass.\n- The render report's \"overflows\" list is a SYNTACTIC check (off-canvas elements, content clipped by overflow:hidden). It says nothing about whether the slide looks good. A wall of text with no overflows is still a wall of text — the screenshot is the only signal that catches \"too dense to read\". Look at the image.\n\nTHE CANVAS LAYOUT\n- Every slide is { layout: \"canvas\", content: { html (required), css?, js?, static_render_only? } }.\n- \"html\" is the full slide markup, rendered into a 1920×1080 frame. CSS in \"css\" is scoped to this slide only; for shared styles use deck.stylesheet.\n- Each slide mounts in an open shadow root, so your CSS is auto-scoped — no BEM, no class prefixes.\n- \"js\" runs on slide enter with (root, slide) in scope. Return a cleanup function for slide exit. Set static_render_only: true to skip JS in print/PDF and screenshots.\n\nLAYOUT SAFETY (the box-sizing + footer-reserve trap)\n- Open every deck.stylesheet with a universal box-sizing reset: `*, *::before, *::after { box-sizing: border-box }`. Without it, an element with `height:100%; padding:Xpx` becomes 100% + 2X in computed height and overflows its parent. This is the #1 cause of \"content overlaps the footer\" bugs.\n- If a slide has a bottom-fixed footer/page-number row (e.g. `position:absolute; bottom:48px`), the in-flow content's bottom padding must clear it. A safe pattern is `.slide { padding: 112px 128px 160px }` so content never reaches the footer band. Same for any full-bleed slide's `.hero-content` analogue — its padding-bottom must reserve ~160px.\n- After authoring the stylesheet, build the most VERTICALLY DENSE slide first (one with big headline + body + chart/diagram + footer) and screenshot it. If a headline + body + chart overflows, you'll see it here before propagating the same mistake to every slide.\n\nDECK-LEVEL THEMING (define once, reference everywhere)\n- stylesheet: global CSS string (up to 100KB) adopted by every canvas slide. Define your design system here. Worked example for a real 1920×1080 design system:\n\n    *, *::before, *::after { box-sizing: border-box; }\n    .slide      { width: 1920px; height: 1080px; padding: 112px 144px 160px; font-family: 'Inter', system-ui, sans-serif; color: #0f172a; background: #fafaf9; position: relative; overflow: hidden; }\n    .h1         { font-family: 'Fraunces', serif; font-size: 128px; line-height: 0.98; letter-spacing: -0.03em; margin: 0; }\n    .h2         { font-family: 'Fraunces', serif; font-size: 64px; line-height: 1.05; margin: 0; }\n    .lead       { font-size: 32px; line-height: 1.45; color: #475569; max-width: 1500px; }\n    .label      { font-family: 'JetBrains Mono', monospace; font-size: 18px; letter-spacing: 0.18em; text-transform: uppercase; color: #94a3b8; }\n    .card       { padding: 56px; border-radius: 28px; background: #ffffff; border: 1px solid #e2e8f0; }\n    .row        { display: flex; gap: 48px; align-items: stretch; }\n\n  Notice the scale: padding in 100s of px, body in 24–32px, h1 in 100+px. Designs sized for a 16px-base browser look tiny at 1920×1080.\n- head: array of { tag, attrs?, body? } entries injected into the page head. Load Google Fonts here as <link> entries, then set font-family in deck.stylesheet on .h1/.h2/.body classes (or whatever your design system calls them).\n\nCOMMENTING\n- Reviewers can comment on ANY DOM element in a canvas slide — deckpipe auto-assigns a content_path to every element at render time.\n- For comment threads that survive edits, mark target elements with data-dp-anchor=\"<stable-name>\" (e.g. data-dp-anchor=\"hero-title\"). Preserve those IDs in updates so threads stay attached.\n- Unmarked elements get auto:<index> paths — stable within a render but may shift if you restructure. Use anchors for anything you'll iterate on.\n\nINLINE EDITS\n- The viewer's edit mode makes text-bearing leaf elements (h1, p, span, etc.) contenteditable. On blur the full html is saved back via PATCH.\n- Your \"js\" should be resilient to text changes — find elements with selectors or data attributes, never with exact strings.\n\nIMAGES\n- search_images returns full-resolution URLs (url, url_full), photographer info, and a pre-built attribution_html snippet. Drop the url into <img src> on a canvas slide and the attribution_html into a small caption near the image. Download tracking fires server-side automatically.\n- upload_image hosts your own image (PNG/JPG/WebP/GIF/SVG, max 10MB) and returns a URL for <img src>. Three ways to provide it, simplest first: a local file \"path\" (only when the server runs on your machine), a remote \"url\" the server fetches and re-hosts, or base64 \"image_data\" + filename + content_type. Pass exactly one.\n\nCONTENT STYLE\n- Short, crisp, scannable. Headlines ≤ 8 words. Stats abbreviated (\"2.4M\" not \"2,400,000\"). Quotes under 30 words.\n\nLEGACY LAYOUTS\n- 25 templated layouts (title, title_and_bullets, stats, chart, swot, …) are deprecated and not advertised. Existing decks using them still render. New slides should always use the \"canvas\" layout.",
+  "durationMs": 6000,
+  "stderr": "deckpipe MCP server running on stdio\n"
+}

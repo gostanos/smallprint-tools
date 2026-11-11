@@ -1,0 +1,1190 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@wootsup/apimapper-mcp",
+  "version": "2.2.0",
+  "integrity": {
+    "dist": "sha512-SfnyH7aEWVnueuzkHRyAkKgcFNdbcN6eGAu/hYh1EJHhPm+xdjCZYl25JS9JGUqfj2t8hExZk6HlVZo8wjffeg==",
+    "installed": "sha512-SfnyH7aEWVnueuzkHRyAkKgcFNdbcN6eGAu/hYh1EJHhPm+xdjCZYl25JS9JGUqfj2t8hExZk6HlVZo8wjffeg=="
+  },
+  "bin": "node_modules/@wootsup/apimapper-mcp/./dist/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T15:14:13.049Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "apimapper_rest_modules_status",
+      "description": "Module-loading status for this MCP adapter (which sub-modules registered cleanly). For runtime connectivity + auth checks against the API Mapper REST surface, use apimapper_health.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "MCP Modules Status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "apimapper_health",
+      "description": "Check connectivity + auth against the API Mapper REST namespace. Returns {wp_base, wp_user, auth, connectivity, connection_count, http_status, apimapper_api_status}. `apimapper_api_status` reports the downstream api.wootsup.com health (OK/HTTP N/timeout/unreachable) so a degradation of getimo infra is distinguishable from a customer-server issue. Run this first if any other tool fails.\n\nExample:\n  apimapper_health({})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Health Check",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_connection_list",
+      "description": "List API Mapper connections — a LEAN projection by default (id / name / source / host / health). The default limit of 25 already covers a typical install — most customers run with 5-25 connections, increase the limit only if you have a specific reason to expect more. Pass `fields: ['all']` for the full dump (endpoint URL, method, auth_type, credential_id), or a list of specific extra columns. Use apimapper_connection_get for full details of a single connection.\n\nExample:\n  apimapper_connection_list({})  // lean projection, up to 25 connections\n  apimapper_connection_list({ source: 'user' })  // narrow to user-created only\n  apimapper_connection_list({ fields: ['all'] })  // full detail dump",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "default": "all",
+            "description": "Filter by origin",
+            "type": "string",
+            "enum": [
+              "library",
+              "demo",
+              "user",
+              "all"
+            ]
+          },
+          "limit": {
+            "default": 25,
+            "description": "Max items (1-500). Default 25 already covers a typical install — do not raise unless you have evidence the list is larger.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "fields": {
+            "description": "Opt into extra columns. Omit for the lean default (id/name/source/host/health). Pass ['all'] for the full dump (endpoint URL, method, auth_type, credential_id).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "name_query": {
+            "description": "Case-insensitive substring filter on connection name. Applied in-memory after the upstream fetch — does NOT change the REST query. Must be 2+ characters; single-char probes are blocked. Combine with `source` for narrower results.",
+            "type": "string",
+            "minLength": 2
+          },
+          "include_meta": {
+            "default": false,
+            "description": "Include the Rich-Card `_meta` payload (a base64 block appended to the table text) in the response. Default false (lean output; no MCP host this ships to renders it). Set to true to opt in; the human-readable table text is unaffected either way.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Connections",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_connection_create",
+      "description": "Create a custom connection. **Use ONLY when no library template matches your target API.** First call `apimapper_library_featured()` or `apimapper_library_list({ search: '<api-name>' })` (min 3 chars) — Google Sheets, Calendly, Notion, Airtable, GitHub, Pexels, Unsplash, OpenWeatherMap, REST Countries, Google Drive/Docs/Slides/Tasks all have ready-to-use templates with auto-configured auth and field-detection. Library activation via `apimapper_library_activate({ id })` is the canonical customer path; connection_create is the fallback for niche or unknown APIs. The server enforces this: a custom create on an API already covered by a curated template is blocked with a 409 naming the template to activate — pass `acknowledge_no_library: true` to intentionally override that block. The guard matches on the request HOST against the curated library; a connection to an uncovered host is NEVER blocked and needs no `acknowledge_no_library` — only set that flag AFTER you actually receive a 409.\n\nNote: connection auth_type spellings differ from apimapper_credential_create's: here it is `basic` / `oauth2`, whereas credential_create uses `basic_auth` / `oauth2_code` / `oauth2_cc`. Use the spelling for the tool you are calling.\n\nExample:\n  apimapper_connection_create({ name: 'Pexels API', endpoint: 'https://api.pexels.com/v1/search', method: 'GET', auth_type: 'bearer', items_path: 'photos' })",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Connection name (e.g., \"My Blog API\")"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Endpoint path or full URL (e.g., \"https://api.example.com/posts\")"
+          },
+          "method": {
+            "default": "GET",
+            "description": "HTTP method",
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ]
+          },
+          "auth_type": {
+            "default": "none",
+            "description": "Auth type (snake_case wire key). NB: credential_create spells these `basic_auth` (here `basic`) and `oauth2_code`/`oauth2_cc` (here `oauth2`).",
+            "type": "string",
+            "enum": [
+              "none",
+              "api_key",
+              "bearer",
+              "basic",
+              "oauth2"
+            ]
+          },
+          "credential_id": {
+            "description": "Credential ID (snake_case wire key) if auth_type requires one",
+            "type": "string"
+          },
+          "items_path": {
+            "description": "JSONPath to items array (snake_case wire key)",
+            "type": "string"
+          },
+          "cache_ttl": {
+            "default": 3600,
+            "description": "Cache TTL in seconds (snake_case wire key)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "description": {
+            "description": "Free-text description",
+            "type": "string"
+          },
+          "acknowledge_no_library": {
+            "description": "Set true ONLY when no library template fits and you intentionally need a custom connection. The server blocks custom creates on APIs that already have a curated library template; this flag is the audited override. Prefer apimapper_library_activate({ id }) when a template exists.",
+            "type": "boolean"
+          },
+          "summary": {
+            "description": "Optional one-line summary of this change for the change history (e.g., \"Added a Pexels photo connection\").",
+            "type": "string",
+            "maxLength": 280
+          }
+        },
+        "required": [
+          "name",
+          "endpoint"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Create Connection",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_connection_data",
+      "description": "Fetch sample data from a connection's configured endpoint. The PHP handler reads ALL query params as source-context for template substitution. Use `limit`/`offset` to trim the response items in-memory — this does NOT trigger multi-page fetch upstream (the request is single-shot). Use `fields` to project each item down to a whitelist of leaf keys, cutting response size on sparse queries.\n\nF144: if a library/template connection returns a 'Please configure …' / 'Please select an endpoint' diagnostic, the missing values are TEMPLATE FIELDS — supply them here via `template_fields` (e.g., { spreadsheet_id: '…' }) rather than re-creating the connection or starting a new OAuth flow. A connection whose template_fields are already resolved IS configured; inspect them with apimapper_connection_get({ id }).\n\nExample:\n  apimapper_connection_data({ id: 'con_abc123', limit: 10 })  // first 10 items\n  apimapper_connection_data({ id: 'con_abc123', limit: 5, offset: 10 })  // skip 10, take 5\n  apimapper_connection_data({ id: 'con_abc123', fields: ['title', 'image.url'] })  // 2 leaf keys per item\n  apimapper_connection_data({ id: 'con_abc123', template_fields: { query: 'nature' } })",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Connection ID. Use apimapper_connection_list to find."
+          },
+          "endpoint": {
+            "description": "Named endpoint SELECTION — NOT a URL. This is the label of a configured endpoint on the connection (e.g., \"Scheduled Events\", \"Get Values\"), the same names connection_create exposes as endpoints[]. List them via apimapper_connection_get({ id }). Empty-string and whitespace-only values are rejected at the schema boundary to prevent \"?endpoint=\" query garbage; omit the field entirely to use the connection default.",
+            "type": "string",
+            "minLength": 1
+          },
+          "template_fields": {
+            "description": "Template field values flattened into the query string. Accepts string/number/boolean values; non-string values are stringified via JS String() (number 25 → \"25\", true → \"true\", false → \"false\"). NaN/Infinity numbers are rejected by schema (defense-in-depth). Nested objects/arrays are rejected. Example: { spreadsheet_id: \"abc\", per_page: 25, active: true } → ?spreadsheet_id=abc&per_page=25&active=true",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "limit": {
+            "description": "Trim the returned items array to at most N (1-500). Applied in-memory after the upstream fetch — does NOT request fewer items from the source API. Omit to return the full response.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "description": "Skip the first N items before applying `limit`. Applied in-memory. Useful for inspecting later items in a large response when combined with `limit`.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "fields": {
+            "description": "Optional whitelist of fields to keep per item (supports nested paths like 'image.url'). Default: all fields. Cuts response size on sparse queries — e.g. fields:['title','image.url'] keeps only those two leaf keys per record.",
+            "maxItems": 40,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get Connection Data",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_credential_list",
+      "description": "List all stored credentials (sanitised — secrets omitted). The `auth_type` parameter is a CLIENT-SIDE filter — the server returns the same set regardless of `auth_type`. Calling repeatedly with different `auth_type` values returns identical underlying data; a single call returns everything. Use apimapper_credential_get for one credential's full metadata.\n\nExample:\n  apimapper_credential_list({})  // returns all credentials\n  apimapper_credential_list({ auth_type: 'oauth2_code' })  // local filter only",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "auth_type": {
+            "default": "all",
+            "description": "Filter by auth_type (server wire-format field). Applied CLIENT-SIDE after the server returns all credentials — calling with different values does NOT change what the server returns.",
+            "type": "string",
+            "enum": [
+              "api_key",
+              "bearer",
+              "basic_auth",
+              "oauth2_code",
+              "oauth2_cc",
+              "all"
+            ]
+          },
+          "include_meta": {
+            "default": false,
+            "description": "Include the Rich-Card `_meta` payload (a base64 block appended to the table text) in the response. Default false (lean output; no MCP host this ships to renders it). Set to true to opt in; the human-readable table text is unaffected either way.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Credentials",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_oauth_authorize_begin",
+      "description": "Initiate the OAuth2 authorization-code flow for a credential. Returns the upstream authorize URL the user must visit in a browser to grant consent, plus the `redirect_uri` this site receives the callback on. After consent: call apimapper_credential_get to verify the credential was populated. If `credential_id` is omitted, supply `provider` to scope the lookup — when exactly one OAuth credential matches it is used automatically; when several match the user is asked to pick. For a CUSTOM provider not in the catalog, pass `oauth_config` (authorization_url / token_url / scopes / use_pkce) together with `client_id` / `client_secret` and an optional `credential_name` — no pre-existing credential is needed. IMPORTANT: add the returned `redirect_uri` to the provider's allowed redirect URIs BEFORE opening `authorize_url`, or consent will fail.\n\nExample:\n  apimapper_oauth_authorize_begin({ credential_id: 'cred_google_drive' })\n  apimapper_oauth_authorize_begin({ provider: 'google' })  // resolves by provider\n  apimapper_oauth_authorize_begin({ oauth_config: { authorization_url: 'https://x/authorize', token_url: 'https://x/token' }, client_id: 'cid', client_secret: 'sec', credential_name: 'My App' })",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "description": "Credential ID (must be type oauth2_code). Use apimapper_credential_list. Omit to resolve by `provider` instead.",
+            "type": "string"
+          },
+          "provider": {
+            "description": "OAuth provider slug to resolve the credential when `credential_id` is omitted (e.g., \"google\", \"meta\"). Match is case-insensitive against the credential's oauth_provider / provider field.",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "Override scopes (e.g., [\"https://www.googleapis.com/auth/spreadsheets.readonly\"])",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "oauth_config": {
+            "description": "Custom-provider OAuth config (omit for catalog providers / existing credentials). Pass with client_id / client_secret to start consent for a self-described provider.",
+            "type": "object",
+            "properties": {
+              "authorization_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "token_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "use_pkce": {
+                "type": "boolean"
+              },
+              "extra_auth_params": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "authorization_url",
+              "token_url"
+            ]
+          },
+          "client_id": {
+            "description": "OAuth client_id for a custom `oauth_config` flow.",
+            "type": "string"
+          },
+          "client_secret": {
+            "description": "OAuth client_secret for a custom `oauth_config` flow (encrypted server-side; never echoed back).",
+            "type": "string"
+          },
+          "credential_name": {
+            "description": "Display name for the credential created after consent (custom `oauth_config` flow).",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Begin OAuth Authorization",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_library_list",
+      "description": "List connection templates shipping with API Mapper. The catalog is small (~30-50 templates) — a SINGLE CALL without filters returns the full set in one round-trip. Do NOT iterate per category and do NOT probe with short search strings; call apimapper_library_categories first if you need an overview of available slugs, then filter the table you already have client-side.\n\nServer-side filters (sent as query params, server returns pre-filtered):\n  - category: narrow by category slug (e.g. 'media', 'productivity')\n  - search:   substring match on template name/description\n\nClient-side filters (applied AFTER fetch in this MCP process):\n  - provider:  narrow by upstream provider (e.g. 'google', 'meta')\n  - activated: narrow to currently-activated or not-activated\n\nImplication: When combined with `limit`, the total reflects the post-server filter — if you set limit:50 + provider:meta and the server returns 50 mixed-provider items, you may see <50 after the client filter. Re-call with a higher limit or omit the client-side filter to see the full server-side result.\n\nExamples:\n  apimapper_library_list({})  // returns the whole catalog\n  apimapper_library_list({ category: 'media' })  // narrow to one category (server-side)\n  apimapper_library_list({ provider: 'google', limit: 200 })  // raise limit because provider filter is client-side",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "description": "Filter by category slug. Use apimapper_library_categories to discover slugs — do NOT loop over every category, the result of an unfiltered list({}) already covers them all.",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Filter by provider (e.g., \"google\", \"meta\")",
+            "type": "string"
+          },
+          "activated": {
+            "default": "any",
+            "description": "Filter by activation status",
+            "type": "string",
+            "enum": [
+              "any",
+              "yes",
+              "no"
+            ]
+          },
+          "search": {
+            "description": "Free-text search. Must be 3+ characters — single-char probes are blocked because the catalog is too small to need typeahead.",
+            "type": "string",
+            "minLength": 3
+          },
+          "page": {
+            "default": 1,
+            "description": "Pagination page (1-based). Capped at 2 — the catalog rarely fills more than one page at the default limit, iterating further yields empty results.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 2
+          },
+          "limit": {
+            "default": 100,
+            "description": "Max items per page (1-500). The default of 100 already exceeds the full catalog — increase only if you have a specific reason.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "include_meta": {
+            "default": false,
+            "description": "Include the Rich-Card `_meta` payload (a base64 block appended to the table text) in the response. Default false (lean output; no MCP host this ships to renders it). Set to true to opt in; the human-readable table text is unaffected either way.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Library Connections",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_library_featured",
+      "description": "List the curated, featured connection templates — the MANDATORY first call before building any new API integration. Use this to discover whether a ready-made template (with OAuth wizard, auto-header detection, and a curated YOOtheme schema) already exists for the API you need. Keywords: featured, recommended, starter, popular templates, pre-built, catalog landing. When NOT to use: to search the WHOLE catalog by name use apimapper_library_list; to read one template's full contract use apimapper_library_connection_detail; only fall back to apimapper_connection_create when no template matches.\n\nExample:\n  apimapper_library_featured({})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 12,
+            "description": "Max items (1-100)",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "include_meta": {
+            "default": false,
+            "description": "Include the Rich-Card `_meta` payload (a base64 block appended to the table text) in the response. Default false (lean output; no MCP host this ships to renders it). Set to true to opt in; the human-readable table text is unaffected either way.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Featured Library Connections",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_library_activate",
+      "description": "Activate a library template — creates a new connection. \n\n**FOR AUTH-PROTECTED TEMPLATES (most APIs incl. Google Sheets, Notion, Airtable, Pexels, OpenWeatherMap, Calendly, GitHub):** you MUST link a credential. The tool auto-links when exactly ONE matching credential exists for the template's provider; otherwise it fails with `credential_required` or `credential_ambiguous`. Pre-flight: call `apimapper_credential_list({})` and confirm a credential exists for the provider — if not, create one via `apimapper_oauth_authorize_begin` (OAuth) or `apimapper_advanced({tool:'apimapper_credential_create',arguments:{…}})` (api_key/bearer). \n\nREST contract: `extra_fields` (template placeholder values) + optional `library_connection` (template metadata override) + optional `credential_id`.\n\n⚠️ Template fields passed at the TOP LEVEL of the call are silently ignored (the schema strips unknown keys) — they MUST be nested under `extra_fields` (F186).\n\n**REQUIRED extra_fields per template (the install 422s with `incomplete_setup` if any are missing — pass them up front):**\n  - google-sheets: `spreadsheet_id` (bare ID or Drive/Sheets URL) AND `range` (A1 notation, e.g. 'A1:Z1000'; tab-qualified 'Sheet-Tab!A:Z' or open-ended 'A:Z' forms are valid; the tab name is OPTIONAL).\n  - google-docs: `document_id`.\n  - airtable: `base_id` AND `table_name`.\n  - strapi: `site_url` AND `content_type`.\n  (Call apimapper_library_connection_detail({ id }) to read the exact required/optional extra_fields + examples for ANY template.)\n\nExamples:\n  apimapper_library_activate({ id: 'pexels', credential_id: 'cred_pexels', extra_fields: { api_key: '…' } })\n  apimapper_library_activate({ id: 'google-sheets', extra_fields: { spreadsheet_id: '1AbC…', range: 'A1:Z1000' } })  // auto-links the unique Google OAuth credential",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Library item ID. Use apimapper_library_list to find."
+          },
+          "credential_id": {
+            "description": "Credential ID. REQUIRED for auth-protected templates unless exactly one matching credential exists (then auto-linked). Use apimapper_credential_list({}) to find one, or apimapper_oauth_authorize_begin({provider}) to create one.",
+            "type": "string"
+          },
+          "extra_fields": {
+            "description": "Template placeholder values. REST key: extra_fields. Each library template declares its own required/optional keys — read them via apimapper_library_connection_detail({ id }). Common required sets:\n  • google-sheets: { spreadsheet_id, range }. spreadsheet_id may be the bare ID or a full Drive/Sheets URL (https://docs.google.com/spreadsheets/d/<ID>/edit) — a pasted URL is auto-extracted to the bare ID (A5). `range` is A1 notation, e.g. \"A1:Z1000\"; a tab-qualified \"Sheet-Tab!A:Z\" or open-ended \"A:Z\" form is also valid and the tab name is OPTIONAL.\n  • airtable: { base_id, table_name }.  • strapi: { site_url, content_type }.  • google-docs: { document_id }.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "library_connection": {
+            "description": "Optional template metadata override (rename connection, override base_url, etc.). REST key: library_connection.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "force_new": {
+            "description": "Force creation of a NEW connection even if a matching one exists (default: false → the backend reuses a healthy connection for the same resource). Set true when wiring a second/different resource on the same credential. REST key: force_new.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Activate Library Connection",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_yootheme_binding_for_flow",
+      "description": "Bridge tool: given a published flow id, return the EXACT YOOtheme GraphQL source names (singular + List) and the schema fields available for binding. Replaces a 3-call chain (flow_get → parse schema JSON → yt-builder sources_list grep) with one deterministic call.\n\nUse after `apimapper_flow_full_recompile_publish` to discover what to bind. In yt-builder-mcp, bind directly with yootheme_builder_element_bind_source({ template_id, element_path, source_name, field_mappings }) (a first-class tool in tools/list since F116; on pre-F116 server builds it is reachable via yootheme_builder_advanced({ tool: \"yootheme_builder_element_bind_source\", arguments: {…} })).\n\nThe `source_name_list` is the canonical Multi-Items target (grid/list/slider containers). The `source_name_single` is the FLAT top-level Single field — bind it to a standalone leaf (headline / hero / one stat) with a FLAT field name. The `source_name_singular` is the wrapper object; its dotted singular.<field> nested path is metadata-less and renders blank, so prefer `source_name_single` for single bindings.\n\nF158 CAVEAT: `example_field_mappings` are HEURISTIC prop keys (title/content/meta/image/link) computed WITHOUT knowing the target element's real prop set — a grid_item, headline or list_item each expose DIFFERENT props. Call yt-builder `yootheme_builder_element_type_get_schema` for the target element FIRST and bind only props that element actually renders; an unknown prop key binds to nothing (silent blank, no error).\n\nExample:\n  apimapper_yootheme_binding_for_flow({ flow_id: 'flow_VYvfwySM34fypAbDoc7rx' })",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "flow_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Flow ID (e.g., \"flow_VYvfwySM34fypAbDoc7rx\"). Use apimapper_flow_list to find."
+          }
+        },
+        "required": [
+          "flow_id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get YOOtheme Binding for Flow",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_flow_setup_with_sources",
+      "description": "Compose a complete flow from connections AND/OR CMS-native local sources in one call. Sequence: (1) build graph via buildFlowGraph() — pure function, deterministic layout. (2) POST /flows (creates row). (3) POST /flows/{id}/compile (publishes to YOOtheme). Returns flow_id + per-step status. On partial failure, returns cleanup hint. Each source is EITHER an API connection (`connection`) OR a local source (`local_source: { content_type, limit?, filters? }`) — never both. Local content_type must be fully-qualified (e.g. 'wordpress/post', 'joomla/article'); a bare 'post' is rejected at save time.\n\nConnection-source example:\n  apimapper_flow_setup_with_sources({ name: 'Pexels + IG Gallery', sources: [{ connection: 'con_pexels' }, { connection: 'con_instagram' }], merge: { strategy: 'concat' }, output: { type: 'yootheme', name: 'Gallery' } })\n\nLocal-source example:\n  apimapper_flow_setup_with_sources({ name: 'Latest Posts', sources: [{ local_source: { content_type: 'wordpress/post', limit: 12 } }], output: { type: 'yootheme', name: 'Posts' } })\n\nFilter example (one-shot — no raw graph editing needed):\n  apimapper_flow_setup_with_sources({ name: 'Warm EU Cities', sources: [{ connection: 'con_weather' }], filter: { field: 'temp', operator: 'gt', value: 10 }, output: { type: 'yootheme', name: 'Warm' } })\n\nFilter operators: equals, not_equals, contains, starts_with, ends_with, gt, gte, lt, lte, exists, not_exists, empty, not_empty, in, not_in. Use the named operators (gt/lt), NOT symbols (>/<). Numeric operators auto-coerce formatted strings ('$1,250,000'). The filter runs AFTER merge and BEFORE transform.\n\nMulti-stage reshape? Pass `transform` as an ARRAY of stages — each stage gets its own depth budget.\n\nMulti-transform example (JMESPath depth cap → split into chained transforms):\n  apimapper_flow_setup_with_sources({ name: 'Opening Hours', sources: [{ connection: 'con_hours' }], transform: [{ expression: '[1:]' }, { expression: '[*].{day: [0], hours: [1]}' }], output: { type: 'yootheme', name: 'Hours' } })\nPass `transform` as an ARRAY to chain N transform nodes (t1 → t2 → …). The pipe between chained nodes resets the JMESPath depth counter, so a reshape that overflows the depth cap (10) in one expression succeeds when split across two. A single `{ expression }` object still works for the one-transform case.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Flow name (appears in YOOtheme dropdown)"
+          },
+          "description": {
+            "description": "Optional description",
+            "type": "string"
+          },
+          "sources": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "connection": {
+                  "description": "Connection ID (API source). Use apimapper_connection_list to find.",
+                  "type": "string"
+                },
+                "local_source": {
+                  "description": "Local-source descriptor (CMS-native source). Mutually exclusive with `connection`.",
+                  "type": "object",
+                  "properties": {
+                    "content_type": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Fully-qualified content type, e.g. \"wordpress/post\", \"wordpress/page\", \"joomla/article\". The bare \"post\" is rejected at save time — always qualify with the platform prefix."
+                    },
+                    "limit": {
+                      "description": "Max items (clamped to tier max server-side)",
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "filters": {
+                      "description": "Server-side filters (e.g. {\"category\":\"news\"})",
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "content_type"
+                  ]
+                },
+                "endpoint": {
+                  "description": "Endpoint id (e.g., \"Scheduled Events\")",
+                  "type": "string"
+                },
+                "template_fields": {
+                  "description": "Template field values (e.g., {\"user_uri\":\"...\",\"spreadsheet_id\":\"...\"})",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "items_path": {
+                  "description": "Override items_path",
+                  "type": "string"
+                },
+                "label": {
+                  "description": "Display label for the source node",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "1..N sources — each a connection source OR a local_source (CMS-native)"
+          },
+          "merge": {
+            "description": "Merge config — required if sources.length >= 2",
+            "type": "object",
+            "properties": {
+              "strategy": {
+                "type": "string",
+                "enum": [
+                  "join",
+                  "concat",
+                  "append"
+                ],
+                "description": "Merge strategy (\"append\" alias for \"concat\")"
+              },
+              "joinKey": {
+                "description": "Left-side join key field (required for strategy=join). This is the field PRESENT IN BOTH sources' rows on which they join. DISCOVER it first: call apimapper_connection_data on EACH source and find a field whose values overlap and are the SAME type/format on both sides (a string \"P-100\" never equals a number 42). If the keys differ in shape, add a Transform before the merge to make them comparable (e.g. date-primitive transforms for a weekday name ↔ ISO date). See apimapper_get_skill({ topic: 'merge-two-sources-on-key' }) → 'Discovering the join key'.",
+                "type": "string"
+              },
+              "joinKeyRight": {
+                "description": "Right-side join key field (defaults to joinKey). Set this when the two sources name the same value differently (e.g. left 'property_id' vs right 'propertyId'). Sample both with apimapper_connection_data to confirm the values actually match.",
+                "type": "string"
+              },
+              "joinType": {
+                "default": "left",
+                "description": "Join type (left/right/inner/outer)",
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right",
+                  "inner",
+                  "outer"
+                ]
+              }
+            },
+            "required": [
+              "strategy"
+            ]
+          },
+          "filter": {
+            "description": "Optional Filter node (F54). Inline `{field, operator, value}` or `{conditions:[...], logic}`. Runs after merge, before transform. Unknown operators are rejected hard.",
+            "type": "object",
+            "properties": {
+              "field": {
+                "description": "Inline single-condition field (shorthand)",
+                "type": "string",
+                "minLength": 1
+              },
+              "operator": {
+                "description": "Inline single-condition operator (shorthand)",
+                "type": "string",
+                "enum": [
+                  "equals",
+                  "not_equals",
+                  "contains",
+                  "starts_with",
+                  "ends_with",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte",
+                  "exists",
+                  "not_exists",
+                  "empty",
+                  "not_empty",
+                  "in",
+                  "not_in"
+                ]
+              },
+              "value": {
+                "description": "Inline single-condition value (shorthand)",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": [
+                        "string",
+                        "number"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "conditions": {
+                "description": "Explicit condition list (for 2+ conditions)",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Field to filter on (e.g., \"price\", \"media_type\", \"user.role\")"
+                    },
+                    "operator": {
+                      "type": "string",
+                      "enum": [
+                        "equals",
+                        "not_equals",
+                        "contains",
+                        "starts_with",
+                        "ends_with",
+                        "gt",
+                        "gte",
+                        "lt",
+                        "lte",
+                        "exists",
+                        "not_exists",
+                        "empty",
+                        "not_empty",
+                        "in",
+                        "not_in"
+                      ],
+                      "description": "Comparison operator. Numeric: gt/gte/lt/lte. Text: equals/not_equals/contains/starts_with/ends_with. Set: in/not_in. Presence: exists/not_exists/empty/not_empty. Symbolic operators (\">\", \"<\") are NOT accepted — use \"gt\"/\"lt\"."
+                    },
+                    "value": {
+                      "description": "Value to compare against. Omit for value-less operators (exists/not_exists/empty/not_empty; for empty/not_empty, 0 and '0' are NOT empty). Numeric operators auto-coerce formatted strings like \"$1,250,000\".",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "string",
+                              "number"
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "operator"
+                  ]
+                }
+              },
+              "logic": {
+                "description": "Combinator across conditions; defaults to \"and\"",
+                "type": "string",
+                "enum": [
+                  "and",
+                  "or"
+                ]
+              }
+            }
+          },
+          "transform": {
+            "description": "Optional Transform node(s). Multi-stage reshape? Pass `transform` as an ARRAY of stages — each stage gets its own depth budget. A single `{ expression }` covers the one-reshape case; an ARRAY CHAINs multiple transforms (t1 → t2 → …). Chaining is the remedy for the JMESPath depth cap (10): split one over-nested expression into two shallow ones — the pipe between chained nodes resets the depth counter. See apimapper_get_skill({ topic: 'jmespath-cookbook' }) → 'Two-Transform split'.",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "expression": {
+                    "default": "[*]",
+                    "description": "JMESPath expression (e.g., \"[*]\" or \"[*].{title:name,id:id}\")",
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "expression": {
+                      "default": "[*]",
+                      "description": "JMESPath expression (e.g., \"[*]\" or \"[*].{title:name,id:id}\")",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "output": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "default": "yootheme",
+                "description": "Output type",
+                "type": "string",
+                "enum": [
+                  "yootheme",
+                  "shortcode"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Source name shown in YOOtheme dropdown"
+              },
+              "slug": {
+                "description": "Source slug (auto-generated if omitted)",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "description": "Output node config"
+          },
+          "summary": {
+            "description": "Optional one-line summary of this flow for the change history (e.g., \"Set up a merged Pexels + Instagram gallery\").",
+            "type": "string",
+            "maxLength": 280
+          },
+          "compile": {
+            "default": true,
+            "description": "Compile after save (= publish to YOOtheme)",
+            "type": "boolean"
+          },
+          "autofix": {
+            "default": true,
+            "description": "Defaults to true. When compile:true, auto-repair empty-output-schema compile errors by calling detect-schema then retrying compile so the new source compiles and appears. Pass false to opt out (verbatim old behaviour — no detect-schema retry). Mirrors `flow_full_recompile_publish` autofix.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "sources",
+          "output"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Setup Flow with Sources",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_flow_full_recompile_publish",
+      "description": "Compile a flow + invalidate admin cache + flush the YOOtheme schema cache in one call. Use after upstream API changes to ensure the flow + schema are fresh. Each step's success is surfaced separately, and a cache-clear failure does NOT silently downgrade compile success. autofix defaults to true: it auto-repairs common compile errors (empty output schema → re-detect; then retry compile) AND flushes the YOOtheme schema cache so the source becomes visible in the YOOtheme builder — no second MCP package needed. Pass autofix:false to opt out (compile + admin-cache only, no detect-schema retry, no YT flush — the verbatim v2.0.7 behaviour).\n\nExample:\n  apimapper_flow_full_recompile_publish({ id: 'flow_Z2fLg70M84' })",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Flow ID. Use apimapper_flow_list to find. (Canonical key; `flow_id` is accepted as a legacy alias.)",
+            "type": "string"
+          },
+          "flow_id": {
+            "description": "Deprecated alias for `id` — accepted for back-compat with pre-W3F-5 callers.",
+            "type": "string"
+          },
+          "autofix": {
+            "default": true,
+            "description": "When true (default): on empty-schema compile error, call detect-schema and retry compile. On compile success, also flush the YOOtheme schema cache so the source surfaces in the YOOtheme builder. Pass false to opt out — compile + admin-cache only, no detect-schema retry, no YT flush (the verbatim v2.0.7 behaviour).",
+            "type": "boolean"
+          },
+          "summary": {
+            "description": "Optional one-line summary of this publish for the change history (e.g., \"Republished after refreshing the upstream schema\").",
+            "type": "string",
+            "maxLength": 280
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Full Recompile & Publish Flow",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_get_skill",
+      "description": "Returns a condensed CORE for a bundled API Mapper skill doc (the recipe + key patterns, ~2 KB). Pass `full: true` for the long form (prose, every example, pitfalls). Topics: getting-started, oauth, yootheme, joomla, troubleshooting, render, jmespath-pitfalls, jmespath-cookbook, merge-two-sources-on-key, conditional-style-multi-items, library-template-discovery, yootheme-source-to-builder-handoff, dynamize-existing-layout. Sibling to skill://apimapper/<topic> resources.\n\nExample:\n  apimapper_get_skill({ topic: 'getting-started' })  // core\n  apimapper_get_skill({ topic: 'merge-two-sources-on-key', full: true })  // long form",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "enum": [
+              "getting-started",
+              "oauth",
+              "yootheme",
+              "joomla",
+              "troubleshooting",
+              "render",
+              "jmespath-pitfalls",
+              "jmespath-cookbook",
+              "merge-two-sources-on-key",
+              "conditional-style-multi-items",
+              "library-template-discovery",
+              "yootheme-source-to-builder-handoff",
+              "dynamize-existing-layout"
+            ],
+            "description": "Which doc to fetch — one of: getting-started, oauth, yootheme, joomla, troubleshooting, render, jmespath-pitfalls, jmespath-cookbook, merge-two-sources-on-key, conditional-style-multi-items, library-template-discovery, yootheme-source-to-builder-handoff, dynamize-existing-layout"
+          },
+          "full": {
+            "default": false,
+            "description": "Default false → the condensed core (recipe + patterns, ~2 KB). true → the full long-form markdown (prose, every example, pitfalls).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "topic"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Get Skill Resource",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "apimapper_onboarding",
+      "description": "ONE-SHOT BRIEFING — run this FIRST when meeting a new install. Aggregates site platform, license tier, connections, flows, and a complete library brief (total_count + categories + featured + popular + free-text hint) into a single response. After this call you have full orientation; do NOT chain apimapper_library_categories or apimapper_library_list to rediscover what is already in the report. Tolerates partial failures and never throws.\n\nExample:\n  apimapper_onboarding({})",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Onboarding Walkthrough",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_diagnose",
+      "description": "Validate a token + siteUrl pair before profile creation. Runs token decode, identity probe (WordPress then Joomla fallback), iss/site-URL match (anti-phishing), capability check, scope check, and a subject-binding check (whoami) that flags a key whose record is not bound to an existing user before it hits the server's key_unbound_subject deny. Returns ready=true/false plus structured blockers[] and a recommendation.\n\nExample:\n  apimapper_diagnose({ token: 'amk_live_eyJ2IjoxLC...XYZ.abc123', siteUrl: 'https://example.com/wp' })",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "description": "API Mapper token (e.g., \"amk_live_eyJ2IjoxLC...XYZ.abc123\")"
+          },
+          "siteUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Site URL the token is meant for (e.g., \"https://example.com/wp\")"
+          }
+        },
+        "required": [
+          "token",
+          "siteUrl"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Diagnose Site",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_render",
+      "description": "USE THIS when the user asks to 'visualize', 'show as diagram', 'render', 'draw', or 'display as a table/chart/flow' — produces deterministic, pre-formatted text output (tables, flow-diagrams, charts, schema-trees, json-tree, diffs). Prefer this over manually composing ASCII art in your response: the output is drift-free and consistent across renders.\n\nRender data as a ready-to-display text visualization (tables, diagrams, trees, charts, diffs). Returns text the user can read directly in any MCP client.\n\nPrerequisite: fetch the data first with the appropriate source tool, then pass the result as 'data':\n  - type:'table' | 'chart-bar' | 'chart-line' | 'json-tree'\n      → use apimapper_connection_data / apimapper_graph_preview /\n        apimapper_flow_trace first\n  - type:'flow-diagram' → use apimapper_flow_get first; pass the flow object\n  - type:'schema-diagram' → use apimapper_schema_profile first\n  - type:'diff' → fetch both datasets, pass as { old: ..., new: ... }\n\nPure function: deterministic, no network, no side-effects. The returned text is ready to show as-is. You are also free to enrich it however your client allows — artifacts, inline images, diagram-markdown, charts — whatever renders best for the user.\n\nExample:\n  apimapper_render({ type: 'flow-diagram', data: flowObject })",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "table",
+              "chart-bar",
+              "chart-line",
+              "schema-diagram",
+              "flow-diagram",
+              "json-tree",
+              "diff"
+            ],
+            "description": "Visualization type"
+          },
+          "data": {
+            "description": "Data to render. Shape depends on type — see description. A JSON-encoded string is auto-parsed; a plain string renders as-is."
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "description": "Optional title shown above the visualization",
+                "type": "string",
+                "maxLength": 200
+              },
+              "max_rows": {
+                "description": "Cap rows/items (table, json-tree). Default 50.",
+                "default": 50,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 500
+              },
+              "columns": {
+                "description": "Field whitelist for table. Default: auto-detect.",
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "depth": {
+                "description": "Depth cap for json-tree. Default 3.",
+                "default": 3,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              },
+              "mask_secrets": {
+                "description": "Mask values for sensitive field names in diff. Default true.",
+                "default": true,
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "required": [
+          "type",
+          "data"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Render Data",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "apimapper_advanced",
+      "description": "Routes to 60 advanced API Mapper tools across 19 domains (connection, credential, flow, graph, library, license, settings, cache, local_source, schema, release, brandfetch, feedback, features, health, inspect, node_snapshot, platform, misc). ONLY for the advanced tools listed below — every tool that appears directly in tools/list is FIRST-CLASS: call it directly, never via this gateway. Call with { tool } for a target's schema + annotations, or { tool, arguments } to run it. The target tool's own confirmation guards and behavior stay in effect.\n\nAvailable advanced tools by domain:\n  connection: apimapper_connection_delete, apimapper_connection_get, apimapper_connection_health_check, apimapper_connection_pipeline_update, apimapper_connection_recover, apimapper_connection_resources, apimapper_connection_test, apimapper_connection_update\n  credential: apimapper_credential_create, apimapper_credential_delete, apimapper_credential_get, apimapper_credential_link, apimapper_credential_update\n  flow: apimapper_flow_change_merge_strategy, apimapper_flow_compile, apimapper_flow_create, apimapper_flow_delete, apimapper_flow_detect_schema, apimapper_flow_export, apimapper_flow_get, apimapper_flow_import, apimapper_flow_import_validate, apimapper_flow_list, apimapper_flow_trace, apimapper_flow_update\n  graph: apimapper_graph_preview, apimapper_graph_validate\n  library: apimapper_library_activated, apimapper_library_catalog, apimapper_library_categories, apimapper_library_connection_detail, apimapper_library_deactivate, apimapper_library_popular\n  license: apimapper_license_activate, apimapper_license_beta_channel, apimapper_license_deactivate, apimapper_license_refresh, apimapper_license_revalidate, apimapper_license_status\n  settings: apimapper_settings_get, apimapper_settings_reset_demo, apimapper_settings_update\n  cache: apimapper_cache_invalidate, apimapper_cache_stats\n  local_source: apimapper_local_source_filter_options, apimapper_local_source_query, apimapper_local_source_schema, apimapper_local_source_types\n  schema: apimapper_schema_profile\n  release: apimapper_release_download, apimapper_release_list\n  brandfetch: apimapper_brandfetch\n  feedback: apimapper_feedback_submit\n  features: apimapper_features_get\n  health: apimapper_health_warnings_dismiss, apimapper_health_warnings_list\n  inspect: apimapper_inspect_token\n  node_snapshot: apimapper_node_snapshot_list\n  platform: apimapper_platform_parity\n  misc: apimapper_jmespath_test\n\nFor topic guidance (getting-started, oauth, yootheme, joomla, troubleshooting, render, jmespath-pitfalls, jmespath-cookbook, merge-two-sources-on-key, conditional-style-multi-items, library-template-discovery, yootheme-source-to-builder-handoff, dynamize-existing-layout), call apimapper_get_skill.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "Advanced tool to route to (e.g. \"apimapper_flow_get\"). Must be one of the advanced tools listed in this gateway's description — first-class tools (apimapper_health, apimapper_flow_setup_with_sources, ...) are called DIRECTLY, not through this gateway. Omit `arguments` to discover its schema first."
+          },
+          "arguments": {
+            "description": "Arguments for the target tool. Omit for discovery mode (returns the tool's schema + annotations).",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "tool"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Advanced Tool Gateway",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_advanced_read",
+      "description": "Routes to the 34 READ-ONLY advanced API Mapper tools. ONLY for the read-only advanced tools listed below — every tool that appears directly in tools/list is FIRST-CLASS: call it directly, never via this gateway. All targets are side-effect-free (readOnly), so this gateway can be called freely for discovery and inspection without write-confirmation prompts. Call with { tool } for a target's schema + annotations, or { tool, arguments } to run it.\n\nAvailable read-only tools by domain:\n  connection: apimapper_connection_get, apimapper_connection_health_check, apimapper_connection_resources, apimapper_connection_test\n  credential: apimapper_credential_get\n  flow: apimapper_flow_export, apimapper_flow_get, apimapper_flow_import_validate, apimapper_flow_list, apimapper_flow_trace\n  graph: apimapper_graph_preview, apimapper_graph_validate\n  library: apimapper_library_activated, apimapper_library_catalog, apimapper_library_categories, apimapper_library_connection_detail, apimapper_library_popular\n  license: apimapper_license_status\n  settings: apimapper_settings_get\n  cache: apimapper_cache_stats\n  local_source: apimapper_local_source_filter_options, apimapper_local_source_query, apimapper_local_source_schema, apimapper_local_source_types\n  schema: apimapper_schema_profile\n  release: apimapper_release_download, apimapper_release_list\n  brandfetch: apimapper_brandfetch\n  features: apimapper_features_get\n  health: apimapper_health_warnings_list\n  inspect: apimapper_inspect_token\n  node_snapshot: apimapper_node_snapshot_list\n  platform: apimapper_platform_parity\n  misc: apimapper_jmespath_test\n\nFor write / mutate / create / delete tools, use the full apimapper_advanced gateway.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "Read-only advanced tool to route to (e.g. \"apimapper_flow_get\"). Must be one of the read-only advanced tools listed in this gateway's description. First-class tools (apimapper_health, ...) are called DIRECTLY; write/mutate tools use apimapper_advanced. Omit `arguments` to discover its schema first."
+          },
+          "arguments": {
+            "description": "Arguments for the target tool. Omit for discovery mode (returns the tool's schema + annotations).",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "tool"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Advanced Read-Only Tool Gateway",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "apimapper_use_profile",
+      "description": "Activate a configured site profile and probe its identity endpoint to confirm the site is reachable and the plugin signature matches. Plugin-hash drift is returned as a warning (not an error). Use `noProbe: true` to skip the network probe for offline activation.\n\nExample:\n  apimapper_use_profile({ name: 'dev-wp', noProbe: false })",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Profile name to activate (e.g., \"dev-wp\", \"client-x-prod\"). Use apimapper_list_profiles to discover."
+          },
+          "noProbe": {
+            "default": false,
+            "description": "Skip the live /identity probe. Use for offline activation when the site is unreachable.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "Switch Active Profile",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "apimapper_list_profiles",
+      "description": "List all configured site profiles (name, siteUrl, platform) with an is_active flag indicating which one is currently active. Use this to discover available profile names before calling apimapper_use_profile to switch the active profile. Read-only — does not contact any site.\n\nResponse shape:\n  { profile_count, active_profile, profiles: [{ name, siteUrl, platform, is_active, lastVerifiedAt? }] }",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "title": "List Configured Profiles",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "API Mapper MCP",
+    "version": "2.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": "## Critical rules (read first)\n\n- Most tools are reachable via the gateway: apimapper_advanced({ tool: \"<name>\", arguments: {...} }). The arg key is `arguments` (NOT `input`). Omit `arguments` to discover a tool's schema.\n- If a call returns \"Unknown tool\", it is gateway-only — wrap it as apimapper_advanced({ tool, arguments }).\n- Verify connectivity with apimapper_health({}) — it is first-class in tools/list (call it directly, NOT via the gateway). Recover auth/config errors via apimapper_diagnose; deeper guidance via apimapper_get_skill({ topic }).\n# API Mapper\n\nBridge any REST API into YOOtheme via a saved flow (Source → Filter → Transform → Output). One server, one Bearer key, 21-tool surface; 60 more behind `apimapper_advanced` (write/mutate) and `apimapper_advanced_read` (read-only); 81 total.\n\n## How to use this MCP server\n\nAPI Mapper is a three-layer gateway server. 21 tools are first-class in `tools/list`; everything else (60 more) is routed behind two gateways:\n- `apimapper_advanced({ tool, arguments })` dispatches the write/mutati\n\n## Available skill topics\n\nFor deeper guidance on specific aspects of API Mapper, call:\n  apimapper_get_skill({ topic })\n\nAvailable topics:\n- getting-started — Quickstart, common tools, common pitfalls\n- oauth — Wiring OAuth-protected sources (Google, Pexels, Instagram, Notion, ...)\n- yootheme — Publish flows as YOOtheme sources; Save-vs-Publish\n- joomla — Joomla 3-tier auth, com_ajax envelope, system plugin layout\n- troubleshooting — HTTP status triage, flow issues, credential states\n- render — Render a flow as a diagram (viz-type, flow-diagram output)\n- jmespath-pitfalls — The 9 traps + date-primitive functions (date_weekday, date_iso_to_time, date_iso_to_date, time_in_window) + depth-cap warning\n- jmespath-cookbook — Copy-paste JMESPath recipes (ternary, join, conditions, sort_by, coordinates, format_number, dates, two-transform split) + a GIBT-ES-NICHT list (arithmetic/split/regex/if-else) with workarounds; iterate via apimapper_jmespath_test\n- merge-two-sources-on-key — Joining two sources on a shared key, including date-primitive bridging for weekday-name ↔ ISO-datetime joins\n- conditional-style-multi-items — Per-row YOOtheme styles driven by a row field (text_color, panel_style)\n- library-template-discovery — Inspect a library template's contract before activating\n- yootheme-source-to-builder-handoff — Bind a published flow into a Builder element. Two shapes: field_mappings (fresh element; binding_for_flow → element_bind_source; map_item, bindingLevel) AND the theme-canonical #parent repeater form to dynamize an EXISTING designed layout (swap source.query.name to apiMapperFlow<Id>List; _condition '!'/'!!'; named-section discovery; article-context width)\n- dynamize-existing-layout — READ FIRST when the customer says \"keep the design exactly as it is\" / \"bind onto my existing section/page\": ONE call does it — template_summary (find the named section) → binding_for_flow (source name + flat fields) → yootheme_builder_page_dynamize({ template_id, section_name, list_source_name, leaf_map, page: { title, published: true } }) → visual row check. The tool copies the subtree byte-identically and swaps only leaf_map names by construction (insert nothing, rebuild nothing)\n",
+  "durationMs": 12834,
+  "stderr": "[mcp] Module loaded: apimapper-rest (18 tools)\n[apimapper-rest] MCP Server v2.2.0 running — 1/1 modules loaded\n"
+}

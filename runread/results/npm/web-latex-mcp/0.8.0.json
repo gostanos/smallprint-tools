@@ -1,0 +1,1421 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "web-latex-mcp",
+  "version": "0.8.0",
+  "integrity": {
+    "dist": "sha512-aXJmHiA0HHjUBORLJ1/KSWHaxQWlQ/ZvfxyQSOCLOh3eDqKN3WeBiztgQd5G8wXZFi84q2pQLyjlbKnAbFYKQA==",
+    "installed": "sha512-aXJmHiA0HHjUBORLJ1/KSWHaxQWlQ/ZvfxyQSOCLOh3eDqKN3WeBiztgQd5G8wXZFi84q2pQLyjlbKnAbFYKQA=="
+  },
+  "bin": "node_modules/web-latex-mcp/dist/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-10T18:26:04.832Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "list_projects",
+      "description": "List every project this server knows about — from the environment and from the workspace registry — with its local path, its mode (\"git\", a clone of a remote; \"local\", a directory edited in place) and whether it is there yet. Start here: if nothing is registered, the result says how to add one. Each project's effective rewrite-preservation mode (what edit_file does with replaced text) is reported as `rewriteMode`, with `rewriteModeSource` (\"project\" if stored for that project via set_rewrite_mode, \"default\" if nothing is stored) and `envConfigured` (whether WEB_LATEX_MCP_REWRITE_MODE set that default, as opposed to the built-in \"off\").",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "project_sync",
+      "description": "Clone the project if it is not present locally, otherwise fast-forward pull (ff-only). If the local and remote histories have diverged, reports the divergence instead of merging. If the tracked branch is gone from the remote (renamed or deleted upstream), reports \"remote-branch-missing\" rather than up-to-date.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "description": "Project id. Defaults to the configured default project.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "auto = clone if missing else ff-only pull (default).",
+            "type": "string",
+            "enum": [
+              "auto",
+              "clone",
+              "pull"
+            ]
+          },
+          "gitUrl": {
+            "description": "Register a new project at this git URL (requires project id). Stored tokenless: a password or token embedded in an https URL is removed, never stored — supply it with set_credential or `tokenEnv` instead.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "register_project",
+      "description": "Register a LaTeX project and persist it to the workspace, so it survives a restart and is available to other sessions — no need to set WEB_LATEX_MCP_PROJECTS. Two kinds: pass `gitUrl` for a git-hosted project (Overleaf, GitHub, any remote), which is cloned immediately and can be synced and pushed — the intended path for Claude Desktop, where editing env config is awkward: just paste the git URL in the chat. Or pass `path` for a directory already on this machine, compiled and edited IN PLACE — the right choice for a .tex that lives in a repo of your own, since cloning that repo to reach one file leaves two copies of the document to drift apart. Exactly one of the two. Pass `default: true` to make this the project used when a call omits `project`. Tokens are never stored; they are resolved per host at git time (see the auth docs).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project id used in tool calls and as the clone dir name (at most 64 characters). Any letters, digits, spaces and punctuation, except: / \\ : < > \" | ? *, control and bidi characters, a leading \".\" or \"-\", a leading/trailing space, a trailing \".\", Windows device names (con, nul, com1, …), \"registry.json…\" and names ending \".pdf\". Must be NFC-normalised."
+          },
+          "gitUrl": {
+            "description": "Git remote URL (Overleaf, GitHub, or any git host). Stored tokenless: a password or token embedded in an https URL (user:token@, token@) is removed, never stored — supply it with set_credential or `tokenEnv` instead; a plain login name (org@) is kept. Give this OR `path`.",
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "description": "A project that already exists on this machine, to compile and edit IN PLACE — no clone, no remote, no second copy. Give the directory, or **a file inside it** (e.g. \"~/proposals/eurohpc.md\" or \"paper/main.tex\") and the folder holding it is registered; a .tex named this way also becomes the LaTeX `rootFile`. The project is always the whole folder — every file in it is readable and editable, so point at a document in its own directory rather than one sitting loose in your home folder. Use this for a document that lives in a repo of your own, or nowhere in particular: the server reads and writes exactly these files, so what you compile is what your editor has open. Give this OR `gitUrl`. Git tools (status/diff/commit/push/sync) do not apply to a local project.",
+            "type": "string",
+            "minLength": 1
+          },
+          "rootFile": {
+            "description": "Explicit LaTeX root file (e.g. main.tex). Auto-detected when omitted.",
+            "type": "string",
+            "minLength": 1
+          },
+          "followSymlinks": {
+            "description": "Local projects only. Let reads and writes follow a symlink that leaves the directory — for the layout where a shared file is linked into the project (`refs.bib -> ~/lab/refs.bib`, `figs/ -> ~/lab/figs`). Default false, and off is the safe answer: a link is followed to wherever it points, so a `notes.tex -> ~/.ssh/id_rsa` would be readable and writable. Set it only when the links in that directory are ones YOU put there — if it is a git working tree, a co-author can commit a symlink (git stores one as mode 120000) and a later pull brings it in. Paths the server picks up on its own (a compile log, a synctex record) are refused either way.",
+            "type": "boolean"
+          },
+          "branch": {
+            "description": "Branch to clone/track. Defaults to the remote.",
+            "type": "string",
+            "minLength": 1
+          },
+          "username": {
+            "description": "HTTPS username override (otherwise a per-host default is used).",
+            "type": "string",
+            "minLength": 1
+          },
+          "tokenEnv": {
+            "description": "Name of the env var holding this project’s token (overrides host defaults).",
+            "type": "string",
+            "minLength": 1
+          },
+          "clone": {
+            "description": "Clone the project right away if it is not present locally (default true).",
+            "type": "boolean"
+          },
+          "default": {
+            "description": "Make this the project used when a call omits `project`: takes effect now and is persisted for later sessions. Only one project is the default; setting it here replaces the previous one. WEB_LATEX_MCP_DEFAULT_PROJECT, when set, always wins.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "name": "set_credential",
+      "description": "Store a git token in your OS credential helper (macOS Keychain / Windows Credential Manager / libsecret), so the server can authenticate without the token ever being written to its config or the project registry. Ideal for Claude Desktop: paste your Overleaf token here instead of editing the JSON config. Give a `host` (e.g. git.overleaf.com) or a `project` id to derive it from. Requires `confirm: true`. Reports whether a credential helper actually kept it (some Linux setups have none configured — set the token via an env var there).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The token / password to store (e.g. your Overleaf Git authentication token, created at https://www.overleaf.com/user/settings)."
+          },
+          "project": {
+            "description": "Derive the host (and default username) from this registered project’s git URL.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host to store the credential for, e.g. git.overleaf.com. Alternative to `project`.",
+            "type": "string",
+            "minLength": 1
+          },
+          "username": {
+            "description": "HTTPS username. Defaults to the host convention (e.g. `git` for Overleaf).",
+            "type": "string",
+            "minLength": 1
+          },
+          "confirm": {
+            "description": "Must be true — storing a secret in your OS keychain is an explicit action.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      }
+    },
+    {
+      "name": "credential_portal",
+      "description": "Open a small loopback web page where the user types a git token, so the secret is entered on their machine and stored in the OS keychain **without ever passing through the chat** (useful when the transcript is cloud-synced). Returns a 127.0.0.1 URL (and auto-opens the browser). The token is POSTed straight to this local server and never returned to Claude. Give a `host` (e.g. git.overleaf.com) or a `project`. After the user submits, **call this tool again** with the same host/project to read the result: it reports `stored`, `not-persisted` (no credential helper kept it), or `awaiting-entry` if they haven’t yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "description": "Derive the host (and default username) from this registered project’s git URL.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host to store the credential for, e.g. git.overleaf.com. Alternative to `project`.",
+            "type": "string",
+            "minLength": 1
+          },
+          "username": {
+            "description": "HTTPS username. Defaults to the host convention (e.g. `git` for Overleaf).",
+            "type": "string",
+            "minLength": 1
+          },
+          "open": {
+            "description": "Also open the portal in the OS browser (default true).",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_files",
+      "description": "List files in a project, optionally filtered to .tex / .bib / prose documents / assets. Works on a local project as well as a clone. Bounded: the listing is cut to a character budget charged across both channels, keeping tex > bib > doc > other > asset in that order — so a figures tree with thousands of entries never starves the .tex sources. Whatever is cut is counted (totalFiles, omittedBySize, omittedByType) and named in `note`, never dropped silently; narrow with subdir or filter to get it back.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "filter": {
+            "description": "tex -> .tex, bib -> .bib, docs -> prose documents (.md/.markdown/.txt/.rst/.org), assets -> images/pdf, all (default). This narrows the WALK, so it is the way to get entries back that the payload budget omitted.",
+            "type": "string",
+            "enum": [
+              "tex",
+              "bib",
+              "docs",
+              "assets",
+              "all"
+            ]
+          },
+          "subdir": {
+            "description": "Restrict listing to a subdirectory of the project. Narrows the walk itself, so — like filter — it brings back entries the payload budget omitted.",
+            "type": "string"
+          },
+          "maxResults": {
+            "description": "Return at most this many entries. Only ever NARROWS: the character budget below is fixed and cannot be raised, so omitting this asks for as many as fit.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
+    {
+      "name": "search_files",
+      "description": "Search the CONTENT of a project’s files — the recursive grep the server could not do. Returns {path, line, text} per matching line, optionally with context lines. The pattern is literal text by default (set regex: true for a regular expression); filter/subdir narrow the file set exactly as list_files does. Use it before any cross-file edit: which files cite a retired \\label, where a metric name still appears, which literals never went through the macro. `excludeComments: true` skips hits inside LaTeX `%` comments, and `commentMatches` reports how many there were either way — so a rename can leave a commented-out provenance block untouched. Read-only: it writes nothing, records no read baseline (so it never arms the out-of-band-edit guard, and a later write_file is not refused because of it), and takes NO project lock, so it never waits on a peer session and creates no session state. No git remote needed — works on a local project. Bounded on every axis: some regex shapes are refused outright, long lines are searched only up to a cap, the search runs under a time budget (a regex search runs on a worker thread that is stopped at the deadline, so no pattern can stall the server), and the payload is cut to a character budget — whatever is cut is counted and named in `note`, never dropped silently.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What to look for. LITERAL TEXT by default — `\\Cref{tab:sota}` finds exactly that, backslashes and braces included. Set regex: true to have it read as a JavaScript regular expression instead."
+          },
+          "regex": {
+            "description": "Read `pattern` as a JavaScript regular expression. Default false. Some shapes are REFUSED with an explanation rather than run — a group repeated without bound (`(a+)+`); a group that can match in more than one way repeated by a count (`(fig|tab){2}`, `(?:a|aa){0,40}`); repeats and alternations that can match what follows them, and so trade input, multiplying past a fixed cost (`.*a.*b`, `a+a+b`, `.*a{999}b` — one such `.*` alone is fine, as in `.*a{0,2}b`); or pieces that can match nothing piled after such repeats (`x{0,75}x*a*b*c*d*\\}`), or runs that all end at one place and hand on to the same costly piece (`x{0,30}x*a+a{11}b`) — because a regex match cannot be interrupted once started, and those take seconds to forever on one long line, which would use up the search's time budget. Anchor each repeat to something it cannot match itself (`[^}]*\\}` rather than `.*\\}`), and drop a leading or trailing `.*`: a match anywhere in the line counts, so it does not change which lines match — except with excludeComments, where a leading `.*` starts every hit at the beginning of the line, so dropping it is what lets a hit inside a `%` comment be seen as commented.",
+            "type": "boolean"
+          },
+          "caseInsensitive": {
+            "description": "Match without regard to case. Default false.",
+            "type": "boolean"
+          },
+          "filter": {
+            "description": "Which files to search, exactly as list_files defines it: tex -> .tex, bib -> .bib, docs -> prose documents (.md/.markdown/.txt/.rst/.org), assets -> images/pdf, all (default). Assets are never searched whichever filter is set — they are reported in \"skipped\" instead, so \"not searched\" never reads as \"no match\".",
+            "type": "string",
+            "enum": [
+              "tex",
+              "bib",
+              "docs",
+              "assets",
+              "all"
+            ]
+          },
+          "subdir": {
+            "description": "Restrict the search to a subdirectory of the project.",
+            "type": "string"
+          },
+          "contextLines": {
+            "description": "Lines of context on each side of a hit (0-5, default 0), so a match can be judged without a follow-up read_file. For a whole passage, use read_file with startLine/endLine.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "excludeComments": {
+            "description": "Skip matches that begin inside a LaTeX `%` comment (in .tex/.sty/.cls/.bbl/.ltx/.latex only — `%` is not a comment elsewhere). Default false. A `%` preceded by an odd number of backslashes is a literal percent (`50\\%`) and starts no comment; a match that starts in live text and runs past a `%` is live. The count of comment-only hits is reported as `commentMatches` either way, so one call answers \"how many of these are live?\" — the reason to reach for this is a manuscript that keeps its history in commented-out blocks, where a rename must not touch them.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "read_file",
+      "description": "Read a text file from the project (optionally a line range). Pass `ref` to read a committed version at any git ref (e.g. the remote side of a conflict) instead of the working tree. Binary/large files are not returned inline — their path is reported instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path relative to the project root."
+          },
+          "startLine": {
+            "description": "1-based first line (inclusive).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "endLine": {
+            "description": "1-based last line (inclusive).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "ref": {
+            "description": "Read a committed version instead of the working tree, at this git ref — the remote default branch (e.g. \"origin/master\" or \"origin/main\"), a commit sha, or \"HEAD~1\". Use it to see the remote/other side of a conflict. Line range still applies; out-of-band-edit tracking does not (a ref read never updates baselines).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Create a new file or fully overwrite an existing one. Prefer edit_file for surgical changes to existing files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path relative to the project root."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full file content to write."
+          },
+          "createDirs": {
+            "description": "Create missing parent directories (default false).",
+            "type": "boolean"
+          },
+          "overrideExternalChanges": {
+            "description": "Overwrite even if the file changed on disk since it was last read through this server (e.g. edited directly by the user). Prefer re-reading first; only set this to deliberately discard those on-disk changes.",
+            "type": "boolean"
+          },
+          "confirmBibEdit": {
+            "description": "Required to write a .bib file directly. Add references via add_citation instead; only set this after the user approves a manual bibliography change.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "add_asset",
+      "description": "Copy a binary figure (PNG, JPEG, PDF, SVG, ...) into the project, from an absolute path on this machine or from inline base64. Text/.tex files use write_file instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Destination path relative to the project root. Must be a recognized binary asset type (e.g. .png, .jpg, .pdf, .svg) — not .tex, .bib, or another text file."
+          },
+          "sourcePath": {
+            "description": "An absolute path to the file ON THE MACHINE RUNNING THIS SERVER (a leading ~ is expanded). Preferred over contentBase64 when the file is already on disk: the bytes never cross the model's context. Give exactly one of sourcePath or contentBase64.",
+            "type": "string"
+          },
+          "contentBase64": {
+            "description": "The file bytes, base64-encoded, for a client with no filesystem access. Has a smaller size cap than sourcePath — prefer sourcePath when the file is on disk. Give exactly one of sourcePath or contentBase64.",
+            "type": "string"
+          },
+          "createDirs": {
+            "description": "Create missing parent directories. Defaults to TRUE for this tool (unlike write_file's false): the destination for an asset is almost always a figures/ directory that may not exist yet, and this is a new tool with no existing callers to surprise.",
+            "type": "boolean"
+          },
+          "overrideExternalChanges": {
+            "description": "Overwrite even if the file changed on disk since it was last read through this server (e.g. edited directly by the user). Prefer re-reading first; only set this to deliberately discard those on-disk changes.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "edit_file",
+      "description": "Apply surgical edits to a file: string replacements {oldString, newString} and/or line ranges {startLine, endLine, newString}, in one array. Each oldString must match uniquely unless replaceAll is set; a line range replaces those lines whatever they say (1-based and inclusive, the numbering read_file uses), so a block only identified by where it is need not be shipped twice. Edits apply atomically — if any fails, the file is left untouched. Preferred over write_file for existing files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path relative to the project root."
+          },
+          "overrideExternalChanges": {
+            "description": "Apply even if the file changed on disk since it was last read through this server (e.g. edited directly by the user). Prefer re-reading first to see those changes.",
+            "type": "boolean"
+          },
+          "confirmBibEdit": {
+            "description": "Required to edit a .bib file directly. Add references via add_citation instead; only set this after the user approves a manual bibliography change.",
+            "type": "boolean"
+          },
+          "preserveOriginal": {
+            "description": "Force the original text to be preserved (true) or not (false) for this call, overriding the project's rewrite-preservation mode either way. Omit to use that mode. This overrides the MODE, not eligibility: on a .bib file or a file with no %-line-comment syntax, the result still reports rewriteMode: \"off\" and nothing is preserved (and the result text says so); on an eligible file a mid-line match or a replaceAll edit still reports the resolved mode with preservedEdits: 0. An edit with replaceAll set never CREATES a preservation itself (there is no single match position to comment above) — it applies unchanged regardless of this setting. Note: preserving leaves oldString in the file as a %-commented block above the replacement (every line prefixed with \"% \", so only a single line of it still occurs verbatim). A later edit_file call whose oldString still occurs in that comment will match it: if the text also still occurs live, the call is refused as non-unique (add more surrounding context); if the comment is the only match, the edit is applied to the dead comment and reports success; with replaceAll: true the comment is rewritten along with the live text. Within a single call it is stricter: a later edit in this same edits array that matches inside (or across the edge of) a block an earlier edit preserved is refused outright, since its live target was already replaced and applying it would rewrite dead commented-out text; the whole call fails and the file is left untouched.",
+            "type": "boolean"
+          },
+          "edits": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "oldString": {
+                      "type": "string",
+                      "description": "Exact text to replace (include enough context to be unique)."
+                    },
+                    "newString": {
+                      "type": "string",
+                      "description": "Replacement text."
+                    },
+                    "replaceAll": {
+                      "description": "Replace every occurrence (default false).",
+                      "type": "boolean"
+                    },
+                    "excludeComments": {
+                      "description": "Skip matches that sit in a LaTeX comment (default false, so existing callers are unaffected). A comment runs from an unescaped % to the end of that line: \\% is a literal percent and is NOT a comment, while \\\\% IS one (the \\\\ consumes both backslashes). Both a whole commented-out line and the commented tail of a live line are excluded, and a match that straddles the boundary counts as commented — it is skipped, never half-replaced. With replaceAll, only the live occurrences are rewritten; without it, uniqueness is judged over the live occurrences alone, so a string with one live and 182 commented occurrences is a unique match. Either way the result reports, per edit, how many were replaced and how many were skipped (commentMatches), and a request whose every match is commented is refused rather than silently doing nothing. Only for a file whose comment character is % (.tex/.sty/.cls/.bbl/.latex/.ltx); anywhere else the call is refused rather than pretending to filter.",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "oldString",
+                    "newString"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "startLine": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "description": "1-based first line to replace, inclusive — the numbering read_file uses."
+                    },
+                    "endLine": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "description": "1-based last line to replace, inclusive."
+                    },
+                    "newString": {
+                      "type": "string",
+                      "description": "Text those lines become. Empty deletes them outright, line terminator included, so no blank line is left behind (in edit_file only, a rewrite-preservation mode leaves them %-commented in place instead; compile's overlay never preserves). In a file mixing bare-CR and LF endings, a deletion that would leave a bare \\r right before a blank LF line turns that \\r (and any bare \\r run just before it) into \\n, so the blank line is not swallowed into one CRLF."
+                    }
+                  },
+                  "required": [
+                    "startLine",
+                    "endLine",
+                    "newString"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "description": "Edits applied in order and atomically. Each is EITHER a string replacement {oldString, newString} OR a line range {startLine, endLine, newString} — never both in one object. A line range replaces those lines whatever they say, for a change defined by where it is rather than what it says (1-based, endLine inclusive, exactly like read_file; the line terminator after endLine is not replaced, so the file's last newline survives a whole-file range — unless newString is empty, which deletes the lines together with that terminator). Line numbers always refer to the file as it was BEFORE this call — the content read_file returned — never to the state an earlier edit in this same array left behind; if two edits in one call would touch the same text (a range counts the line terminator after endLine as its own), the whole call is refused rather than applied to shifted lines. A STRING edit, unlike a range, matches the text as the earlier edits in the array left it, so it fails as not found when an earlier edit already removed what it names — including the newline before an unterminated last line, which deleting that line takes. A file that is not valid UTF-8 is refused: the edit rewrites the whole file as UTF-8."
+          }
+        },
+        "required": [
+          "path",
+          "edits"
+        ]
+      }
+    },
+    {
+      "name": "set_rewrite_mode",
+      "description": "Choose what edit_file does with the text it replaces in a .tex file. \"off\": replace outright, no trace of the original kept (the built-in default — nothing is preserved unless you turn it on). \"always\": comment the original out above the replacement, the way Overleaf users do by hand. \"prose\": do that only for what looks like a prose rewrite, so a typo fix or a changed cite key is not preserved. To get the Overleaf habit back, set this to \"prose\" (or \"always\" to preserve every eligible edit) — server-wide via WEB_LATEX_MCP_REWRITE_MODE, or per project with this tool. The choice is stored per project and outlives this session; edit_file's preserveOriginal overrides it for one call. Omit `mode` to report the current setting. When setting a mode, the result reports `previous` (the mode in effect just before the call) alongside `mode`, so a caller can say what it changed from and to.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "mode": {
+            "description": "The mode to store for this project. Omit to report the current mode without changing it.",
+            "type": "string",
+            "enum": [
+              "off",
+              "prose",
+              "always"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "delete_file",
+      "description": "Delete a file from the project working tree. Commit afterwards to persist it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path relative to the project root."
+          },
+          "overrideExternalChanges": {
+            "description": "Delete even if the file changed on disk since it was last read through this server (e.g. edited directly by the user).",
+            "type": "boolean"
+          },
+          "confirmBibEdit": {
+            "description": "Required to delete a .bib file. Only set this after the user approves it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "compile",
+      "description": "Compile the project locally (latexmk by default, or tectonic — pass `compiler` to pick one for this call, and read it back in the result to see which actually ran) and return success, the PDF path, and structured errors/warnings (each attributed to its source .tex file when known — an error also carries the 5 source lines around it, so you rarely need a read_file to interpret it) plus a de-noised log tail — only errors, warnings, and the output summary, not the font/memory dump (pass rawLog: true for the unfiltered tail). Does not touch the Overleaf remote. TikZ externalization (\\tikzexternalize) runs the engine through a system call, which only shellEscape: true allows (restrictedShellEscape does not: TeX’s allow-list holds no engine) — it lets the .tex run ARBITRARY shell commands, so only enable it for a trusted project. Shell escape is never enabled automatically: without either flag latexmk gets -no-shell-escape, so not even TeX Live’s default restricted allow-list runs (an .eps figure needing repstopdf, or makeindex via \\write18, then needs restrictedShellEscape: true), and when the log shows a command refused, or a compile fails for lack of shell escape, the result carries a hint. (A latexmkrc can still re-enable it: latexmk hands the flag to the engine through %O.) A failure caused by a package the local TeX installation does not have names it in missingPackages, so you can act on it without parsing the log. On a warning-heavy document, warningsFilter trims warnings[] AND logTail together (warningsOmitted counts the removed ones) — never errors. The result is budgeted either way (20000 characters across both channels for errors, warnings and logTail, warnings cut before errors, what went counted in errorsOmittedByCap/warningsOmittedByCap and explained in note; only rawLog: true is exempt), so a build with hundreds of box warnings comes back bounded instead of being rejected by the client and delivering nothing. Also reports whether the backend actually wrote a fresh PDF (`rebuilt` — false means a peer session already compiled this shared clone and there was nothing to do) and how long this call waited for the project lock before compiling (`lockWaitSec`, with `lockHeldBy` when contended). Pass `overlay` to compile a what-if variant instead — some files with edit_file-style edits applied in memory — and measure it (pageCount, render_pages / extract_text / pdf_geometry with the returned `variant`) without the server writing the source or the main build (any project file the build still changed is named in `hint`).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "rootFile": {
+            "description": "Root .tex file. Auto-detected when omitted.",
+            "type": "string"
+          },
+          "engine": {
+            "description": "Default pdflatex.",
+            "type": "string",
+            "enum": [
+              "pdflatex",
+              "xelatex",
+              "lualatex"
+            ]
+          },
+          "compiler": {
+            "description": "Compile backend for this one call, overriding WEB_LATEX_MCP_COMPILER — so a backend that is not installed can be switched without editing the client config and restarting. Naming one here is an assertion: it is never substituted, and a backend that is not on PATH is an error naming what is installed. Omitted, the configured backend is used, and if it is merely the default (WEB_LATEX_MCP_COMPILER names no backend) and missing, an installed one is substituted and reported in `hint`. `compiler` in the result always names what ran.",
+            "type": "string",
+            "enum": [
+              "latexmk",
+              "tectonic"
+            ]
+          },
+          "clean": {
+            "description": "Force a full rebuild.",
+            "type": "boolean"
+          },
+          "timeoutSec": {
+            "description": "Compile timeout (default 120s).",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "restrictedShellEscape": {
+            "description": "Pass -shell-restricted, allowing only TeX's allow-listed helper binaries to run (repstopdf, makeindex, extractbb, …). Default false — and false means OFF: without it or shellEscape a latexmk compile passes -no-shell-escape, overriding TeX Live’s own default (which is this restricted mode), so a document whose .eps figures are converted by repstopdf, or that runs makeindex through \\write18, needs this set (`hint` says so when the log shows a refused command). The cost: those helpers run in the project directory and can write files there (makeindex -o can overwrite a source file). Prefer this over shellEscape for those helpers. It does NOT enable TikZ externalization (\\tikzexternalize): that runs the engine itself, which the allow-list never holds — only shellEscape does. Tectonic has no restricted mode and ignores it.",
+            "type": "boolean"
+          },
+          "shellEscape": {
+            "description": "Pass -shell-escape, letting the .tex run ARBITRARY shell commands during compilation. Default false. SECURITY: only enable for a project you trust — the document comes from a shared remote others can write to. Never enabled automatically, and only when the caller explicitly wants it. The one flag that enables TikZ externalization (\\tikzexternalize), which runs the engine itself — no helper on TeX's allow-list. For a refused repstopdf or makeindex, try restrictedShellEscape first.",
+            "type": "boolean"
+          },
+          "rawLog": {
+            "description": "Return the raw, unfiltered log tail instead of the de-noised default. Default false: logTail keeps only errors, warnings, and the \"Output written on\" summary, dropping the font/memory noise. The full log is always at logPath. Raw means raw: rawLog: true is never trimmed by warningsFilter either — only the default, de-noised logTail is. `warnings[]` is still filtered (and warningsOmitted still counts it) either way.",
+            "type": "boolean"
+          },
+          "warningsFilter": {
+            "description": "Trim warnings[] to the ones you actually want, on a document whose warning-heavy log otherwise dominates the result. Applies to logTail too, in lockstep with warnings[] — an Overfull \\hbox line otherwise ships twice, once structured and once as raw text — except when rawLog: true, where logTail stays whole (see rawLog). Never filters errors, only warnings: a document that fails to compile is not made to look cleaner by a filter meant for box-warning noise. warningsOmitted reports how many warnings this removed. An EMPTY array constrains nothing rather than matching nothing — {file: []} returns every warning, not none — so a list you built programmatically and that came out empty widens the result instead of narrowing it.",
+            "type": "object",
+            "properties": {
+              "file": {
+                "description": "Keep only warnings whose file is exactly one of these — project-relative POSIX, matched EXACTLY as warnings[].file reports it (no globs, no prefixes): the way to get the spelling right is to read it off a previous compile result. A warning the log named no file for is dropped when this is set, even though it would otherwise survive — there is nothing to compare it against, and filtering to one file is not what you want mixed with warnings of unknown origin.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "rule": {
+                "description": "Keep only warnings whose rule is exactly one of these — the values warnings[].rule carries: \"Overfull \\hbox\", \"Underfull \\vbox\", \"LaTeX\", or a package/class name like \"hyperref\" — including one carrying a dot or a hyphen, e.g. \"pdftex.def\" or \"tikz-cd\". Matched exactly, never a prefix.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "excludeRule": {
+                "description": "Drop warnings whose rule is exactly one of these. A warning with no rule is never excluded by this — only rule and file ever drop a rule-less/file-less warning.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "overlay": {
+            "description": "Compile a what-if VARIANT instead of the project: these files with these edits applied in memory, everything else as it is — to measure a change (page count, where a float lands, whether a table still fits) without the server writing the source. The server leaves the source, the main build, the surfaced PDF and the viewer as they were, and records nothing as a change of this session. Like every compile, an overlay compile runs NO shell command unless shellEscape or restrictedShellEscape is set — here that is also what keeps the build from writing the source through the variant, so opting in costs more than usual (see below) — and `hint` says so when a document needed one (makeindex, repstopdf, TikZ externalization); and a latexmkrc / .latexmkrc may not be overlaid (latexmk runs it as Perl). Some routes stay open: the project's own latexmkrc still runs and can turn shell escape back on, lualatex's Lua io.open needs no shell escape, and tectonic's \\openout writes any absolute path. So the project's files — following its symbolic links, which the build can write through — are compared (size, mode, inode and times; no content read) — of a .git directory at the project root only what the next git command runs or reads its configuration from (hooks/, config, …), since the rest of .git changes on every git call — before and after the build: any that changed are named in `hint` — check them and discard what you did not mean — and a log showing shell escape enabled against the request is reported. The result carries a `variant` handle; pass it to render_pages / extract_text / pdf_geometry to inspect that build. Name each file once (all its edits in one entry); at most 20 files and 100 edits in total. A .bib may be overlaid without confirmBibEdit — the real file is never written. Line numbers in the diagnostics (and snippets) for an overlaid file refer to the variant's text, not the file on disk. shellEscape or restrictedShellEscape in an overlay compile lets the document write wherever a normal compile can — including into the source, through the variant's links to it. The 4 most recently compiled variants per project are kept; older ones are removed. Recompiling the same overlay reuses its variant (incrementally). rootFile must be relative to the project root — not absolute or drive-qualified (C:), with no \"..\" segment, and not reached through a linked directory — or the overlay compile is refused before anything is read. The variant mirrors the project and not its parent: ./ and ../ inputs resolve as in the project while they stay inside it, but a ../ input that leaves the project fails here, where a normal compile reads it.",
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Project file to edit for this build, relative to the root."
+                },
+                "edits": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "oldString": {
+                            "type": "string",
+                            "description": "Exact text to replace (include enough context to be unique)."
+                          },
+                          "newString": {
+                            "type": "string",
+                            "description": "Replacement text."
+                          },
+                          "replaceAll": {
+                            "description": "Replace every occurrence (default false).",
+                            "type": "boolean"
+                          },
+                          "excludeComments": {
+                            "description": "Skip matches that sit in a LaTeX comment (default false, so existing callers are unaffected). A comment runs from an unescaped % to the end of that line: \\% is a literal percent and is NOT a comment, while \\\\% IS one (the \\\\ consumes both backslashes). Both a whole commented-out line and the commented tail of a live line are excluded, and a match that straddles the boundary counts as commented — it is skipped, never half-replaced. With replaceAll, only the live occurrences are rewritten; without it, uniqueness is judged over the live occurrences alone, so a string with one live and 182 commented occurrences is a unique match. Either way the result reports, per edit, how many were replaced and how many were skipped (commentMatches), and a request whose every match is commented is refused rather than silently doing nothing. Only for a file whose comment character is % (.tex/.sty/.cls/.bbl/.latex/.ltx); anywhere else the call is refused rather than pretending to filter.",
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "oldString",
+                          "newString"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "startLine": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "description": "1-based first line to replace, inclusive — the numbering read_file uses."
+                          },
+                          "endLine": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "description": "1-based last line to replace, inclusive."
+                          },
+                          "newString": {
+                            "type": "string",
+                            "description": "Text those lines become. Empty deletes them outright, line terminator included, so no blank line is left behind (in edit_file only, a rewrite-preservation mode leaves them %-commented in place instead; compile's overlay never preserves). In a file mixing bare-CR and LF endings, a deletion that would leave a bare \\r right before a blank LF line turns that \\r (and any bare \\r run just before it) into \\n, so the blank line is not swallowed into one CRLF."
+                          }
+                        },
+                        "required": [
+                          "startLine",
+                          "endLine",
+                          "newString"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "description": "edit_file's edits, with edit_file's rules (string or line-range edits, excludeComments; never rewrite preservation), applied in memory to this file."
+                }
+              },
+              "required": [
+                "file",
+                "edits"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "render_pages",
+      "description": "Read-only over the last compiled PDF — it never compiles. Rasterizes the requested pages (default: every page, capped at 8 per call) to PNG so the model can see the actual layout: did a restructured column push a row onto the next page, are columns balanced, is a figure panel clipped by its own PDF box. Returns each PNG inlined as image content (unless inline: false) plus its path, width/height in pixels, the resolution rendered at, and the page box in PostScript points. Use dpi for a precise crop (e.g. 150 dpi on one clipped column) or maxEdgePx for a budget-friendly overview (default 1600px longest edge). For sub-point measurement (matching two table heights, checking rule alignment), clip a narrow band and push dpi toward its 1200 cap instead of rendering a whole page — a tight clip at high dpi resolves well under a point per pixel. Pass `labels` instead of `pages` when the question is \"which page did this float land on?\": each \\label is resolved through the build-directory .aux of the LAST COMPILE and the label -> page mapping comes back in the result (through the PDF's own /PageLabels tree when it has one, so a renumbered document resolves exactly). A label that cannot be resolved — absent from that .aux, printing on a page the PDF does not print, printing on several pages at once, defined twice, or — in a document with no /PageLabels — printing a number that is not a PDF page index or on a page whose own folio does not read that number (or that no neighbouring folio corroborates), refuses the call rather than rendering a guessed page. Writes nothing into the project — its PNGs go under the temp build dir. It does take the per-project lock, exactly as pdf_geometry and extract_text do (a peer session's compile can rewrite the build dir mid-read), so it creates <workspace>/.sessions/<project>/ if that is not already there, and it can wait on — or time out against — a peer holding that lock. Fails with a message to run compile first when nothing has been compiled yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "variant": {
+            "description": "A `variant` handle an overlay compile returned: read that what-if build (its PDF, and its .aux/.log where this tool reads them) instead of the main build — never falling back to the main build or the surfaced PDF. rootFile may be omitted (the variant's own root is used); a different one is refused. Refused too once the variant is evicted: only the 4 most recently compiled variants of a project are kept.",
+            "type": "string"
+          },
+          "rootFile": {
+            "description": "Root .tex file whose build this reads: its build-dir PDF (and, for `labels`, its .aux), in every workspace mode — pass the same rootFile you compiled with to read a non-default root. Auto-detected when omitted. Only when it is omitted and no .aux is read does a missing build PDF fall back to the surfaced <workspace>/<id>.pdf (workspace-local mode), which holds whichever root compiled last.",
+            "type": "string"
+          },
+          "pages": {
+            "description": "1-based page numbers, in the order given. Defaults to every page, capped at 8 (MAX_PAGES_PER_CALL) per call. Omit the field for every page; an empty array is rejected rather than silently rendering nothing. Cannot be combined with `labels`.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "labels": {
+            "description": "Render the page each \\label{...} landed on, instead of naming page numbers — the actual question after moving a float (\"which page did the restructured table end up on?\"), where the page number is exactly what is unknown. Resolved through the build-directory .aux of the LAST COMPILE (the same index pdf_geometry kinds: [\"floats\"] reports), so a label added since, one that moved, or one whose reference has not converged yet (LaTeX's \"Label(s) may have changed. Rerun to get cross-references right.\") resolves to a STALE page or not at all — compile first, and the result echoes every label -> page it used so you can see what was actually rendered. The .aux records each label's PRINTED page; that is turned into a PDF page index through the PDF's own /PageLabels tree when it has one, so a renumbered document (roman front matter, \\frontmatter, an appendix scheme) resolves EXACTLY. A printed page that tree prints on no page is reported as a stale .aux, and one it prints on several pages (a restarted \\pagenumbering) is refused with both candidates named rather than resolved to the first. A PDF with no /PageLabels — the usual `article` without hyperref — falls back to the printed page as the index, but only once that PDF page's own folio (the page number in its footer or running head) reads that printed page AND a neighbouring page's folio reads the adjacent number (a section number or a table cell can pass for a folio on one page; a folio continues on the next): a title page or \\setcounter{page} shifts every page without saying so, so a label whose page shows another folio, no folio, a running head that reads two ways, or a folio no neighbour corroborates, a label past the end of the PDF or defined twice, a label printing as \"iv\", and every label in a document any of whose labels print roman, is REFUSED rather than mapped onto a page that would be wrong. On either route, a page the build .log records as shipped out under a different page counter (its [n] shipout marks) is refused too, and — without /PageLabels — so is one whose counter was also shipped on another page that could print the same number (a restart). Ahead of both routes, EVERY label of a build is refused when its records (.fls or .log) name pgfpages.sty or pgfmorepages.sty — a \\pgfpagesuselayout puts every label a page late — when neither record can be read (a missing or empty file counts as unread), when the .log holds no [n] shipout mark beside a PDF with pages (the last compile stopped before its first page, so the .aux and PDF are an earlier run's, or the .log is empty), or when the PDF is not the output of the last compile — the .aux is newer than the PDF, or the engine's closing line in the .log names another page count or no output (under xelatex an error in the body leaves the earlier PDF in place): compile again, or find the page and pass `pages`. Any label that cannot be resolved refuses the whole call — no page is ever guessed, and nothing partial is rendered. Cannot be combined with `pages`; two labels on one page render it once and both are echoed. At most 16 per call.",
+            "minItems": 1,
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "dpi": {
+            "description": "Sets the resolution directly and beats maxEdgePx, bounded only by the 4000px hard cap. This is the precise path — clip one column and ask for 150 dpi.",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1200
+          },
+          "maxEdgePx": {
+            "description": "Longest edge of the *returned* image, default 1600. The budget-friendly knob and the default: enough to see whether the layout broke or the columns are balanced, without a huge image.",
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 4000
+          },
+          "clip": {
+            "description": "Crop, as fractions of the page box, origin top-left (x1 must exceed x0, y1 must exceed y0). On a poster or a wide figure the question is usually about one column, and a full page at legible dpi is a large image — clip to the part that matters instead.",
+            "type": "object",
+            "properties": {
+              "x0": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y0": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "x1": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y1": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "x0",
+              "y0",
+              "x1",
+              "y1"
+            ]
+          },
+          "inline": {
+            "description": "Return the PNGs as image content as well as paths. Default true. Set false for a client that cannot render images, or to save tokens.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "pdf_geometry",
+      "description": "Read-only over the last compiled PDF — it never compiles. Run compile first. Reports geometry in PostScript points (72pt = 1 inch), origin TOP-LEFT of the page — the same convention as render_pages' clip, so the two tools compose: render_pages to look, pdf_geometry to measure. Answers questions eyeballing a PNG cannot: does this table's text box overlap the figure frame above it, and by how many points. \"text\" reports per-line boxes (pdf.js text items merged by a shared line position and adjacency along the run, both measured in the item's own frame); the \"text\" string on each box is truncated — it is a label for the box, not the document's content, so use read_file for that. A text box runs from the baseline up by the font's declared ascent where there is a usable one and by the full em otherwise, so it never under-runs the ink above — and it excludes descenders (g, p, y) below either way. Rotated text IS accounted for — a sideways table cell, a rotated axis label and a pdflscape landscape page all get correct boxes, and a rotated line of several items is merged into one — and so is a sheared (slanted, non-orthogonal) text matrix. Vertical writing mode is handled too: a correct box per item AND its items merged into one column line; see the schema field description for all of it. \"images\" reports image and form XObject PLACEMENT RECTANGLES — what an \\includegraphics figure actually occupies — and NOTHING ELSE: general vector path geometry (\\fbox rules, TikZ strokes) is explicitly out of scope, because pdf.js only exposes those as raw path-construction operators in untransformed space, and replaying them correctly is a full graphics-state interpreter. A frame drawn purely with rules or strokes and no embedded image is not reported at all — a caller who assumes otherwise will measure a collision that is not there, or miss one that is. Anything painted inside an ANNOTATION appearance stream is not measured either, because pdf.js rebases the graphics state there on a base transform this tool does not model — those are counted per page in annotationImagesSkipped rather than going silently missing. A form whose own bounding box could not be recovered is flagged \"approximate\": true and must never be used for a collision computation, and neither must a box measured after an overflowing cm operand forced the walk to keep an older transform (\"unreliableCtm\": true). \"floats\" (opt-in, since it is document-wide rather than per-page) reports a label -> printed-page index parsed from the build-dir .aux, so it reflects the LAST COMPILE: a label added since, or one whose reference has not converged yet (LaTeX's \"may have changed, rerun\" case), is absent until the next compile. It is every \\newlabel, not only floats, so section, equation, varioref and subcaption records appear too. Requesting kinds: [\"floats\"] alone never opens the compiled PDF at all, and does not even need one to exist — a compile that wrote an .aux and then died still has a readable float index. Caps: 4 pages per call (MAX_GEOMETRY_PAGES, lower than render_pages’ cap — a page of boxes is a lot more output than one PNG), 300 text lines and 100 image rects per page, 200 floats total — each with its own *Omitted count, so a truncated result is never silent — and a 20000-character budget on the page boxes (every page guaranteed a share; cuts counted per page in textOmittedBySize / imagesOmittedBySize) and another on the floats, because every text label and \\label key is document-controlled. Writes nothing into the project or its build directory. It does take the per-project lock, exactly as render_pages does (a peer session's compile can rewrite the build dir mid-read), so it creates <workspace>/.sessions/<project>/ if that is not already there, and it can wait on — or time out against — a peer holding that lock. It never rasterizes, so it does not need the optional native canvas backend (@napi-rs/canvas) that render_pages does.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "variant": {
+            "description": "A `variant` handle an overlay compile returned: read that what-if build (its PDF, and its .aux/.log where this tool reads them) instead of the main build — never falling back to the main build or the surfaced PDF. rootFile may be omitted (the variant's own root is used); a different one is refused. Refused too once the variant is evicted: only the 4 most recently compiled variants of a project are kept.",
+            "type": "string"
+          },
+          "rootFile": {
+            "description": "Root .tex file whose build this reads: its build-dir PDF (and, for kinds: [\"floats\"], its .aux), in every workspace mode — pass the same rootFile you compiled with to read a non-default root. Auto-detected when omitted. Only when it is omitted and no .aux is read does a missing build PDF fall back to the surfaced <workspace>/<id>.pdf (workspace-local mode), which holds whichever root compiled last.",
+            "type": "string"
+          },
+          "pages": {
+            "description": "1-based page numbers, in the order given. Defaults to every page, capped at 4 (MAX_GEOMETRY_PAGES) per call — lower than render_pages' cap, because a page of text-line boxes is a lot more structured output than one PNG. Omit the field for every page (up to the cap); an empty array is rejected rather than silently reporting nothing.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "kinds": {
+            "description": "Which geometry to report. Defaults to [\"text\", \"images\"]. \"floats\" is opt-in and separate from the rest: it is document-wide (a label -> printed-page index from the .aux), not per-page, and can be long. \"images\" is image/form XObject PLACEMENT RECTANGLES ONLY — what an \\includegraphics figure occupies — NOT vector drawing geometry: a frame drawn with \\fbox rules or a TikZ stroke and no embedded image is never reported by this tool. kinds: [\"floats\"] alone never opens the compiled PDF at all (it only reads the .aux), so it works even before any PDF exists (a compile that wrote an .aux and then died).",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "images",
+                "floats"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "extract_text",
+      "description": "Read-only over the last compiled PDF — it never compiles. Returns the TYPESET text of the requested pages, line by line, which is the only way to check something that is a few pixels wide in a render: whether an \\xspace macro left a spurious space before a \\textsubscript, whether a ligature or a hyphenation broke a term, what a float's caption actually reads after macro expansion. Also the way to read a compiled page at all on a client that cannot display images. Pass `labels` instead of `pages` when the question is about a float rather than a page number — resolved exactly as render_pages resolves it, and refused rather than guessed. Complements the other two: render_pages to LOOK at a page, pdf_geometry to MEASURE it (its `text` kind returns the same merged lines with their boxes, capped much tighter because it is labelling geometry, not returning content), extract_text to READ it. What comes back is the PDF text layer, not the source: macros are expanded, hyphenation is applied, and a line break here is a typeset line, not a source line — use read_file or search_files for the source. Lines come in the order the PDF draws them and are never re-sorted. At most 4 pages per call, and ONE 20000-character budget for the whole call, charged on the text as rendered in both channels (roughly half of it is page text) — every page is guaranteed an equal share and a page that needs less passes the rest on, so ask for fewer pages to read more of each. Each page is cut from its end, and whatever a budget cut is counted in linesOmitted/charsOmitted, never dropped silently. Writes nothing into the project or its build directory, but it is NOT free of side effects: like render_pages and pdf_geometry it takes the per-project lock, because a peer session's compile can rewrite the build dir mid-read — so it creates <workspace>/.sessions/<project>/ if absent, and can wait on or time out against a peer holding that lock. It never rasterizes, so it does not need the optional native canvas backend (@napi-rs/canvas) that render_pages does. Fails with a message to run compile first when nothing has been compiled yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "variant": {
+            "description": "A `variant` handle an overlay compile returned: read that what-if build (its PDF, and its .aux/.log where this tool reads them) instead of the main build — never falling back to the main build or the surfaced PDF. rootFile may be omitted (the variant's own root is used); a different one is refused. Refused too once the variant is evicted: only the 4 most recently compiled variants of a project are kept.",
+            "type": "string"
+          },
+          "rootFile": {
+            "description": "Root .tex file whose build this reads: its build-dir PDF (and, for `labels`, its .aux), in every workspace mode — pass the same rootFile you compiled with to read a non-default root. Auto-detected when omitted. Only when it is omitted and no .aux is read does a missing build PDF fall back to the surfaced <workspace>/<id>.pdf (workspace-local mode), which holds whichever root compiled last.",
+            "type": "string"
+          },
+          "pages": {
+            "description": "1-based page numbers, in the order given. Defaults to every page, capped at 4 (MAX_TEXT_PAGES) per call — the rest come back in skippedPages. Omit the field for every page; an empty array is rejected rather than silently extracting nothing. Cannot be combined with `labels`.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "labels": {
+            "description": "Read the text of the page each \\label{...} landed on, instead of naming page numbers. Resolved exactly as render_pages resolves it — through the build-directory .aux of the LAST COMPILE, converted to a page index through the PDF's own /PageLabels tree when it has one — so a label added since the last compile, or one whose reference has not converged, resolves to a STALE page or not at all. Refused in the same cases too, including every label of a build whose records name pgfpages, cannot be read, or hold no shipout mark, or show that the PDF is not the output of the last compile (see render_pages `labels`). Any label that cannot be resolved refuses the whole call; no page is ever guessed. Cannot be combined with `pages`. At most 16 per call.",
+            "minItems": 1,
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "viewer",
+      "description": "Start (if needed) a local viewer for the compiled PDF and return its URL. It shows the auto-detected root file (main.tex, else the first .tex with a \\documentclass) and renders it with pdf.js (zoom/scroll/search, select-to-comment), hot-reloading whenever that root is recompiled and preserving your page and scroll position. For clients without a PDF surface (e.g. Claude Desktop) it auto-opens your browser; in VSCode pass target:\"vscode\" (or set WEB_LATEX_MCP_VIEWER_TARGET=vscode) to get the URL to open as a Simple Browser tab. The server binds to loopback only and starts on demand. Run compile to populate it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "target": {
+            "description": "Where you intend to open the viewer: \"browser\" (default — auto-opens your OS browser) or \"vscode\" (returns the URL to open as a Simple Browser editor tab; never auto-opens a browser). Defaults to WEB_LATEX_MCP_VIEWER_TARGET, else \"browser\".",
+            "type": "string",
+            "enum": [
+              "browser",
+              "vscode"
+            ]
+          },
+          "open": {
+            "description": "For target \"browser\": also open the URL in the default browser (default true). Ignored for \"vscode\".",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_comments",
+      "description": "List the comments the user attached to the compiled PDF in the viewer. Each comment has the note, the selected PDF text (`quote`), and — when SyncTeX resolved it — the source `file`/`line` plus a snippet of surrounding source. Use these to make the requested edits, then call resolve_comments so the viewer marks them done. Default lists only open comments. The result is budgeted: on a long review pass the snippets go first, then the quotes, and only then whole comments — every listed comment keeps its id, location and note, and `truncated`/`budgetNote` say what went.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "includeResolved": {
+            "description": "Include already-resolved comments too (default false: only open ones).",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "resolve_comments",
+      "description": "Mark PDF review comments as resolved after addressing them, so the viewer dims their markers. Pass specific `ids` (from list_comments) or omit to resolve every open comment for the project. Does not edit files or push.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "ids": {
+            "description": "Comment ids to mark resolved. Omit to resolve every open comment.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "status",
+      "description": "Show branch, sync state (ahead/behind vs the tracked remote — a non-zero \"behind\" means origin moved since the last sync and a push may conflict), and staged/unstaged/untracked files. Counts reflect the last fetch; run project_sync to refresh them. Each reported commit (aheadCommits, behindCommits) lists the files it touched with added/removed line counts; for the content, diff with ref: \"<hash>~1..<hash>\". Also splits the uncommitted changes into this session's and other sessions', and lists the other agent sessions currently working on the project. The path lists are bounded: a working tree with thousands of dirty or untracked files is cut to fit the result, with pathsOmitted saying how many went from each and truncated saying whether anything did. The commit lists are not — aheadCommits and behindCommits are complete, and only the text rendering of them is shortened — except aheadCommits when the tracked remote branch is absent, which is capped with aheadCommitsOmitted counting the rest.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "diff",
+      "description": "Show the unified diff plus per-file added/removed line counts, for review before committing. Pass `ref` (e.g. \"HEAD~3\", \"origin/master\") to diff against a commit instead, so work already committed this session can still be reviewed as a whole. The result is budgeted (20000 characters across both channels): a large patch comes back cut at hunk boundaries, with every cut marked and counted — narrow it with `path`, or pass detail: \"full\" for the whole thing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "description": "Limit the diff to a single file.",
+            "type": "string"
+          },
+          "staged": {
+            "description": "Show staged (cached) changes instead of working tree.",
+            "type": "boolean"
+          },
+          "ref": {
+            "description": "Diff the working tree against this git ref instead of the index — \"HEAD~3\" to review a session that already committed a few times, a commit sha, or \"origin/master\" for what this branch has that the remote does not. A two-dot range (\"HEAD~3..HEAD\") diffs two commits. Cannot be combined with `staged`. On a clone shared by several sessions this spans everyone's commits: it answers \"what changed\", not \"what did I change\".",
+            "type": "string",
+            "minLength": 1
+          },
+          "detail": {
+            "description": "\"auto\" (the default) fits the result inside a 20000-character budget charged across BOTH channels (the patch is returned as text and again as structuredContent.diff): whole hunks are dropped from the end, every changed file keeps its diff --git/---/+++ headers, what went is marked in place and counted, and files[] lists at most 20 files. \"full\" returns the complete patch, uncut and uncapped — use it when you genuinely need every line and your client can take the size; an oversized result may be rejected by the client and deliver nothing at all.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "full"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "commit",
+      "description": "Stage and commit changes locally. Does NOT push — use the push tool, after reviewing with status/diff, to send commits to Overleaf. By default commits only this session's own edits, so parallel sessions working on different parts of the paper do not commit each other's half-finished work; pass scope \"all\" to commit everything in the clone, or scope \"paths\" to commit exactly a named set of files (refusing any a live peer owns).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Commit message."
+          },
+          "paths": {
+            "description": "Limit the commit to these paths. Defaults to every change in scope; required for scope \"paths\". Matched literally for every scope — no globs, exact spelling (case-folded only on a core.ignorecase clone).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope": {
+            "description": "Which changes to commit. \"session\" (the default when this session has tracked changes) commits only what this session edited, leaving other sessions' in-flight work uncommitted in the working tree. When this session tracks nothing, the default is \"all\" only if no other live session shares the clone — with one, the call refuses and commits nothing, so pass scope \"all\" explicitly to take the whole working tree. \"all\" commits every change in the clone, including other sessions' and any made outside this server. \"paths\" commits exactly the files named in `paths` and nothing else — it refuses an empty list, and refuses a path a live session owns. Use it for work made outside this server (a script, the client's own file tools) when a peer has in-flight work in the clone.",
+            "type": "string",
+            "enum": [
+              "session",
+              "all",
+              "paths"
+            ]
+          },
+          "allowEmpty": {
+            "description": "Allow a commit with no changes.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "push",
+      "description": "Safely push committed changes to the Overleaf remote. Default (direct) mode pull-rebases onto the latest remote before pushing and never force-pushes; on success it reports the new tip (pushedSha) and the remote commits it rebased over (rebasedOver). A conflict means someone touched the same lines: it aborts the rebase (clone back to pre-push state, nothing half-merged) and returns status \"conflict\" with a per-file base/ours/theirs plus a marker `hunks` view, and top-level conflictPaths (every conflicted path, never capped or elided), remoteHead, mergeBase, and remoteCommits (capped by default at 20 commits/5 files each — remoteCommitsOmitted says how many more landed, and status.behindCommits always lists every one) (all in the result text, not just structuredContent). By default (conflictDetail: \"auto\") that per-file payload is budgeted to fit in one tool result: hunks are allocated first, in file order, since they cannot be cheaply re-derived once the rebase aborts; base/ours/theirs are allocated next, in file order and base-then-ours-then-theirs, each individually capped so one huge side cannot starve every other file's sides. Past 20 conflicted files the rest get no per-file detail at all (still fully listed in conflictPaths); conflictTruncated is true whenever any of that fired. An elided side is fetchable in one call via read_file(path, ref); an elided hunks block has no ref of its own — reconstruct it from the (fetched) sides. Set conflictDetail: \"full\" for the complete, uncapped payload instead. It never auto-resolves. To resolve, retry with `resolutions` (the full merged content per conflicted file; the set is validated and missing/extra files are named), optionally passing expectedRemoteHead (the reported remoteHead) so the push is refused if the remote moved again. `.bib` files need confirmBibEdit. Read any side directly with read_file(path, ref) using remoteHead/mergeBase. Each reported commit (rebasedOver, remoteCommits) lists the files it touched with added/removed line counts; for the content, diff with ref: \"<hash>~1..<hash>\". If the remote moves during the push, the pull-rebase is retried up to 3 times; if it still loses the race the result is status \"remote-moved\" (nothing pushed, clone intact) — re-run push. That retry does not apply when expectedRemoteHead was given: it is one attempt only, refused as \"remote-moved\" on a second lost race. Branch mode commits to a local review branch and lands it only on approve=true; that pre-approval result carries the branch-vs-base patch in structuredContent.diff (and diffFiles), budgeted to 20000 characters across at most 20 files — a large patch comes back cut at hunk boundaries with every cut marked and counted (diffTruncated, diffNote), and the whole change is one `diff` call away with ref: \"<base>...<branch>\". Once past the live-peer guard, untracked files never block a push; uncommitted modifications to files git already tracks do, since git cannot rebase over them — commit first (or discard them); a `message` here commits the WHOLE working tree, including any peers' in-flight work, so prefer committing your own edits first. Requires confirm=true. See docs/CONCURRENCY.md.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "description": "Project id. Defaults to the configured default.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "direct (default) = safe pull-rebase-then-push. branch = commit to a local review branch and land it only on approval. See docs/CONCURRENCY.md.",
+            "type": "string",
+            "enum": [
+              "direct",
+              "branch"
+            ]
+          },
+          "message": {
+            "description": "Commit message. In direct mode, used to commit uncommitted work before pushing. In branch mode (without approve), the message for the review branch commit.",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Branch mode: the local feature branch name.",
+            "type": "string"
+          },
+          "base": {
+            "description": "Branch mode: branch to land onto (defaults to the clone default, e.g. master).",
+            "type": "string"
+          },
+          "approve": {
+            "description": "Branch mode: set true to land an already-reviewed branch onto the base and push.",
+            "type": "boolean"
+          },
+          "resolutions": {
+            "description": "Resolve a prior \"conflict\" result: for each conflicted file, the full merged file content (both sides reconciled). Providing this re-runs the rebase, applies the merges, and pushes (direct mode only). Every conflicted file must be included.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          },
+          "confirmBibEdit": {
+            "description": "Required to include a .bib file among `resolutions` (mirrors the write/edit guard).",
+            "type": "boolean"
+          },
+          "expectedRemoteHead": {
+            "description": "With `resolutions`: the `remoteHead` from the conflict you merged against — that commit SHA (4 to 40 hex characters, full or abbreviated as the conflict text prints it); a ref name such as \"origin/master\" is refused, since it would always match the remote it names. If the remote has advanced past it, the push is refused instead of merging over what just landed. Setting this also disables the automatic lost-race retry: a second remote move during this push is reported as \"remote-moved\" (nothing pushed) after one attempt, rather than retried up to 3 times.",
+            "type": "string",
+            "minLength": 1
+          },
+          "conflictDetail": {
+            "description": "How much of a \"conflict\" result's per-file content to return. \"auto\" (default) budgets the payload so it fits in a tool result: the marker `hunks` view is allocated first, in file order (it is the least recoverable part once the rebase aborts), then base/ours/theirs, in file order and base-then-ours-then-theirs, each also capped individually so one huge side cannot starve every other file. Past 20 conflicted files the rest get no per-file detail at all (still fully listed in conflictPaths). An elided side is fetchable in one call via read_file(path, ref); an elided hunks block has no ref of its own — reconstruct it from the (fetched) sides. \"full\" returns every side of every file in full, uncapped — for a caller that wants the complete payload and can take the size.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "full"
+            ]
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be set to true to confirm pushing (or staging a review branch)."
+          }
+        },
+        "required": [
+          "confirm"
+        ]
+      }
+    },
+    {
+      "name": "discard",
+      "description": "Revert the working tree to the last commit (and remove untracked files), optionally limited to paths. Destructive — requires confirm=true. Paths are matched literally, never as globs; any the repository does not know come back in `missed` rather than being reported as discarded.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "paths": {
+            "description": "Limit the discard to these paths. Defaults to all changes.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be true — discarding permanently loses uncommitted changes."
+          }
+        },
+        "required": [
+          "confirm"
+        ]
+      }
+    },
+    {
+      "name": "revert",
+      "description": "Undo one or more committed changes, leaving the result uncommitted in the working tree so it can be reviewed with `diff` and landed with `commit`. Commits are matched literally and applied in the order given. Destructive — requires confirm=true. Refuses a merge commit (it would need a mainline), a path that is or lies under a symbolic link, a path with uncommitted changes (commit or discard those first), anything staged anywhere in the clone (aborting a conflicted revert resets the whole index, which would destroy staged work), and a .bib bibliography unless confirmBibEdit=true. On a conflict nothing is changed on disk: the revert is aborted and the conflicting paths are named.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "commits": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Commit shas to revert, newest first. Matched literally. Applied in the order given, in one git revert --no-commit, so a later one may depend on an earlier one being undone first."
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be true — revert rewrites the working tree."
+          },
+          "expectRef": {
+            "description": "A commit-ish the reverted files should end up matching — normally the commit before the one being reverted. Compared over the reverted paths only, and reported as matchesRef.",
+            "type": "string"
+          },
+          "confirmBibEdit": {
+            "description": "Required when a reverted commit touches a .bib bibliography file.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "commits",
+          "confirm"
+        ]
+      }
+    },
+    {
+      "name": "shelve",
+      "description": "Take the named paths' working-tree content OUT of the clone into a shelf held beside it, and restore those paths to HEAD. The exit push's dirty-tree refusal points at: the only one that neither publishes your work (commit, or a message on push) nor destroys it (discard). Bring it back with unshelve. Deliberately NOT git stash: a stash is a ref inside the shared clone, invisible to every tool here and to every peer session, which is how one sits unreclaimed for days. A shelf lives under <workspace>/.sessions/<project>/, is labelled, and is listable. Shelves are PROJECT-scoped, not session-scoped — any session on this project can list and unshelve one, which is the point. Refuses, taking nothing, when a live peer session owns one of the paths, or when it cannot read that peer's change index to tell (an unreadable index is never read as \"owns nothing\"). Refuses a .bib without confirmBibEdit, and a path that is a symbolic link on any side. Mutating: takes the per-project lock.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "paths": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Project-relative paths to set aside. Matched LITERALLY — no globs, exact case, no \"..\" segments — exactly as commit's and discard's paths are, so a typo fails loudly instead of matching something else. Naming a directory covers the changed files under it. Every named path must actually be changed in the working tree; one that is not is refused rather than silently ignored."
+          },
+          "label": {
+            "description": "A short note to recognise this shelf by in list_shelves. Free text.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "confirmBibEdit": {
+            "description": "Required (true) when any covered path is a .bib — including one reached through a symlink, since the gate judges the link-resolved name. Same gate as write_file/edit_file: a bibliography is not ordinary prose, and moving one out of (or back into) the tree is not something to do by accident.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "paths"
+        ]
+      }
+    },
+    {
+      "name": "unshelve",
+      "description": "Restore a shelf taken by shelve. Any session on the project can unshelve any of its shelves — they are project-scoped by design. If HEAD has moved under a shelved TEXT file since the shelve (a pull brought in a co-author's commit touching it) and the tree is clean there, the shelved change is three-way merged onto HEAD's new content, so both land. REFUSES rather than overwrites: if the working tree has changed under a shelved path (\"dirty\"), or HEAD moved and the shelved change cannot be merged onto it (\"head-moved\": the two changes touch the same lines, the file is not text, or one side added or deleted it), nothing is written, the tree is left exactly as it was, and the SHELF IS LEFT INTACT. The refusal reports base/ours/theirs per file the way a push conflict does, never conflict markers in your files. theirs is the shelved content — the one side no other tool can read, since a shelf lives outside the project — so it is charged against the size budget first and cut last; ours is the working tree (read_file) and base is HEAD when the shelf was taken (read_file with ref = the shelf's headSha). For \"dirty\", clearing the live edit and calling unshelve again restores (or merges) every byte. For \"head-moved\", resolve by hand from theirs and ours. A successful unshelve REMOVES the shelf; an unshelve that refuses does not. Refuses a .bib without confirmBibEdit, a path that is a symbolic link on any side, and a path a live peer session owns (or one it cannot read that peer's index to judge). Mutating: takes the per-project lock.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "description": "The shelf id from shelve or list_shelves — `sh-` followed by 8 hex digits."
+          },
+          "confirmBibEdit": {
+            "description": "Required (true) when any covered path is a .bib — including one reached through a symlink, since the gate judges the link-resolved name. Same gate as write_file/edit_file: a bibliography is not ordinary prose, and moving one out of (or back into) the tree is not something to do by accident.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "list_shelves",
+      "description": "Every outstanding shelf on the project, newest first. Read-only, and takes NO lock. A peer's shelve/unshelve DOES rewrite this directory concurrently, so that is not the reason: what makes the lock-free read safe is that a shelf becomes visible only when its manifest lands, the manifest is written last, and it is written atomically — so a shelf mid-write is skipped, never half-read. Shelves are project-scoped, so this lists every session's, not just this one's — an invisible per-session shelf is exactly the unreclaimed git stash this feature replaces. A shelf directory with no readable manifest is skipped rather than reported as empty.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "reset_to_remote",
+      "description": "Recover from a push conflict without dropping to raw git: fetch, then hard-reset the local clone to origin/<branch> and remove untracked files, leaving a clean working tree at exactly what is on the remote so you can re-apply your edits onto the current remote. Destructive — it permanently discards local commits ahead of the remote and any uncommitted changes, and reports exactly what it discarded. Never merges or pushes. Requires confirm=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "description": "Project id. Defaults to the configured default.",
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be true — this permanently discards local commits and uncommitted changes to rewind onto the remote."
+          }
+        },
+        "required": [
+          "confirm"
+        ]
+      }
+    },
+    {
+      "name": "search_references",
+      "description": "Look a publication UP in an external bibliography — DBLP, Crossref or OpenAlex — over the network. It does NOT search the project: it never reads the project’s .bib and never changes anything. To search the references the project already has, use list_references instead. Reach for this to find a paper’s canonical metadata — to check an entry the project cites, or to add one it does not. Each result carries a namespaced `key` (e.g. \"dblp:conf/cvpr/HeZRS16\", \"crossref:10.1109/CVPR.2016.90\"); pass that key to add_citation to append the entry, fetched from the source rather than written by hand. By default the server tries DBLP, then Crossref, then OpenAlex, and substitutes one that cannot be reached — `source` in the result says which answered. These services rate-limit: call this one paper at a time, never in parallel bursts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Free-text query: title words, authors, venue — e.g. \"deep residual learning he\"."
+          },
+          "maxResults": {
+            "description": "Max hits to return (default 10).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "source": {
+            "description": "Pin the bibliography to search: \"dblp\" (computer science, richest cite keys), \"crossref\" (broadest coverage, any discipline) or \"openalex\" (broad, open). Naming one is an assertion: only that backend is tried, and if it cannot be reached the call fails rather than quietly searching a different bibliography. Omit it to let the server try them in order and substitute one that is unreachable — the result then reports which actually answered.",
+            "type": "string",
+            "enum": [
+              "dblp",
+              "crossref",
+              "openalex"
+            ]
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "add_citation",
+      "description": "Fetch a reference from DBLP, Crossref or OpenAlex by its record key and append it to the bibliography. This is the only sanctioned way to add to a .bib file: the BibTeX is fetched from the service server-side, never hand-written, so entries are verifiable. The key decides which service is asked. OpenAlex publishes no BibTeX of its own, so an openalex: key is resolved to its DOI and the entry fetched from Crossref — a record with no DOI is refused rather than assembled by hand. Find the key with search_references first. No-op (alreadyPresent) if the cite key is already in the file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Namespaced record key from search_references — e.g. \"dblp:conf/cvpr/HeZRS16\", \"crossref:10.1109/CVPR.2016.90\", \"openalex:W2194775991\", or \"doi:<doi>\" as an alias for crossref. A bare DBLP key, a bare DOI, or a dblp.org / doi.org / openalex.org URL is accepted too. The key decides which service is asked, whatever the configured search source is: it came from a result, so it carries its own provenance."
+          },
+          "bibFile": {
+            "description": "Target .bib path. Optional when the project has exactly one .bib file.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    },
+    {
+      "name": "list_references",
+      "description": "Parse the references OUT OF THE PROJECT (not from the internet) and return them structured — cite key, type, title, authors, year, venue, DOI/arXiv, and the file and line each one sits on. Reads three shapes of bibliography: a BibTeX .bib (fields are exact, @string macros resolved), a LaTeX thebibliography of \\bibitem entries, and a reference list written as prose in a markdown or plain-text document. Use this instead of read_file + regex to answer \"does this reference exist?\" or \"find the entry for Author 2025\" — pass `filter` to search. To look a paper UP in an external bibliography (DBLP, Crossref or OpenAlex) instead, use search_references. Read-only, and it needs no git remote, so it works on a local project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "path": {
+            "description": "A single file to read references from — a .bib, a .tex with a thebibliography, or a markdown/plain-text document with a reference list. Omit to scan the whole project.",
+            "type": "string"
+          },
+          "filter": {
+            "description": "Case-insensitive substring; keeps entries whose key, title, authors, venue, year or raw text contains it. Use it to answer \"is Author 2025 in here?\" without reading the file.",
+            "type": "string"
+          },
+          "maxResults": {
+            "description": "Cap on entries returned — default 50, which is what a client can actually be handed. At 200 (the old default) an ordinary bibliography renders past the payload size a client rejects outright even with every field budget spent, and it arrives stripped of the authors, venue and DOI a reader is there for: the per-entry scaffold (path, line, format, year, cite key) is irreducible, so no content budget can refuse it and only a smaller page can. At 50 an ordinary `.bib` comes back whole — titles, authors, venue and DOI intact. Narrow with `filter` rather than raising this; raise it and the parsed fields are cut from the tail of the result, which `typedNote` (and `rawNote`, `fieldsNote`) will tell you.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        }
+      }
+    },
+    {
+      "name": "check_citations",
+      "description": "Cross-reference what the document CITES against what the bibliography DEFINES, in one call: keys cited with no entry (these break the build), entries never cited, cite keys defined twice, and BibTeX entries missing a field their type requires. Reads \\cite / \\citep / \\textcite / \\autocite and friends in .tex, and pandoc `[@key]` in markdown, against .bib files and \\bibitem lists. This is the regex diff you would otherwise write by hand. It does NOT check whether a reference is factually correct — that is search_references against DBLP, Crossref or OpenAlex, or the verify-citations skill. Pass `bibliographyProject` to check a draft against a SHARED bibliography that lives in another registered project. Read-only; no git remote needed, so it works on a local project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "documents": {
+            "description": "Files whose citations to collect (.tex, or markdown/plain-text using pandoc `[@key]`). Omit to use every .tex and prose document in the project.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bibliography": {
+            "description": "Files holding the reference entries — a .bib, or a .tex with a thebibliography. Omit to use every bibliography the project has. Resolved inside `bibliographyProject` when that is set, otherwise inside `project`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bibliographyProject": {
+            "description": "Check against ANOTHER registered project’s bibliography — a shared group .bib the draft cites but does not contain. `documents` still resolve in `project` and `bibliography` in this one, each sandboxed to its own project. Findings are then limited to entries this draft actually cites: a shared bibliography is not dead weight for one draft, so uncitedEntries comes back empty (run check_citations inside that project to audit it).",
+            "type": "string"
+          },
+          "maxResults": {
+            "description": "Cap on findings returned in EACH of the four lists (default 20). A character budget applies on top and can cut further — advisory findings first, undefinedCitations last — so raising this does not guarantee a longer report; narrow `documents` or `bibliography` instead. Nothing is ever cut silently: every list has an `…Omitted` count and `note` names which bound fired.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        }
+      }
+    },
+    {
+      "name": "server_info",
+      "description": "Report the web-latex-mcp server version and runtime configuration (workspace root, whether the workspace is local to the launch dir, whether the clone dir was git-excluded from the host repo, the configured compiler — which is not necessarily the backend a compile runs, since an uninstalled default is substituted; doctor reports what is really there — and the configured rewrite-preservation default, which is not necessarily what a given project uses since a project's own set_rewrite_mode setting wins over it, plus whether WEB_LATEX_MCP_REWRITE_MODE actually set that default or it is only the built-in one) plus whether a project-specific writing guide (WEB_LATEX_MCP_WRITING_GUIDE_EXTRA) is configured and, if so, whether it actually loaded — a typo in that path otherwise means the user's conventions are silently ignored forever with nothing to tell them — plus a live count of the bullets currently in that file (writingGuideExtraRuleCount), which reflects a rule added during this session even though the loaded instructions and the guide://latex/writing-guide resource are both fixed at startup. It also reports when WEB_LATEX_MCP_REFERENCE_SOURCE holds a value that names no bibliography backend, which is the reason search_references would be refusing an unpinned search while every other tool works. Use this to confirm which version of the MCP server is running.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "add_writing_convention",
+      "description": "Remember a project-specific writing convention (e.g. \"always write lidar, never LiDAR\") by appending it to the user's configured extra writing-guide file (WEB_LATEX_MCP_WRITING_GUIDE_EXTRA), which is loaded into the server's instructions at startup. Use this only when the user explicitly asks to remember or add a writing convention. The rule takes effect in NEW sessions only — this running session's own guide text is not updated live, though it already has the rule in context since it just added it. Requires confirmGuideEdit: true, set only after the user explicitly confirms the convention should be remembered. Fails with an actionable error if no extra writing guide is configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rule": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "One self-contained writing convention, phrased as an instruction (e.g. \"Always write 'lidar', never 'LiDAR'.\"). Appended as a bullet to the project's extra writing guide file — do not include multiple unrelated rules in one call. Max 2000 characters (a single convention, not a document)."
+          },
+          "confirmGuideEdit": {
+            "description": "Required to append this rule. Only set this after the user has explicitly asked for the convention to be remembered — the rule is written outside every project sandbox and enters every future session's instructions.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rule"
+        ]
+      }
+    },
+    {
+      "name": "list_skills",
+      "description": "List the LaTeX procedures bundled with this server — formatting a project, normalizing a .bib, verifying citations against DBLP, Crossref or OpenAlex, preparing an arXiv submission, summarizing a paper — each with what it does and when to use it. Pass `skill` to get one back in full and follow it. Worth calling when a request sounds like one of these: the bundled procedure knows this server’s tools and guardrails, so it beats improvising.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "skill": {
+            "description": "Name of one skill to fetch in full — the result then carries its complete procedure, ready to follow. Omit to get the catalogue (name + description) instead.",
+            "type": "string",
+            "minLength": 1
+          },
+          "project": {
+            "description": "With `skill`: the project id the procedure should be applied to.",
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "doctor",
+      "description": "Report the local toolchain a compile depends on: the configured compiler — and, when it is missing, whether the other supported backend (latexmk/tectonic) is installed and whether compiles fall back to it — which engines are installed, the TeX distribution and its age, the package manager and the repository it would install from, where a package can be installed without root, git (and whether it is 2.25 or newer), and whether the workspace is writable. Read-only and local — pass checkRepository: true to also test the repository over the network. Call this when a compile fails for a reason that is about the machine rather than the document (missing package, unknown engine), instead of discovering each limitation by failing into it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checkRepository": {
+            "description": "Also reach the package repository over the network to confirm it answers (default false — every other check is local). Worth it when an install failed and you need to know whether the repository itself is the problem; it times out after ~8s rather than hanging.",
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "web-latex-mcp",
+    "version": "0.8.0"
+  },
+  "protocolVersion": null,
+  "instructions": "When reading, writing, editing, or reviewing LaTeX (.tex) files through this server, follow the project's LaTeX writing guide below.\n\n# Writing Academic Articles in LaTeX\n\nA style and conventions guide for drafting research papers in this repository.\nThese are the rules Claude should follow when writing or editing `.tex` files\nthrough the WebLatexMCP server, and that human contributors should follow too.\n\n---\n\n## Tense\n\nUse the present tense throughout the paper.\n\n## Writing style\n\nThe reading must flow. If the reader has to stop and re-read a sentence, it is\nnot clear enough — prefer the simpler phrasing.\n\nAvoid overusing \"we\" and \"our\". These words are impactful when reserved for key\ncontributions (\"our contributions are...\") and diluting when applied to\neverything (\"our parameters are...\" → \"the parameters are...\"). Reserve the\nfirst person for what is genuinely yours; let the rest of the paper speak\nplainly.\n\n## Sections\n\nIntroduce each section with a short header sentence that signposts its\nsubsections. For example:\n\n> In \\autoref{sec:exp:details}, we present the experimental details, and compare\n> against state-of-the-art models in \\autoref{sec:exp:sota}.\n\n## Figures and tables\n\n- Every figure and table is referred to in the text. An unreferenced float is a\n  red flag.\n- Position figures and tables next to where they are discussed.\n- Prefer the **top** of the page for placement (`[t]`), occasionally the bottom;\n  avoid floats drifting far from their discussion.\n- Captions start with a short title in **bold**, then the explanation.\n- The explanation is descriptive: it says what the figure or table shows — the\n  axes, the conditions, what each curve, column, or panel is. Do not comment on\n  the figure in the caption. Interpretation, comparison, and the conclusions\n  drawn from it belong in the body text, not the caption.\n- Use descriptive labels: `\\label{tab:sota_results}`, `\\label{fig:overview}`.\n- The caption test: a reader who only reads the title and then looks at the\n  figures, tables, and their captions should still understand them. Write\n  captions to pass this test.\n- For table design, follow the conventions in Markus Püschel's guide:\n  <https://people.inf.ethz.ch/markusp/teaching/guides/guide-tables.pdf>\n  (in short: `booktabs` rules, no vertical lines, aligned numbers).\n\n## Equations\n\n- Introduce every notation you use.\n- Drop any notation you introduce but never use.\n- Equations are part of the sentence: punctuate them. End with a period if the\n  sentence ends there, a comma if it continues.\n- Textual subscripts and superscripts use `\\text` or `\\textit`, otherwise the\n  letters are typeset as a product and become hard to read. Write\n  `L_\\textit{image}`, not `L_{image}`.\n\n```latex\nThe image loss is defined as\n\\begin{equation}\n  L_\\textit{image} = \\frac{1}{n} \\sum_i \\| x_i - \\hat{x}_i \\|_2^2,\n\\end{equation}\nwhere $\\hat{x}_i$ is the reconstruction.\n```\n\n## Bibliography\n\n- **Never hand-write or invent references.** Do not fabricate BibTeX entries or\n  `\\cite` keys for works you cannot verify. The only sanctioned way to add a\n  reference is the `add_citation` tool, which fetches the BibTeX from DBLP,\n  Crossref or OpenAlex server-side — use it when the author asks for a\n  citation. If a passage seems to need a citation and you cannot find the work\n  on any of these services, flag it for the author rather than guessing — a\n  hallucinated reference is worse than a missing one.\n- **`.bib` files are protected.** Direct `write_file` / `edit_file` /\n  `delete_file` on a `.bib` file is refused; add references through\n  `add_citation`. Any other change to a `.bib` (removing or fixing an entry)\n  needs the author's explicit approval and the `confirmBibEdit: true` flag.\n- Harmonize the reference style consistently across the whole file:\n  - Strip noise: conference location and date, editors, URL/DOI, volume number,\n    page ranges, etc.\n  - Use venue acronyms instead of full names (optional, but be consistent — all\n    or none).\n- BibTeX key format: `firstauthorYEARpaperacronym`, e.g. `chambon2024pointbev`.\n  If the paper has no acronym, use the first word of the title.\n\n## Citations\n\n- **Never cite in the abstract.** Indexing engines strip bibliographies; bracketed\n  references become bare numbers with no meaning. As a rare exception, if a work is\n  central to the abstract's argument, use plain text only: \"(Dosovitskiy et al., 2020)\".\n- **Cite on first mention in the main text.** The first time a method, baseline, or\n  architecture is named, add `\\cite{}`.\n- **Re-anchor at major section boundaries.** Papers are not read linearly — readers\n  jump straight to the Method or Experiments. Re-cite a method at its first appearance\n  in each new major section: Related Work, Method, and Experiments/Implementation Details.\n\n  ```latex\n  % Method section\n  The architecture uses a standard ResNet-50 \\cite{he2016resnet} backbone.\n\n  % Experiments section\n  The model is optimized with AdamW \\cite{loshchilov2017adamw} at a learning rate\n  of $10^{-4}$.\n  ```\n\n- **Do not re-cite within the same section.** Once a method is established, use its\n  name alone for the rest of the section. Never bracket the same method twice in the\n  same paragraph:\n\n  ```latex\n  % ✗\n  Unlike NeRF \\cite{mildenhall2020nerf}, our method is faster.\n  Furthermore, NeRF \\cite{mildenhall2020nerf} requires static scenes.\n\n  % ✓\n  Unlike NeRF \\cite{mildenhall2020nerf}, our method is faster.\n  Furthermore, NeRF requires static scenes.\n  ```\n\n## Acronyms and abbreviations\n\n- Define an acronym at its **first appearance**: full term first, acronym in\n  parentheses, as in \"bird's-eye view (BEV)\". Every occurrence after that uses\n  the acronym alone.\n- Define it **once**. Re-introducing \"bird's-eye view (BEV)\" in a later section\n  tells the reader they missed something — check the whole paper for duplicate\n  definitions.\n- The abstract is read on its own: if the acronym appears there, define it in\n  the abstract and again at its first appearance in the body, then never after.\n- Only introduce an acronym worth reusing. A term that appears once or twice\n  stays spelled out — an acronym the reader has to look back for costs more than\n  the words it saves.\n\n## English usage\n\n- \"i.e.,\" and \"e.g.,\" — dot, dot, comma. Not italicized.\n- \"ground truth\" as a noun (no hyphen); \"ground-truth\" as an adjective, as in\n  \"the ground-truth annotation\".\n- Hyphens and dashes:\n  - **Hyphen** (`-`): compound words (\"well-known\"), prefixes (\"re-evaluate\"),\n    word breaks.\n  - **En dash** (`--`): ranges (\"2010--2015\") and connections\n    (\"Paris--London flight\").\n  - **Em dash** (`---`): parenthetical punctuation — like this — in place of\n    parentheses or commas for emphasis. Use sparingly: it has become a tell of\n    LLM-generated text, so do not overuse it.\n\n## LaTeX commands\n\n- Use `\\autoref{}` for cross-references, not `\\ref{}` or `\\cref{}`.\n- For quotation marks, the opening quote uses backticks: `` `single' `` and\n  ` ``double'' `.\n\n---\n\n## Working with Claude through the MCP server\n\nThis repository lets Claude read, edit, compile, and commit `.tex` files\ndirectly. To get clean, reviewable results:\n\n- Write **one sentence per line** in the source. LaTeX flows them into normal\n  paragraphs, but it keeps `git diff`s small and lets Claude edit surgically\n  instead of rewriting whole blocks.\n- Ask for **targeted changes** (\"tighten the second paragraph of the intro\",\n  \"fix the punctuation on the loss equations\") rather than \"rewrite this\n  section\" — the diffs stay reviewable.\n- Have Claude **compile after editing** and report errors; LaTeX failures are\n  usually localized and the log points to the offending line.\n- **Review the diff before pushing.** Treat edits like a collaborator's pull\n  request: read `git diff`, then commit and push deliberately.\n- **When rewriting prose, replace the text directly — unless you are asked to\n  keep the old wording.** If the project has `edit_file`'s rewrite-preservation\n  mode turned on (`set_rewrite_mode`; off by default), the server comments the\n  original out above the replacement on its own, byte-exact — in that case do\n  not hand-type `%`-commented copies, which duplicate it and are not provably\n  the original. With the mode off and a preserved copy wanted, say so and offer\n  `set_rewrite_mode` or `edit_file`'s `preserveOriginal: true` rather than\n  retyping the paragraph as comments.\n\n---\n\n_Contributions to this guide are welcome. Keep examples minimal and compilable._\n\n---\n\nWhen committing or pushing changes through this server, follow the concurrency and safe-push rules below.\n\n# Concurrent Editing and Safe Pushing\n\nWhy this server pushes the way it does — the model behind safe pushing, the editing\nhabits that keep merges clean, and the limits we can't engineer away. This is the\n_why_; for the exact tool arguments and result fields, see [`tools.md`](tools.md)\n(the tool descriptions and their `conflict` results are self-contained — an MCP-only\nclient can resolve without a shell).\n\n---\n\n## The setup: three concurrency models\n\nAn Overleaf project's Git bridge is an ordinary Git remote — in practice a single\ndefault branch (`main`; older projects may still use `master`). But the people\nediting the document are not all using Git:\n\n- **Web-editor users** type in Overleaf's real-time editor. Their keystrokes are\n  reconciled by operational transforms (OT) and committed back to the Git history\n  **opaquely** — you see commits appear on `main`, not the individual edits.\n- **AI agents** (Claude, through this server) clone the repo, edit files, commit,\n  and push over Git.\n- **Several agent sessions at once** — one person running a session per section,\n  say — each a separate server process, all editing the _same_ local clone.\n\nSo we are bridging concurrency models: OT inside Overleaf, Git against the remote,\nand a shared working tree between sibling sessions. The web side can advance `main`\nat any moment, without warning, so every push has to assume the remote may have\nmoved since we last looked. And the working tree can change under a session at any\nmoment, so no session may assume the files on disk hold only its own work.\n\nThe rest of this document covers the remote (agent ↔ web) half. For the local half,\nsee [**parallel sessions**](#parallel-sessions-on-one-clone) below.\n\n## The core rule\n\n**Always `pull --rebase` before pushing. Never force-push.**\n\nRebasing replays our local commits on top of whatever is currently on `main`, so\nwe add our work _after_ everyone else's instead of on top of a stale base. A\nforce-push would overwrite commits made on the web side — silently destroying\nother people's work. There is no situation in this workflow where force-pushing is\ncorrect. The `push` tool enforces this automatically.\n\n## Surgical edits are a concurrency strategy, not just style\n\nGit merges at **line granularity**. Two commits that change _different_ lines merge\ncleanly with no human involvement; two commits that change the _same_ line\nconflict. That single fact drives how we edit:\n\n- **One sentence per line.** LaTeX flows lines into paragraphs, so this costs\n  nothing in the rendered PDF, but it makes each sentence an independent unit that\n  Git can merge on its own. A web user rewording sentence 3 while the agent fixes\n  sentence 7 produces zero conflicts.\n- **Only modify lines within the stated edit scope.** Never reflow, rewrap, or\n  re-indent untouched regions. Reflowing a paragraph rewrites every line in it, so\n  a one-word fix turns into a whole-paragraph diff that collides with any\n  concurrent edit anywhere in that paragraph. A localized edit touches only the\n  lines it must.\n\nSurgical, localized edits are therefore the primary way we avoid conflicts in the\nfirst place — the conflict never has to be resolved because it never happens. (This\nis also why the [writing guide](writing-guide.md) asks for one sentence per line and\ntargeted changes.)\n\n## Structural mitigation: split the paper into section files\n\nConflicts can only happen when two people touch the same file. The most effective\nstructural defense is to make that rare:\n\n```latex\n% main.tex\n\\input{sections/intro}\n\\input{sections/method}\n\\input{sections/experiments}\n\\input{sections/related-work}\n```\n\nWith each section in its own file, people working in different sections touch\ndifferent files, which essentially never conflict. Combined with one-sentence-per-\nline editing _within_ a file, this keeps the conflict surface tiny.\n\n## Conflict policy: fail safe, never auto-resolve\n\nA rebase conflict means the agent and a human edited the **same lines**. There is\nno safe automatic answer — picking either side risks discarding someone's intended\nchange. So we do **not** auto-resolve. On any conflict `push`:\n\n1. **Aborts the rebase**, returning the local clone to exactly its pre-push state —\n   nothing half-merged is left behind.\n2. **Surfaces all three sides** — the merge-base, our version, and the version that\n   landed on the remote — as a structured `status: \"conflict\"` result (also rendered\n   into the result _text_, so a client that drops structured fields can still read it).\n   By default that per-file payload is **budgeted** to fit in one tool result: `hunks`\n   are kept first (least recoverable once the rebase aborts), then `base`/`ours`/`theirs`,\n   each capped individually; whatever doesn't fit comes back `null` with a matching\n   `elided` entry (its true size plus a `read_file(path, ref)` pointer to fetch it in\n   full) — distinct from an ordinary `null` with no `elided` entry, which just means\n   the file didn't exist on that side. Past 20 conflicted files the rest get no\n   per-file detail at all, though every path stays listed in `conflictPaths`.\n   `conflictDetail: \"full\"` asks for the old, uncapped behavior instead. See\n   [`tools.md`](tools.md#reviewable-safe-pushes) for the field-level detail.\n3. **Stops**, and waits for a human to adjudicate.\n\nFailing safe and asking a human beats merging wrong. A conflict is information, not\nan error to be papered over.\n\n**Resolving it stays in the tools — no shell needed.** You reconcile the three sides\nand hand the merged content back through the same `push` tool; the merged text always\noriginates from the caller, nothing is auto-merged. If redoing your edits is easier\nthan computing a line-by-line merge, you can instead rewind the clone to the current\nremote and re-apply. The exact arguments (the `resolutions` array, the\n`expectedRemoteHead` guard, `reset_to_remote`) and the fields on a `conflict` result\nare documented in [`tools.md`](tools.md#reviewable-safe-pushes) — this document only\ncovers the policy: **the resolution always comes from a human, never from an\nauto-merge.**\n\n## The sync-lag caveat\n\nOverleaf's Git bridge does **not** instantly reflect in-flight web edits. Someone\ncan be typing in the web editor right now, and those changes will not appear in the\nGit history until the bridge commits them. This means even a _clean_ push — one that\nrebased without conflict — can land on top of live edits that simply had not been\ncommitted yet. This is a limitation of the bridge, not something the tools can\ndetect; no `pull --rebase` can rebase onto a commit that doesn't exist yet.\n\nWe cannot eliminate this, only shrink the window:\n\n- **Keep the push window short.** The tool fetches and `pull --rebase`s\n  _immediately_ before the actual `git push`, so the gap between \"this is the\n  current `main`\" and \"pushed\" is as small as possible.\n- **For high-stakes pushes, coordinate timing.** Before a large or structural push,\n  it is worth asking collaborators to pause web edits for a moment, or pushing when\n  the document is quiet.\n\n## Parallel sessions on one clone\n\nEverything above is about the _remote_. This section is about the _local_ clone, when\none person runs several agent sessions on the same paper — one per section, say — and\neach is a separate server process sharing a single working tree.\n\nTwo things break if that is left unmanaged. Git has no tolerance for two processes\nrewriting an index at once, so operations must be serialised across processes, not\njust within one. And `git add` cannot tell whose change is whose, so one session\ncommitting would sweep up another's half-written paragraph under its own message.\n\n### One server process per session\n\n**A session is a server process.** `WEB_LATEX_MCP_SESSION` is read once at startup, so\neverything on this page assumes each session runs its own stdio server with its own `env`\nblock. That is how Claude Code works, and the isolation described here is real there.\n\n**Claude Desktop shares one server process across every chat**, and gives one `env` block\nper configured server — so every Desktop chat resolves to the same session id and the\nsplit is inert: two chats editing one paper commit each other's work exactly as they did\nbefore per-session shadows existed. Nothing is broken by this and single-session behaviour\nis unchanged, but do not read the rest of this page as describing what a Desktop user gets\nfrom two chats.\n\nTo get the isolation described here today, give each session its own server entry with its\nown `WEB_LATEX_MCP_SESSION`, so each is a separate process — see [configuration.md's interim\nlimitation](configuration.md#parallel-sessions). Decoupling session identity from the\nprocess is tracked in\n[#18](https://github.com/elias-ramzi/WebLatexMCP/issues/18), and which shape that takes turns\non an empirical question about Desktop the server can answer about itself: the [session\nidentity probe](configuration.md#session-identity-probe).\n\n### Naming your sessions\n\nSet `WEB_LATEX_MCP_SESSION` per session to something meaningful — `intro`,\n`experiments` — and it becomes what peers see in `status`. Without it a session still\nworks and is still isolated, but it shows up to the others under a generated id.\n\n### Serialising across processes\n\nEvery mutating operation takes a lock file beside the clone for the duration, on top\nof the in-process mutex. A session that crashes cannot release its lock, so a lock is\nreclaimed once its owning process is gone — or, when the record cannot prove its holder\nalive on this boot (unreadable, or a pid that may be another boot's), once it stops being\nrefreshed. A holder whose pid is alive on the boot that recorded it is **not** reclaimed on\none look at its age: a laptop that slept past the staleness window wakes with every lock\nlooking old before its holder has had a chance to refresh it, and stealing that lock puts\ntwo processes into git at once. Such a lock is reclaimed only once a waiter has seen the\nsame record, unchanged in content and modification time, stale on two looks at least 10\nseconds apart — long enough for a woken holder's overdue heartbeat to land and move it.\nThat is what a crashed holder whose pid another process has since reused looks like, and it\nmust not wedge the lock for as long as that unrelated process lives. (A live holder whose\nheartbeat cannot land at all — a stopped process — is reclaimed the same way.) A lock this\nvery process wrote is judged without guessing: it is live exactly while a call here still\nholds it. \"This very process\" is recognised by a random per-process nonce written into every\nrecord, not by pid alone — two containers sharing a workspace volume both run the server as\npid 1, and without the nonce each would read the other's live lock as its own leftover and\ntake it. A lock carrying this process's pid under another nonce is either that twin or this\nserver's own predecessor — a container whose pid 1 crashed and restarted — and asking whether\nthe pid is alive only asks about ourselves, so such a lock is judged by its heartbeat alone:\nit is reclaimed once it has gone 15 seconds without one and is then seen unchanged 10 seconds\nlater, so a restarted server gets its predecessor's lock about 25 seconds after the crash,\ninside the 30-second wait. A live twin refreshes its lock every 5 seconds and is never taken;\none whose process is frozen for that long (a blocked event loop, a stopped process) is, which\nis the same trade the stopped-holder case above makes, only sooner. Callers wait rather than fail for up to 30 seconds; a holder still busy past that\n(a long fetch) or a genuinely stuck one produces an error that names the session holding\nit, the lock file, and the manual way out — if no other web-latex-mcp session is running,\nthe lock was left by a crash, and deleting that file is safe. Every server sharing a\nworkspace must run a version with this protocol: an older one (0.6.x or earlier) deletes a\nlock it judges stale unconditionally.\n\nRemoving a lock file is the step that has to be careful, since the filesystem has no\n\"delete this file only if it is still the one I judged\". Each lock record carries a unique\ntoken, and a record is removed — by its holder's release or by a reclaim — only by whoever\nfirst creates its removal marker (`project.lock.rm-…`) and then finds that same record\nstill in place; a release removes only its own record. Without that, a waiter reclaiming a\ndead holder's lock could delete a faster waiter's fresh one and let two holders in. A crash\npart-way through a removal can leave a `project.lock.rm-…` or `project.lock.gone-…` file\nbehind; it is harmless and is not cleaned up automatically.\n\n**The lock is sound only among servers on one host, in one pid namespace.** Whether a\nholder is alive is decided by asking the local process table about the pid in its record,\nand a pid means nothing outside the namespace that issued it. Two machines sharing a\nworkspace over a network filesystem, or two containers with separate pid namespaces sharing\na volume, cannot see each other's processes: a holder whose pid is absent here reads as\ncrashed and its lock is taken at once, and one whose pid happens to name an unrelated live\nprocess here is judged by that process. The nonce closes only the case where the two\nprocesses carry the _same_ pid; it does not make pids comparable across namespaces. Run\nevery server that shares a workspace on one host, in one pid namespace (for containers,\nshare the host's or one another's pid namespace), or give each its own workspace.\n\n### Committing only your own work\n\nEach session keeps a **shadow** of every file it has touched, holding `HEAD + only\nthis session's edits`, while the working tree holds everyone's. `commit` stages the\nshadow directly rather than running `git add`, so the commit contains that session's\nlines and leaves its peers' edits sitting uncommitted on disk, exactly where they\nwere.\n\nThe shadow is maintained from the _change_, not the result: when a session writes a\nfile, what is folded into its shadow is the difference its own write made, three-way\nmerged, never the whole file it happened to read. That is what keeps a peer's lines\nout of it. After HEAD moves — a peer commits, a pull lands, a push rebases — each\nsession carries its shadow onto the new HEAD by three-way merge, lazily, on its next\ncall. No session has to be running for another to make progress.\n\nTwo consequences worth knowing:\n\n- `commit` reports `leftUncommitted` — what is still dirty that it deliberately did\n  not take. A file can appear there even though the commit included part of it; that\n  is the two-sessions-one-file case, working as intended.\n- `commit scope: \"all\"` is the escape hatch: it commits the whole working tree, other\n  sessions' work included. Use it deliberately, not as a default — and the default never\n  becomes it behind your back while someone else is working: an unscoped `commit` from a\n  session that tracks nothing falls back to the whole tree only when no other live session\n  shares the clone, and otherwise refuses and names them.\n- `commit scope: \"paths\"` is for work that never went through the server — a file a\n  script produced, an edit made with the client's own tools. Nobody's shadow holds it,\n  so a session-scoped commit cannot see it, and `scope: \"all\"` would take a peer's\n  in-flight work along with it. `\"paths\"` stages exactly the named files, refuses an\n  empty list, and refuses a path a live session owns — taking that is what `\"all\"`\n  is for, and it stays a deliberate act.\n\n### When two sessions edit the same lines\n\nSame file, different paragraphs, is the case this is built for and it merges silently.\nSame _lines_ is a genuine collision, and it is treated exactly like a rebase conflict:\nsurfaced, never guessed at. The file is flagged (`conflictedChanges` in `status`,\n`conflicted` on a commit result) and excluded from commits, and it stays flagged —\nlater edits do not quietly clear it, because that session's shadow is anchored to a\nbase the file has since moved past, and committing it would revert whatever landed in\nbetween. Carrying the shadow onto a new HEAD clears it only where the shadow is known to\nbe complete: a collision found while carrying it forward leaves this session's shadow\nexactly as it was, so when HEAD moves again and the change now merges cleanly, the entry is\ncarried forward and unflagged. An entry whose shadow is missing a write this session made\n(a collision found while recording it, or a write made while already flagged) is marked\nincomplete, and no refresh ever clears that — only taking the file deliberately or\ndiscarding it does.\n\nThere are three honest ways out, and all are the caller's decision: commit with\n`scope: \"all\"` to take the working tree as it stands, or discard those files to give\nup that session's version (which also throws away any other session's uncommitted\nwork at those paths — `discard` reverts the working tree, not one session's view of\nit). Taking the tree settles the record; and when git finds\nnothing to stage for the paths taken — the content is already at HEAD, because a\n`push` with `message` committed it or a hand edit reverted it — the record is settled\nwithout a commit (`committed: false`, the files under `settled`), so a stale flag never\nforces an empty commit to get out.\n\nThe third is `shelve`: it takes the named paths' content out of the clone entirely and\nsettles them in every session, so the record goes without the work going. That is the\ndifference from `discard`, which also settles those paths but keeps nothing — `shelve`\nis the exit for the case where the content still matters. Its partner `unshelve`\nsettles across every session and then records into the calling session, exactly as\n`revert` does and for the same reason: restored bytes are content nobody currently\nowns, so ownership has to be decided rather than observed. Both live outside the\nclone, under `<workspace>/.sessions/<project>/shelves/`, and are project-scoped, so a\nshelf is visible to every session on the project rather than only its author.\n\nOne more thing a session commit never takes: a file git ignores. Staging from the\nshadow bypasses `git add`, which is the only place `.gitignore` and\n`.git/info/exclude` are consulted, so `commit` asks git first and skips those files\n(reported under `ignored`) — they stay in the working tree, out of every commit and\nevery push, as the exclude entry intended. And because no scope can ever commit one, an\nignored entry is settled and its record dropped whatever its `conflicted`/`unrecorded`\nstate, so it never wedges the default scope behind a remedy that cannot work.\n\n### Pushing with peers around\n\nA push has to rebase, and a rebase needs a clean tree. So `push` refuses while a live\npeer session exists and the tree holds work that is not this session's — the\nalternative would be sweeping their in-flight paragraph into the push or rewriting\nthe tree underneath them.\n\nOn a `core.ignorecase` clone (git's default on macOS and Windows) ownership is judged with git's\nown ASCII case fold, so a peer's `notes.txt` and git's `Notes.txt` are one file; elsewhere the\ncomparison is byte-exact. The refusal says what is known: per live session, the files its shadow owns, how long\nago it last wrote through the server, and how long ago it was last seen; and, apart,\nthe files no live session owns (edited outside the server, or left by a session that\nhas since exited). That is what separates \"wait\" from \"take over\": a write seconds old\nis a peer mid-paragraph; one hours old, from a session that is merely still open, is a\njudgement the caller can now make with `commit scope: \"all\"` (peer-owned files) or\n`\"paths\"` (files no live session owns) — never with `discard`, which has no ownership\nguard and would destroy the owner's uncommitted work. A session\nwhose index cannot be read is treated as owning everything, never as owning nothing.\nA write is never failed because its shadow record could not be written, but the\nfailure is not silent either: the path is marked in the session's index as\n`conflicted` (and `unrecorded`), so a peer's `commit scope: \"paths\"` refuses it as\nowned and the session's own commit excludes it until it is taken deliberately with\n`scope: \"all\"` or discarded — and taking it settles it, so the session's default scope\nworks again afterwards. What remains is the case where the index itself cannot be\nwritten (a full or unwritable `.sessions/`): then the edit is in the tree with no entry\nnaming it, and it shows up as owned by nobody.\n`status` carries the same per-session `changes` and `lastWriteAt`, for checking\nwithout attempting a push. It takes no lock and **writes nothing to the shadow index** (it\nonly refreshes this session's own heartbeat in `session.json`): it reports this\nsession's shadow as it would stand on the current HEAD without saving that view — saving it\nlock-free could overwrite a concurrent write's record, or bring back entries a peer's\n`discard` had just settled. The next locked `commit`, `push` or `project_sync` carries the\nshadow forward for real.\n\nOwning a file does not make it yours alone. A file this session edited is still disputed\nwhen a live peer's shadow lists it too — both edited it — or while any live peer's index\ncannot be read. The refusal says the file carries this session's edits as well, and names\nthe route that takes only those: `commit` with its default scope, which stages this\nsession's lines and never a peer's; then push without a `message` once the owner has\ncommitted. A `message` on push commits the whole tree (`git add -A`), which is exactly how the\npeer's lines in that file used to be pushed under this session's name.\n\nNot every peer `status` lists by name, though. A session that has died — no live process _from this\nboot_ behind its recorded pid, and a heartbeat older than the staleness window — whose heartbeat is\nolder still, by at least two hours, and whose shadow index reads back as a readable, empty\narray (usually because it committed everything before exiting, or never made a server-side edit —\nbut not only, which is what the two-hour clause is about) is folded into a\nsingle `staleSessions: N` count instead. Four cases are deliberately NOT collapsed: a **live** peer,\nhowever little it currently holds, because it may write again any moment; a **dead peer that still\nholds entries**, since those are exactly the changes `status` exists to surface; a dead peer\nwhose shadow index came back **unreadable** (`null`, not empty) — `null` means \"cannot tell\", never\n\"owns nothing\", so it stays listed individually with `changes: null` rather than being counted as\nharmless; and a dead peer that went quiet **only recently**.\n\nThat last one is the narrower of the two claims the count could make, and it is the only one that is\ntrue. `ShadowStore.peerEntries` maps ENOENT — no index file at all — and a successfully-read empty\nindex to the same `[]`, so an empty index says \"nothing is recorded here\", not \"this session changed\nnothing\". The gap between those is exactly the failure the section above ends on: a write that\nreached the working tree while the index write itself failed leaves lines in the tree with no entry\nnaming them. Collapsing such a peer removes the only named suspect for them. So the collapse also\nrequires the peer to have been quiet for `RECENT_HEARTBEAT_GRACE_MS` (two hours,\n`src/lib/peerSummary.ts`). What that window buys is worth stating precisely, because the obvious\nreading is wrong: elapsed time is not evidence about the write: it either failed or it did not, and\nthat does not become less likely as the record ages. What two hours buys is that a human still\nlooking at those dirty lines, in the same working period as the death, gets a name for them. It is\na usefulness window, not an evidence window — and it is comfortably above the 30-minute staleness\nwindow a peer must already have crossed to read dead\nat all (a grace at or below that window could never fire, and would sit in the code reading like a\nworking guard). Being bounded is what keeps the original problem fixed: only the last two hours'\nworth of dead, empty sessions stay listed, not every one the workspace has ever seen. A peer whose\n`heartbeatAt` does not parse at all is never collapsed either — the same fail-closed bias as the\n`null` rule, since an unusable reading is not evidence of harmlessness.\n\nThe collapse is report-level only — nothing is deleted from `<workspace>/.sessions/<projectId>/`.\n`status` is read-only and takes no lock, and a session that reads as dead by its stale heartbeat can\nstill be mid-write (a slow `record()`, a paused process); reaping its files out from under that write\nwould destroy the exact ownership proof `push`'s peer guard and `commit scope: \"paths\"` depend on to\ntell this session's in-flight edits from a peer's. Both of those guards resolve peers through\n`SessionRegistry.livePeers`, which the collapse never touches — a peer folded into `staleSessions`\nwas already dead by `livePeers`' own definition, so nothing that used to be refused starts being\nallowed, and nothing that used to be allowed starts being refused. Session records accumulate on disk\nfor as long as the workspace exists; only what `status` chooses to print is bounded.\n\nLiveness itself is derived, never trusted — a session that crashes cannot retract its record. A peer\ncounts as live if its recorded pid still names a running process **and** that pid can be tied to the\ncurrent boot (there are two ways it can be, both below), **or** its heartbeat is inside the 30-minute\nstaleness window. The heartbeat clause is a bounded grace, which is what lets an idle-but-alive\nsession go on being protected: a session heartbeats from `status`, `commit` and `push`, and from the\nmutation recorder on every server-side write, so anything actually doing work stays fresh — but a\nsession merely waiting on its user is still perfectly real. The pid clause carried no such bound\nbefore #78 — it was the only unbounded route to `live`, and that is exactly where it broke: a pid is\nunique only within one boot, so on a workspace that survives a reboot a dead session's recorded pid\ncan be handed to an unrelated process. `pidAlive` then answered true forever. The record never aged\ninto `staleSessions`, and — because `guardPeerWork` refuses while any live peer exists **whatever\nthat peer owns**, being owner-aware only about how it words the refusal — it blocked every `push`\nmade while the tree carried a dirty path this session had not itself recorded, permanently, with no\ncure but deleting a JSON file by hand. In the reboot case that condition is almost always met: the\ndead session's own abandoned edits are still in the tree and are owned by nobody.\n\nSo the pid is scoped to its boot. Each record is stamped with the instant the machine booted\n(`bootedAt`, derived in `src/lib/bootIdentity.ts` from `os.uptime()`), and the pid clause only counts\nwhen that stamp matches the current boot. The stamp is approximate — second-resolution uptime, and a\nclock NTP can step — so the comparison carries a generous tolerance, deliberately biased toward\n\"same boot\": calling two boots one merely leaves today's behaviour in place (a spurious refusal, which\nis the safe way to be wrong), while calling one boot two would revoke a live session's pid grant and\nlet its uncommitted work read as owned by nobody. A record with **no** stamp — written by a build from\nbefore the field existed — earns no pid grant _from the stamp_, since the stamp is what makes a pid\nmeaningful; it reaches the pid clause by two other routes instead, both below — the clock-free one\nwhile it goes on heartbeating after the judging process started, and a bounded 24-hour grace on the\npid alone once it has gone quiet. Both matter, because a stampless record exists _because its owning\nprocess runs the old build_, and that process will never write a stamp however often it heartbeats —\nso a stamp-only rule would strand a still-running old-build session, whose files a new-build peer's\n`commit scope: \"paths\"` would then take. Past the grace it does read dead, which is what keeps a\ngenuine legacy ghost clearing itself instead of sitting on disk forever. What\nthis does not catch is pid reuse _within_ a single boot (pid wraparound), which would need the OS's\nper-process start time — and that has no portable source across Linux, macOS and Windows.\n\nA derived stamp is only as good as its clock, so the pid clause has a second route that needs no clock\nat all. `Date.now() - os.uptime() * 1000` drifts whenever the wall clock is stepped without uptime\nadvancing, and that drift accumulates over the life of a boot rather than being write-time jitter: on\nthe WSL2 machine this was developed on it had already moved 4m32s, about 90% of the tolerance, inside\none boot, and an overnight sleep steps it by hours. That is the unsafe direction — a live peer holding\nuncommitted edits loses its stamp match _and_ has a stale heartbeat, both clauses dying at once, and\n`commit scope: \"paths\"` stops refusing its files. So a record whose `heartbeatAt` is at or after **this\nprocess's own start** earns the pid grant outright: it must have been written during the current boot,\nbecause a reboot would have killed us. That proof is immune to drift, since a clock step moves future\nreadings and not the two past ones being compared, and it is what rescues both the drifted live peer\nand the stampless old-build session above — in each case only from the moment they heartbeat again\nafter we start. It only ever supplements the stamp — it can vouch for nothing written before this\nprocess started, so an older peer still needs its `bootedAt`.\n\nThat argument rests on one assumption, recorded here rather than asserted away: both readings are\n_wall-clock_ ones (`touch()` writes `heartbeatAt` off `Date.now()`), so it holds only while the clock\ndid not step **backward** between the peer's last heartbeat and our own start — which a dual-boot\nmachine with a local-time RTC, or NTP correcting a fast RTC at boot, can do. A ghost that heartbeated\nat wall 10:55 before a reboot that reset the clock to 09:58 clears the route at 10:00 and keeps the\nunbounded pid grant: the original defect, reproduced. It is documented rather than closed because it\nfails **closed** — a ghost reading live costs a spurious refusal, exactly the pre-fix behaviour — and\nnever in the direction that lets a live peer's lines be swept.\n\nWhat clears no route at all reads dead, and there are two shapes of that — plus a **container**,\nwhich cuts either way depending on the runtime. A **clock step** strands a\nlive peer, and the deciding quantity is not when either process started relative to the step:\n`isSameBoot` compares the stamp the peer derived at its last heartbeat against the one we derive now,\nso what matters is the drift accumulated between that heartbeat and the `peers()` call judging it. A\nstep anywhere inside that span pushes the two past the tolerance — including one that happens after\nthe judging process started, so long as the peer's last heartbeat predates our module load, which is\nexactly when `writtenSinceProcessStart` cannot speak for it either.\n\nA still-running **old-build** session was the same shape with no clock step at all, and the most\nreachable of them: its pid is genuinely alive, its record carries no `bootedAt` and never will, and\nonce its last heartbeat was older than both the staleness window and our own start, neither route\nheld. That is the ordinary upgrade window — heartbeats come only from `status`, `commit`, `push` and\nthe mutation recorder, so an agent session waiting on its user goes quiet for precisely that long —\nand it failed **open**: `guardPeerWork` saw no live peer, so a `push` carrying a `message`\n(`git add -A`) or a `commit scope: \"paths\"` could take that session's uncommitted lines. So a\nstampless record now keeps its pid grant on the pid alone, for a bounded `LEGACY_PID_GRACE_MS` (24\nhours) — \"no stamp\" is an absence of evidence, unlike a stamp that names another boot, and the grace\nacts only in that absence. The bound is what keeps this from being the original defect again: a\nlegacy ghost whose pid has been reused clears itself within a day rather than never, and a stampless\nsession idle beyond the grace does read dead, deliberately. A record whose stamp merely drifted gets\nno such grace — it has a stamp, the stamp disagrees, and granting it anyway would re-grant the\nboot-reused ghost for a day. And in a **container** the answer\ndepends on the runtime: under a plain one `/proc/uptime` is the host's while pids are namespaced, so\n`pidAlive` false-positives survive there, fail-closed, as wraparound does — but under LXCFS or gVisor\n`/proc/uptime` _is_ virtualised per container, so two containers derive different stamps and an idle\npeer in another one reads dead, fail-open, the way the old-build session used to. The legacy grace\ndoes not rescue that one either: those records carry a stamp, it is simply the wrong host's.\n\nEvery path list in that refusal is capped at 20 (`REFUSAL_PATH_CAP`): the header's\ndisputed set, each session's `owns`, the unowned line, and the closing's copy of it.\nThe cap costs more here than in the conflict payload, because the refusal is an error\nand so has only a text channel — a dropped path is dropped from the response, not\nmerely from one of two renderings of it. `status` is what makes that affordable: its\n`otherChanges` is the same disputed set — staged, unstaged and untracked alike, so a\npath modified only in the index is not left out — and its `activeSessions[].changes` is\nwhat each session claims. Neither is uncapped: since #175 both are budgeted like every\nother path list `status` returns, so the affordability argument above is weaker than it\nwas. `truncated` is the always-present witness (`pathsOmitted` ships only when something\nwas cut), and when it fired the subtraction yields a lower bound on the disputed set\nrather than the whole of it. The refusal says so itself (#185). What keeps that safe is\nthat no report-derived list is load-bearing: `commit` and `push` read each session's\nchange index directly, never this report, so acting on a short list is refused rather\nthan silently wrong. The refusal names them only when a cap actually fired, never as\nboilerplate — and names them as a derivation rather than as two fields to go read.\nThat is deliberate: there is no `unowned`-shaped field in `status`, and `otherChanges`\nis the whole disputed set, peer-owned files included, so feeding it to\n`commit scope: \"paths\"` — which is what the closing advises for unowned files — would\nbounce off the live-peer guard and fail the whole call. The files no live session owns\nare `otherChanges` minus every live session's `changes`, a null `changes` claiming\neverything, and the message says so. It also claims no more than that: `status` names\nevery omitted path, among more besides, rather than reporting these lists back. The\nstronger claim holds for `push`, whose disputed set is built exactly as `otherChanges`\nis, but not for `project_sync`, whose blocking set is the paths an incoming commit\nwould overwrite, tracked or untracked — a strict subset no `status` field reproduces. A message two\ntools share may only assert what is true for both.\n\n`project_sync` takes the same per-project lock every mutating tool does, so a peer's\nwrite never interleaves with a fast-forward pull — and a peer waiting on that lock gives\nup after 30 seconds, so a sync that fetches for longer costs it one refused call rather\nthan a silently interleaved one.\n\nOnce past that peer guard — no live peer, or every live peer's work is already\ncommitted — the push still has to rebase, and git itself draws a further line:\n**untracked files never block it.** They ride through the rebase untouched, whoever\nleft them (a build artifact, a peer's new file after it has exited). What does block\nit is an **uncommitted modification to a file git already tracks**, because git cannot\nrebase over one; `push` refuses and names every such file, and offers the ways out —\n`commit` (this session's edits by default, `scope: \"all\"` for the whole tree), a\n`message` on push (which commits the _whole_ working tree, any peers' work included),\nor `discard`. Separately, if the incoming remote commit would **add** a path that\nalready exists, untracked, in the local tree, git refuses that specific rebase step\ntoo; `push` reports it by name and leaves the clone exactly as it was — nothing\npushed, no rebase left in progress. Either way, the fix is the same: commit the\ncolliding file (so the next push surfaces a proper conflict instead of this abort) or\ndelete/move it, then read the remote version with `read_file(path, ref=\"origin/<branch>\")`.\n\nIf a collaborator's push lands in the gap between our fetch and our push, `push` retries the same\npull-rebase-then-push sequence up to 3 rounds before giving up as `status: \"remote-moved\"` (nothing\npushed, clone intact) — a genuine rebase conflict on any round is reported immediately, not retried.\nTwo cases take one attempt only and report `remote-moved` on the first lost race: a `resolutions`\npush that passed `expectedRemoteHead` (the caller asked to be refused if the remote moved again), and\nbranch-mode landing, whose summary then prescribes the direct-mode push that recovers from it.\n\nThe practical rhythm: sessions commit as they finish a piece, and whoever pushes does\nso when the others are between edits.\n\n### What this does not do\n\n- **It is one machine only.** All of it rests on a shared filesystem. Two people on\n  two laptops see none of it, and coordinate through the remote as they always did.\n- **It attributes, it does not lock.** No session is prevented from editing any file.\n  Splitting the paper into per-section files remains the real defence — it makes\n  collisions rare rather than merely legible.\n- **A peer's `register_project { default: true }` reaches this session at once** — its next\n  call that omits `project` resolves to the peer's choice, whether or not this session had a\n  default before. Only a session that asserted one through `WEB_LATEX_MCP_DEFAULT_PROJECT`\n  keeps its own.\n- **A session that dies leaves its edits behind.** They stay in the working tree; once its\n  process is gone — or its recorded pid belongs to a different boot — and its heartbeat is\n  stale, it stops counting as live, and its files show up as changes no live session owns,\n  committable with `scope: \"all\"` or `scope: \"paths\"`.\n\n## Optional review flow for larger edits\n\nFor a big or risky change, you do not have to push straight to `main`. The `push`\ntool's **branch mode** stages the work on a **local** feature branch (never pushed —\nthe Overleaf bridge only reliably syncs the default branch) and returns its full diff\nagainst `main` for a human to read. Only on explicit approval does it rebase onto a\nfreshly fetched `main`, fast-forward, and push — with the same abort-and-surface behavior\nif the rebase conflicts. This is the right mode when you want eyes on the change\nbefore it reaches the shared document.\n\n---\n\n> Note: this server is branch-agnostic — it rebases onto whatever the clone's default\n> branch actually is. This document says `main` throughout because that is Overleaf's\n> current default; older projects may still use `master`, and everything here applies\n> unchanged to either.\n\n_Read alongside the [LaTeX writing guide](writing-guide.md): the editing habits it\nprescribes are what make these merges clean. For the tool-by-tool mechanics, see\n[`tools.md`](tools.md)._\n\n---\n\nThe user can leave review comments on the compiled PDF in this server’s local `viewer` (they select text and attach a note). When the user asks you to apply, address, resolve, or act on their PDF comments / feedback / review notes — e.g. “resolve my comments”, “apply my PDF feedback”, “address the comments” — run this loop for the relevant project:\n1. Call `list_comments` to get the open comments (each has the note, the selected `quote`, and the source `file`/`line` with a snippet).\n2. Make the requested change at each comment’s `file`/`line`, using the `quote` to pin the exact spot when the line is approximate.\n3. `compile` to confirm it still builds (the viewer hot-reloads).\n4. Call `resolve_comments` (all, or the specific `ids` you handled) so the viewer clears them.\nMake all the edits before resolving, and ask rather than guess when a comment is ambiguous.",
+  "durationMs": 56585,
+  "stderr": "[web-latex-mcp] server ready on stdio as session \"session-5b37f7c5\" (writing guide loaded) (concurrency guide loaded) (9 skills as prompts)\n[web-latex-mcp] client smallprint-runread v1\n"
+}
