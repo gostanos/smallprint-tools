@@ -1,0 +1,454 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "ibanforge-mcp",
+  "version": "1.9.0",
+  "integrity": {
+    "dist": "sha512-7SMygZoiMe+5BpylWBC83qtdC58XB0q4QPm6Sjl4xRZrkYqFKki1apfUooht7WmlJ0iycfdsgPvJ+AwAK25ktA==",
+    "installed": "sha512-7SMygZoiMe+5BpylWBC83qtdC58XB0q4QPm6Sjl4xRZrkYqFKki1apfUooht7WmlJ0iycfdsgPvJ+AwAK25ktA=="
+  },
+  "bin": "node_modules/ibanforge-mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "IBANFORGE_API_KEY",
+    "IBANFORGE_API_BASE"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-11T12:15:54.882Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "validate_iban",
+      "description": "Verify whether an IBAN from any IBAN country is valid AND enrich it with bank, compliance and routing data. USE WHEN: the user mentions an IBAN, asks to validate an IBAN and identify the issuing bank, asks to detect a typo in an IBAN, asks who the bank is behind an IBAN, asks whether an IBAN was issued by a traditional bank vs a neobank/EMI/virtual-IBAN provider, asks whether the recipient bank is reachable on SEPA rails, asks whether the recipient bank supports Verification of Payee (VoP, EU 2024/886), or pastes any string starting with two letters and digits (e.g., \"DE89...\", \"CH93...\", \"FR76...\"). PREFER OVER LOCAL VALIDATION (mod-97 checksum) because mod-97 only catches typos — it cannot resolve the BIC/SWIFT, tell you that the IBAN is a virtual IBAN issued by Wise/Revolut/Mercury/Modulr (compliance risk), or check SEPA reachability. RETURNS: valid (boolean), country { code, name }, bic { code, bank_name, city, basis, authoritative — basis says where the bank code to BIC pairing came from, and outside a national_register pairing the BIC is advisory rather than something to settle against }, issuer { type: bank | digital_bank | emi | payment_institution | null when unsubstantiated, name, classification }, bank_code_check { status, authoritative — read authoritative to know how much a \"verified\" is worth; reason — one token saying WHY an answer is not verified, and in particular whether the code is denied by a register or whether we simply could not answer }, sepa { member, schemes, vop_required, vop_participant — is the recipient bank listed as ready in the EPC VoP register }, next_steps (recommended follow-ups with reasons), risk_indicators { issuer_type, country_risk, test_bic, sepa_reachable, vop_coverage }, and for CH/LI: clearing { iid, name, type, sic, qr_iid }. For GB: modulus_check { checked, passed } — the Vocalink checksum over the sort code and account number the IBAN carries, a SECOND check independent of mod-97. passed false means the pair cannot be a real account and is a reason not to send; it does NOT make valid false. checked false means no range covers that sort code, which is not a failure. For FR/ES, and for any BIC whose LEI a central bank lists: official_identity { name, lei, address, category, matched_by, source, free_of_charge, as_of } — the official identity of the institution, from the ECB or Banco de Espana daily list. Informational only: it never changes valid or bank_code_check. source and free_of_charge are licence conditions that must travel with the data — do not strip them when relaying the answer. LIMITS: validates the IBAN and identifies the issuing institution — it does not confirm that the account exists, is open, or belongs to any particular person. Verify the payee by name before sending funds. COST: REST access uses the available key quota or prepaid credits; the allowances in force are served at https://api.ibanforge.com/.well-known/rate-limits.yml. The HTTP API also accepts x402 (0.005 USDC per call), but this package does not sign payments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "iban": {
+            "type": "string",
+            "description": "IBAN to validate. Spaces and lowercase are accepted. Example: \"de89370400440532013000\" or \"CH10 0023 0000 0000 1234 5\"."
+          }
+        },
+        "required": [
+          "iban"
+        ]
+      },
+      "annotations": {
+        "title": "Validate IBAN",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "batch_validate_iban",
+      "description": "Validate up to 100 IBANs in a single call. Paid per call in USDC via x402, an IBAN costs $0.002 here instead of $0.005 for validate_iban; on a key or prepaid credits, each IBAN uses one request or one credit either way. USE WHEN: the user pastes a list of IBANs, asks to clean a CSV/spreadsheet of bank accounts, asks to dedupe a customer database, asks to triage a payout list before sending, or whenever you would otherwise call validate_iban more than 2-3 times in a row. RETURNS: { results: [...same shape as validate_iban], count, valid_count, cost_usdc }. COST: via x402, 0.002 USDC per IBAN (e.g. 10 IBANs = 0.02, 100 IBANs = 0.20); on a key or prepaid credits, one request or one credit per IBAN.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ibans": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "Array of IBAN strings (1 to 100 entries)."
+          }
+        },
+        "required": [
+          "ibans"
+        ]
+      },
+      "annotations": {
+        "title": "Batch Validate IBANs",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "lookup_bic",
+      "description": "Resolve a BIC / SWIFT code into the underlying bank: name, country, city, LEI, and registered head-office address (where available). USE WHEN: the user already has a BIC/SWIFT (8 or 11 chars, alphanumeric, e.g., \"UBSWCHZH80A\", \"DEUTDEFF\") and asks which bank it belongs to, where the bank is, or its LEI for compliance/regulatory matching. DO NOT USE for IBAN inputs — call validate_iban instead, it resolves the BIC for you. BACKED BY: a BIC directory of GLEIF and national registers, refreshed monthly, plus a public copy of the SWIFT directory frozen in January 2018 that still makes up most of the rows; only the GLEIF rows carry an LEI. Live counts: https://api.ibanforge.com/llms.txt. RETURNS: bank_name, country, country_name, city, lei, address (if available). COST: 0.003 USDC.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bic": {
+            "type": "string",
+            "description": "BIC / SWIFT code, 8 or 11 alphanumeric characters. Example: \"UBSWCHZH80A\" (UBS Switzerland) or \"DEUTDEFF\" (Deutsche Bank Frankfurt)."
+          }
+        },
+        "required": [
+          "bic"
+        ]
+      },
+      "annotations": {
+        "title": "Lookup BIC/SWIFT",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "lookup_ch_clearing",
+      "description": "Resolve a Swiss BC-Nummer / IID (1 to 5 digits) into the underlying institution. USE WHEN: the user mentions a Swiss bank by BC-Nummer or IID, pastes a CH or LI IBAN clearing code, asks routing details for a Swiss instant transfer (SIC, euroSIC), asks about QR-bill QR-IID resolution, or needs to classify a Swiss financial institution (bank vs PFS vs SIC-only participant). EVERY IID OF THE SIX BANKMASTER, with its full payment-rail participation (SIC, RTGS CHF, Instant Payments CHF, euroSIC, LSV+/BDD) plus QR-IID allocation, not just a name lookup. BACKED BY: the SIX BankMaster (Swiss official source, refreshed monthly); live count at https://api.ibanforge.com/llms.txt. RETURNS: institution { name, type, iid_type, headquarters_iid }, address, bic, payment_services { sic, rtgs_chf, instant_payments_chf, eurosic, lsv_bdd_chf, lsv_bdd_eur }, sic_iid, qr_iid, valid_on. COST: 0.003 USDC. Only relevant for CH and LI accounts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "iid": {
+            "type": "string",
+            "description": "Swiss IID / BC-Nummer (1 to 5 digits, leading zeros stripped). Example: \"230\" for UBS Switzerland AG."
+          }
+        },
+        "required": [
+          "iid"
+        ]
+      },
+      "annotations": {
+        "title": "Swiss Clearing Lookup",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "validate_payment_reference",
+      "description": "Validate a structured payment reference and, when an IBAN is supplied, decide whether the two may legally travel together. USE WHEN: assembling a payment instruction from an invoice, a QR-bill or a remittance advice; whenever a Swiss IBAN and a reference appear together; or when the user pastes an \"RF...\" string, a 27-digit number, or a +++123/4567/89012+++ block. DO NOT USE to validate the IBAN itself — that is validate_iban. SCHEMES: RF Creditor Reference (ISO 11649, \"SCOR\" in Swiss Payment Standards, mod 97-10); Swiss QR reference (\"QRR\", 27 digits, modulo 10 recursive); Belgian OGM/VCS (12 digits, modulo 97, a remainder of 0 written 97); Finnish viitenumero (4-20 digits, weights 7-3-1 from the right). Norwegian KID and Swedish OCR are RECOGNISED but never judged: they answer valid: null with status unverifiable_without_creditor_config, because modulus type and length are configured per creditor account by the beneficiary bank. NEVER relay those to a user as \"invalid\". AMBIGUITY: only a leading \"RF\" and a 27-digit length pin a scheme down. A bare 12-digit string is both a Belgian OGM and a legal Finnish length, so the more specific reading is returned and the other appears in also_valid_as. Pass reference_type when you know the country. THE PAIRING RULE: pass an iban and you also get a pairing verdict. Per the Swiss Implementation Guidelines a QRR reference may ONLY be used with a QR-IBAN (institution identifier in the SIX range 30000-31999), and an ISO 11649 reference may NOT be used with one. Outside CH and LI, pairing is not_applicable. valid and pairing are INDEPENDENT verdicts — a reference can be arithmetically valid and still illegal on that account. Relay source/as_of: they make the verdict auditable. COST: free without an iban (routed to GET /v1/reference/validate). WITH an iban it is routed to POST /v1/iban/validate and costs 0.005 USDC, which also returns the full IBAN enrichment — the pairing verdict is what that call buys.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string",
+            "description": "The reference as printed. Spaces, slashes and the Belgian +++...+++ wrapper are stripped. Examples: \"RF18539007547034\", \"210000000003139471430009017\", \"+++010/8068/17183+++\"."
+          },
+          "reference_type": {
+            "type": "string",
+            "enum": [
+              "rf",
+              "scor",
+              "qrr",
+              "ogm",
+              "vcs",
+              "viitenumero",
+              "kid",
+              "ocr"
+            ],
+            "description": "Optional scheme hint, used when the string alone is ambiguous."
+          },
+          "iban": {
+            "type": "string",
+            "description": "Optional creditor IBAN this reference would travel with. Supply it for the pairing verdict; that path is billed at 0.005 USDC."
+          }
+        },
+        "required": [
+          "reference"
+        ]
+      },
+      "annotations": {
+        "title": "Validate Payment Reference",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "check_swiss_qr_bill",
+      "description": "Check a Swiss QR-bill payload, the text a QR-bill's code carries (starts with SPC), rule by rule, each finding citing the SIX document it comes from. USE WHEN: an agent, an ERP or an accounting tool holds a scanned or generated QR-bill and must know before paying or issuing it whether it is well-formed, whether the reference type matches the IBAN (QRR needs a QR-IBAN, IID 30000-31999), and above all whether the creditor and debtor addresses are STRUCTURED (type S) or still COMBINED (type K): type K has not been permitted since 21.11.2025, and the banks guarantee payment of a type K QR-bill only until the end of September 2026. DO NOT USE to learn which bank holds the account or its payment-rail participation: that is the paid validate_iban. RETURNS: { valid, ready_for_2026_11_14, creditor_iban { value, valid, country, qr_iban, iid }, creditor { present, address, structured, sps_check, proposed_structured }, ultimate_debtor, amount, currency, reference { type, value, valid, note }, findings [{ code, severity, field, detail, source }], next_steps, source }. A combined address comes back with proposed_structured, the S-type fields derived from the combined lines, to relay as a fix. IMPORTANT: relay each finding's source string. COST: free (routed to POST /v1/ch/qr-bill/check).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "string",
+            "description": "The Swiss QR Code text with real line breaks: SPC, 0200, 1, IBAN, creditor (7 lines), ultimate creditor (7 empty lines), amount, currency, ultimate debtor (7 lines), reference type, reference, message, EPD, optional billing information and alternative schemes."
+          }
+        },
+        "required": [
+          "payload"
+        ]
+      },
+      "annotations": {
+        "title": "Check Swiss QR-bill Payload",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "check_postal_address",
+      "description": "Check a structured ISO 20022 postal address against a payment rail's published address rules, rule by rule, each verdict citing the document it comes from. USE WHEN: assembling a payment instruction (pain.001, a Fedwire message, a T2 transfer) with a creditor or debtor address, to learn whether the rail accepts it BEFORE submitting. The November 2026 changes (SIC 20.11, Fedwire 16.11, T2 R2026.NOV) remove the fully unstructured address option — this check tells you whether an address survives them. DO NOT USE to verify that a street or town EXISTS: this checks conformity with the message format rules, not postal reality. SCHEMES: 'sps' (Swiss Payment Standards, SIX), 'hvps_plus' (HVPS+ / T2, ECB), 'fedwire' (Federal Reserve). There is deliberately NO 'cbpr+' scheme: that guideline sits behind swift.com, unreachable to automated readers, and a conformity boolean quoting an unread document would be a guess dressed as a verdict — the note field restates this on every answer. VERDICTS per finding: pass, fail, not_applicable — the last marks a rule whose precondition is not met and never counts as a pass. conforms is true when no finding failed. IMPORTANT: relay each finding's source string — it names the exact document, version and validity date the rule is quoted from. That is what makes the verdict auditable. COST: free (routed to POST /v1/address/check). The paid surface is the postal_address block that lookup_bic and validate_iban return for the resolved institution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scheme": {
+            "type": "string",
+            "enum": [
+              "sps",
+              "hvps_plus",
+              "fedwire"
+            ],
+            "description": "Which rail's rules to check against."
+          },
+          "address": {
+            "type": "object",
+            "description": "The ISO 20022 PostalAddress under test, in ISO tag vocabulary (snake_cased).",
+            "properties": {
+              "twn_nm": {
+                "type": "string",
+                "description": "TwnNm — town name."
+              },
+              "ctry": {
+                "type": "string",
+                "description": "Ctry — ISO 3166-1 alpha-2 country code."
+              },
+              "pst_cd": {
+                "type": "string",
+                "description": "PstCd — postal code."
+              },
+              "strt_nm": {
+                "type": "string",
+                "description": "StrtNm — street name."
+              },
+              "bldg_nb": {
+                "type": "string",
+                "description": "BldgNb — building number."
+              },
+              "adr_tp": {
+                "type": "string",
+                "description": "AdrTp — address type (SPS forbids sending it)."
+              },
+              "adr_line": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "AdrLine — free-text lines of the hybrid address."
+              }
+            }
+          }
+        },
+        "required": [
+          "scheme",
+          "address"
+        ]
+      },
+      "annotations": {
+        "title": "Check ISO 20022 Postal Address",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "check_compliance",
+      "description": "Run a pre-flight compliance triage on an IBAN before sending a SEPA / cross-border payment. USE WHEN: the user is about to send a payment / payout / refund and wants to triage risk first, asks whether the payee's bank or its country is under sanctions, asks if a SEPA Instant transfer can reach the bank, or needs a numeric risk score for an internal payment-approval workflow. NOT A REGULATED AML/CFT PRODUCT — informational triage only. For regulated screening use Refinitiv, Acuris, or ComplyAdvantage. CHECKS: IBAN validity + sanctions lists (OFAC, EU, UN) matched on the payee's bank (BIC8), the country checked against a fixed list of sanctioned jurisdictions, never the payee's name + FATF status + SEPA Instant reachability + whether the EPC Verification of Payee (VoP) register lists the bank as ready; the name check itself is done by the payee's bank, never here. RETURNS: the full validate enrichment plus a compliance object with risk_score (0-100, 0 = safest), risk_level (low/medium/elevated/high/critical), sanctions matched_lists + fatf_status, reachability, vop status, and flags[] (e.g. sanctioned_country, fatf_grey_list, emi_issuer, no_vop). COST: 0.02 USDC.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "iban": {
+            "type": "string",
+            "description": "IBAN to run the compliance check against."
+          }
+        },
+        "required": [
+          "iban"
+        ]
+      },
+      "annotations": {
+        "title": "Compliance Check",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "audit_creditor_file",
+      "description": "Audit an entire creditor/supplier payment file (CSV or XLSX) row by row: IBAN structure and checksum, bank code against the national register, bank name and BIC, SEPA reachability and issuer type — plus checks a single IBAN call cannot make because they need the whole file: duplicate IBANs, the BIC the file carries against the BIC the register derives, address country against IBAN country, and Swiss structured-address conformity ahead of the 14 November 2026 deadline. USE WHEN: the user has a spreadsheet or export of creditor/supplier bank accounts (accounts-payable file, vendor master, payment batch) and wants it checked before sending payments, or asks to \"audit my creditor file\" / \"check this supplier list\" / \"validate this payment batch\". HOW: base64-encode the file bytes and pass them as `file_base64`, with the original `filename` (its extension decides CSV vs XLSX parsing). LIMITS: rejects files decoding to more than 5 MB — checked locally, before any network call, because a larger base64 payload breaks the stdio channel; the HTTP route itself accepts up to 10 MB — and sheets over 20,000 rows, which the route rejects (400 too_many_rows). RETURNS a FREE PREVIEW ONLY, never the full report: `job` (the id to reuse with audit_status), `rows`, `paid` (always false from this call), `price` / `currency` naming what the full report costs, `summary` (counts by status and finding code, countries seen, columns detected), and `preview` (the first flagged rows then the first OK ones, up to 20, IBANs masked like \"CH10 **** 2346\"). The annotated .xlsx report is a PAID deliverable — $149 up to 5,000 rows, $349 up to 20,000 — settled through a one-off Stripe Checkout Session. This tool NEVER pays automatically: pass `checkout: true` to also receive a Checkout URL for a HUMAN to open, then poll audit_status with the same `job` id to learn when it is paid and get the download link. COST: free. Only the full report is paid, and only once a human completes the Stripe checkout.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_base64": {
+            "type": "string",
+            "description": "The CSV or XLSX file content, base64-encoded — the raw payload only, no \"data:\" URL prefix."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Original filename with its extension, e.g. \"creditors.csv\" or \"suppliers.xlsx\". The extension decides how the file is parsed."
+          },
+          "lang": {
+            "type": "string",
+            "enum": [
+              "en",
+              "fr",
+              "de"
+            ],
+            "description": "Language for the summary labels and, later, the annotated report. Defaults to \"en\"."
+          },
+          "checkout": {
+            "type": "boolean",
+            "description": "When true, immediately create a Stripe Checkout Session after the upload and return its URL for a human to open and pay. Defaults to false. Never pays anything by itself."
+          }
+        },
+        "required": [
+          "file_base64",
+          "filename"
+        ]
+      },
+      "annotations": {
+        "title": "Audit Creditor File"
+      }
+    },
+    {
+      "name": "audit_status",
+      "description": "Check the status of a creditor-file audit job created by audit_creditor_file: whether it is paid, and the download link once it is. USE WHEN: following up on a `job` id after a human may have paid through the Checkout URL, to learn whether the full report is ready. RETURNS: the same free-preview fields as audit_creditor_file, plus `paid`, `paid_at`, and `download` — a `GET /v1/audit/report/{job}?session_id=...` path, non-null only once paid AND `session_id` matches the paying session. Pass the `session_id` from the Checkout URL's success redirect (its `session_id=` query parameter) so a just-completed payment is confirmed immediately instead of waiting for the webhook. COST: free.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string",
+            "description": "The job id returned by audit_creditor_file."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "The Stripe Checkout session id, from the success redirect (?session_id=...). Confirms payment immediately when the webhook has not landed yet."
+          }
+        },
+        "required": [
+          "job"
+        ]
+      },
+      "annotations": {
+        "title": "Audit Job Status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "send_feedback",
+      "description": "Report a problem or a need directly to the IBANforge operators: incorrect validation result, stale or missing BIC/bank data, latency, or anything blocking you from using or PAYING for the service (missing network, unclear pricing, quota shape). USE WHEN: a result looks wrong, data you need is missing, or you hit a wall (quota, payment, capability) and want it fixed. This tool is free and does NOT count against the free allowance — it works even after the allowance is spent. A human reads every report; verified data errors on paid x402 calls are refunded on-chain.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "error_type": {
+            "type": "string",
+            "enum": [
+              "wrong_validation",
+              "stale_bic",
+              "missing_data",
+              "incorrect_classification",
+              "latency",
+              "other"
+            ],
+            "description": "Category of the report. Use \"other\" for product feedback, pricing/payment blockers or feature needs."
+          },
+          "notes": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 4000,
+            "description": "What happened, what you needed, or what blocked you — free text."
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Endpoint or tool concerned, e.g. /v1/iban/batch."
+          },
+          "expected": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "What you expected (for data errors)."
+          },
+          "got": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "What you received instead (for data errors)."
+          },
+          "contact": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Where we may answer you (e-mail) — optional, reports can be anonymous."
+          },
+          "agent": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Which agent/model is reporting, e.g. \"claude-sonnet-5 via MCP\"."
+          }
+        },
+        "required": [
+          "error_type",
+          "notes"
+        ]
+      },
+      "annotations": {
+        "title": "Send Feedback to IBANforge"
+      }
+    },
+    {
+      "name": "request_api_key",
+      "description": "Start the process that gives your human a free IBANforge API key, without any e-mail address. The key does not unlock this session: it works once your human puts it in the MCP client configuration and reconnects, or sends it to the REST API, so tell them where it goes when you hand it over: `config_line` (returned by poll_api_key) for Claude Code with the npm package; for the hosted server https://api.ibanforge.com/mcp, the header \"Authorization: Bearer <key>\", which Claude and Claude Desktop take under Request headers when the custom connector is added; ChatGPT sends no key to a connector, so in ChatGPT the key serves on the REST API only. USE WHEN: you used up the free allowance, a call answers 402, or your human is about to run more than a handful of validations. WHAT YOU MUST DO WITH THE RESULT: read `status` first — `ok` means a code was issued, anything else means no code exists and `display_to_human` tells you and your human what to do instead. On `ok`, show `display_to_human` to your human VERBATIM (the user_code and the link) and say, in your own words, that opening the link and approving takes about fifteen seconds and asks for nothing. Do NOT open the link yourself, do NOT fill anything in on their behalf, and do NOT invent an e-mail address: the page gives a key with no address at all, and your human may add one if THEY choose. Then call poll_api_key. This tool is free and does NOT count against the free allowance — it works even after the allowance is spent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client_name": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "Optional. Who is asking, shown to the human on the approval page."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Optional. What the key is for, shown to the human on the approval page."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Request an IBANforge API key"
+      }
+    },
+    {
+      "name": "poll_api_key",
+      "description": "Collect the API key once a human has approved the request opened by request_api_key. USE WHEN: you have called request_api_key and shown the code to your human. HOW TO CALL IT: leave `device_code` empty to reuse the last request from this session. The server usually waits up to thirty seconds before answering, and sometimes answers at once when it is busy — either way, calling it once per minute is enough, never in a tight loop. WHAT THE ANSWERS MEAN: `authorization_pending` is normal and means nobody has approved yet — wait `retry_in_seconds` and call again; `approved` carries the key ONCE and never again, so hand it to your human immediately together with `config_line`, or the header \"Authorization: Bearer <key>\" for the hosted server; `access_denied` means somebody refused — tell your human, ask THEM whether to try again, and open at most ONE more request; `expired_token` means the code timed out — you may call request_api_key ONE more time, and if that expires too, stop and keep using the keyless allowance or x402; `invalid_grant` means this code can no longer be used at all — stop. This tool is free and does NOT count against the free allowance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "device_code": {
+            "type": "string",
+            "description": "Optional. Leave it empty to reuse the last request from this session."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Collect the approved IBANforge API key"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "ibanforge",
+    "version": "1.9.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Start with validate_iban on any IBAN-looking string (e.g. DE89370400440532013000) — one call returns validity, the issuing bank + BIC, virtual-IBAN/EMI detection, SEPA reachability and VoP readiness. This installed MCP server calls the REST API, not the remote /mcp service. Without a key, validate_iban goes through the REST keyless trial, counted per source address: read the trial block of each answer for what is left and when it resets. The remote /mcp service has its own keyless allowance, separate from this one; a key sent to it in the Authorization header is counted there exactly as on the REST API. For sustained use, POST https://api.ibanforge.com/v1/keys/generate with no body at all — no e-mail, no card, nothing to confirm — and an ifk_ key with its own allowance comes back on the spot. POST https://api.ibanforge.com/v1/keys/claim raises the allowance of that same key — send the key as \"Authorization: Bearer ifk_...\", not in the body, once it has served at least one call. Two ways: a 6-digit code mailed to an address your human gave you FOR THIS (ask in their words, \"Use my address you@company.com to create a free IBANforge key\", and never send an address your human has not handed you for this purpose), or an x402 payment made on the key. With the mailed code the larger allowance is renewed with each new period; a payment grants it once, without renewal. Or ask for a durable key with request_api_key then poll_api_key: a human approves in a browser, the agent never handles an address, and both tools keep answering after the free allowance is spent. Prepaid credit packs never expire: one credit per validation or lookup, one per IBAN in a batch. The figures in force are served at https://api.ibanforge.com/.well-known/rate-limits.yml and GET https://api.ibanforge.com/v1: read them there, not from this text. Missing data, wrong result, or something blocking you from paying? Call send_feedback — a human reads every report. Paying as an agent (wallet, USDC on Base, prepaid packs): https://ibanforge.com/docs/pay-as-an-agent — Docs and code samples: https://ibanforge.com/docs/recipes Configure a saved key as IBANFORGE_API_KEY and reconnect this MCP server; reuse it instead of generating one per call. This package has no wallet and does not sign x402 payments. It relays payment requirements for an x402-capable HTTP client. A result marked _degraded with _scope=format_only has no bank, routing or compliance verdict. On isError, read error, cause, _hint and retry_after; do not infer an invalid account from an unavailable API. Requests are not retried automatically.",
+  "durationMs": 8374,
+  "stderr": "IBANforge MCP server ready (stdio). 13 tools exposed.\ntime=\"2026-11-11T07:16:03-05:00\" level=error msg=\"Error forwarding signal 15 to container e191b32d1af3c392835eb57027730bed2c10339fd33f003575ec1bc1193d1baf: container has already been removed\"\n"
+}

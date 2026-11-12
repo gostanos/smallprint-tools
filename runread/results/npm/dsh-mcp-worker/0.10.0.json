@@ -1,0 +1,494 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "dsh-mcp-worker",
+  "version": "0.10.0",
+  "integrity": {
+    "dist": "sha512-E32BsB0Gr3AO1mj2CxtMr10Mz3jhcQdP6o6HxSpUYtMxNRPqYQKRqw0YwRssPI8ei7vmpNRCUXdG2ZAD8xX2Vw==",
+    "installed": "sha512-E32BsB0Gr3AO1mj2CxtMr10Mz3jhcQdP6o6HxSpUYtMxNRPqYQKRqw0YwRssPI8ei7vmpNRCUXdG2ZAD8xX2Vw=="
+  },
+  "bin": "node_modules/dsh-mcp-worker/dist/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "3.25.76",
+    "sdk": "1.30.0",
+    "ajv": "8.20.0",
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-11T15:33:51.261Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "dsh_run",
+      "description": "把一个可验收的完整工作单元（功能点/bug/测试修复批次/跨文件重构）交给本机 DSH 异步执行，立即返回 task_id。DSH 自己规划并执行多步工具调用（读代码、改文件、跑测试），一次任务应覆盖「实现 + 自测 + 证据」；不要提交单步/逐文件微任务。之后用 dsh_status 长轮询（wait_s 60–120）到终态，dsh_result 取结果；中断用 dsh_cancel。cwd 传当前项目绝对路径。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "minLength": 1,
+            "description": "完整工作单元描述，建议包含：目标、[已定决策]、[待你判断]、[入口]（可选）、范围（可改/不可改）、验收命令与期望、证据要求；给目标与约束，不要写逐步操作清单"
+          },
+          "cwd": {
+            "type": "string",
+            "description": "任务执行目录（绝对路径）；缺省依次用 DSH_MCP_DEFAULT_CWD、worker 进程 cwd"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "续聊已有 DSH 会话时传入；同一 session 的任务串行执行"
+          },
+          "permission_mode": {
+            "type": "string",
+            "enum": [
+              "read-only",
+              "workspace-write",
+              "danger-full-access",
+              "auto"
+            ],
+            "description": "权限模式，默认 auto（worker 按 cwd 能力自动选 workspace-write / danger-full-access）"
+          },
+          "timeout_s": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 86400,
+            "description": "任务超时秒数，默认 1800；大任务可设 1800–3600"
+          },
+          "wait_s": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 600,
+            "description": "可选：提交后在本次调用里等待最多 N 秒（建议 60–120），减少 dsh_status 往返；任务未结束时返回中间状态"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "幂等键（可选）：同一 key 的重复提交返回同一个 task，重试不会重复派活（默认 24h 内有效，DSH_MCP_IDEM_TTL_H 可配）"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "dsh_status",
+      "description": "查询任务状态与增量事件摘要（单条事件 ≤ 2KiB，单次载荷 ≤ 16KiB）；完整原始事件仍会落盘，用 dsh_read_result(source=events) 分页读取。默认 detail=summary 只返回状态/异常事件与 last_text（省 leader 上下文）；排查 worker 行为时用 detail=events。status 为 succeeded/failed/cancelled 表示结束，outcome 给出 completed/needs_decision/failed/cancelled。用 wait_s 长轮询（建议 60–120s）一次等更久，减少 leader 往返；不要用 5–25s 高频轮询。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "dsh_run 返回的任务 id"
+          },
+          "cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "上次返回的 next_cursor，用于只取增量事件"
+          },
+          "wait_s": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 600,
+            "description": "长轮询等待秒数（默认 0）；实际上限由 worker 配置 DSH_MCP_STATUS_WAIT_MAX_S 决定（当前 120s）"
+          },
+          "detail": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "events"
+            ],
+            "description": "summary=仅状态与异常事件（默认，省 leader 上下文）；events=返回全部工具/文本事件（排查用）"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_result",
+      "description": "任务结束后获取最终结果。验收优先看 `evidence`（命令退出码、变更文件、git diff 摘要）与 `outcome`（completed/needs_decision/failed/cancelled）；失败/取消时看 `failure_kind`（如 sandbox_acl）、`sandbox_blocked`/`sandbox_blocked_detail` 与 `attempts`（逐次尝试 + 首次决策文本，避免归因丢失）；`output` 是 DSH 的叙述。输出过大时会自动落盘并返回文件路径；传 offset/max_chars 可在本次调用里直接分页续读。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "dsh_run 返回的任务 id"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "从最终输出的第 N 个字符开始读（分页续读；用上次返回的 output_pagination.next_offset）"
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 200000,
+            "description": "本次最多返回多少字符，默认 40000"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_cancel",
+      "description": "取消排队中或运行中的任务：运行中的任务会杀掉整个进程树。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "dsh_run 返回的任务 id"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_describe",
+      "description": "返回 worker 版本、DSH 入口、默认参数与限制，便于 leader 自适应调用方式。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_tasks",
+      "description": "列出最近的任务摘要（task_id / 状态 / 任务预览 / cwd / 时间 / 错误），用于回顾历史与继续轮询。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "返回条数，默认 20"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "description": "按状态过滤"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_audit",
+      "description": "读取最近的审计事件（任务创建/开始/结束/取消、审批决定等），用于追溯与排障。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "返回最近多少条，默认 50"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_read_result",
+      "description": "分页读取任务落盘产物：result=最终结果（超长落盘时）、events=完整事件流、diff=git.patch、evidence=结构化证据 JSON。仅限任务目录内。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "任务 id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "result",
+              "events",
+              "diff",
+              "evidence"
+            ],
+            "description": "result=最终结果；events=事件流 JSONL；diff=完整 diff.patch；evidence=结构化证据 JSON；默认 result"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "字符偏移，默认 0"
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 100000,
+            "description": "本次最多返回字符数，默认 20000"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_batch_run",
+      "description": "一次并行派发多个彼此独立、各自可验收的工作单元（每个任务仍应覆盖「实现+自测+证据」），立即返回 batch_id；用 dsh_batch_status / dsh_batch_result 聚合查询。不要用它串行拆解同一工作流。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "完整工作单元描述（目标/范围/验收/证据），不是单步指令"
+                },
+                "cwd": {
+                  "type": "string",
+                  "description": "该任务的执行目录；缺省用默认 cwd"
+                },
+                "session_id": {
+                  "type": "string",
+                  "description": "该任务续用的 session"
+                },
+                "permission_mode": {
+                  "type": "string",
+                  "enum": [
+                    "read-only",
+                    "workspace-write",
+                    "danger-full-access"
+                  ]
+                },
+                "timeout_s": {
+                  "type": "integer",
+                  "minimum": 5,
+                  "maximum": 86400
+                }
+              },
+              "required": [
+                "task"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "description": "任务数组（1–8 个）"
+          }
+        },
+        "required": [
+          "tasks"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "dsh_batch_status",
+      "description": "返回批量任务的整体状态、各子任务状态与计数；wait_s>0 时轮询到批量结束或超时。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "dsh_batch_run 返回的 batch_id"
+          },
+          "wait_s": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 25,
+            "description": "长轮询等待秒数（默认 0）"
+          }
+        },
+        "required": [
+          "batch_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_batch_result",
+      "description": "返回批量中每个任务的最终输出/错误/耗时；单条输出超过 max_output_chars 会截断（完整内容用 dsh_read_result）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "dsh_batch_run 返回的 batch_id"
+          },
+          "max_output_chars": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 100000,
+            "description": "单条输出最大字符数，默认 4000"
+          }
+        },
+        "required": [
+          "batch_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_search",
+      "description": "在已记录任务的最终输出与工具结果里做子串检索，返回匹配任务与上下文片段。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "检索词（大小写不敏感）"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "最多返回多少条，默认 20"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_metrics",
+      "description": "返回任务计数、耗时分位（avg/p50/p95/max）、DSH 侧 token 汇总、并发限制、排队情况、后端与 OTel 状态；用于 leader 自适应与「省 token/提速」核对。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dsh_usage",
+      "description": "按时间窗口聚合任务数/状态分布/耗时/DSH token 与估算费用（单价 DSH_MCP_PRICE_*、汇率 DSH_MCP_USD_CNY），并给出按 cwd 的 top 分布；数据来自任务记录（含重启恢复）。用于回答「这批活花了多少」。费用为估算值，仅供参考。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "description": "统计最近多少天，默认 1"
+          },
+          "cwd": {
+            "type": "string",
+            "description": "只统计某个工作目录（可选）"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "dsh-mcp-worker",
+    "version": "0.10.0"
+  },
+  "protocolVersion": null,
+  "instructions": "DSH（DeepSeek Harness）worker：把可验收的完整工作单元交给本机 DSH 执行，并返回结果。\n粒度原则（最重要）：一个 dsh_run = 一个可独立验收的工作单元，默认包含「定位 → 实现/修改 → 自测 → 证据汇总」。典型粒度：一个功能点、一个 bug、一个测试修复批次、一次跨文件重构。禁止把同一工作拆成逐文件/逐命令/逐步骤的微任务——那会让 leader 付出更多思考与往返 token，反而更慢。\n分工原则：leader 负责决策与验收，DSH 负责执行与迭代；执行密集（读代码/改文件/跑测试/机械重构/批量核对）交给 DSH，需要业务语义/方案权衡/根因判断时 leader 先决策再外包。任务建议写 [已定决策] 与 [待你判断]，DSH 遇到需决策的分支应停下汇报，不要猜。\n任务文本四要素：目标（做什么、为什么）、范围（可改/不可改、入口文件可选——不知道就不写）、验收（要跑的命令与期望结果，失败附输出）、证据（变更文件清单 + 测试结果 + 风险点）。给目标与约束，不要让 DSH 逐步等你确认；DSH 会自己规划多步工具调用。\n使用顺序：1) dsh_run 提交（可带 wait_s=60–120 在本次调用里直接等结果）；2) dsh_status(task_id, wait_s=长轮询，建议 60–120s) 等到终态；3) dsh_result 取结果；中断用 dsh_cancel。不要 5–25 秒高频轮询，也不要在 DSH 执行期间重复做同一件事。\ncwd 必须是具体项目目录绝对路径（不要用用户主目录；Windows 沙箱下 shell 可能不可用）。\npermission_mode：默认 auto（worker 按 cwd 能力自动选 workspace-write / worktree / read-only / danger-full-access，调用方不需要手选）；也可显式传 read-only / workspace-write / danger-full-access。\n并行：彼此独立的工作流用一次 dsh_batch_run 派发（每个任务仍各自包含完整验收），不要拆成串行小任务。\n续聊：同一工作单元后续修正把首次返回的 session_id 传回 dsh_run，不要新建多个孤立任务。\n验收：leader 只审阅结构化事实并决定是否返工——优先看 dsh_result 的 evidence（命令退出码/变更文件/git diff 摘要）与 outcome；outcome=needs_decision 时用原 session_id 回答；output 是 DSH 的叙述，不作为唯一依据。不要逐步重做 DSH 已完成的工作；DSH 失败时把 error 原样反馈用户。\n历史任务用 dsh_tasks 回顾；审计事件用 dsh_audit；dsh_result 输出过长落盘时用 dsh_read_result 分页读取（source=result/events/diff/evidence）；运行指标用 dsh_metrics。\n长任务依赖异步任务模型：不要在一次工具调用里反复短轮询等待。\n用量与成本：用 dsh_usage(days, cwd) 查看窗口内任务数/耗时/DSH token 与估算费用（单价可用 DSH_MCP_PRICE_* 覆盖）；单任务费用见 dsh_result.usage.cost_usd/cost_cny。费用是估算值，仅供参考。\n重试安全：同一工作单元重试时可带相同的 idempotency_key，重复提交会返回同一个 task，不会重复派活。\n控制 DSH 上下文：在 task 里要求 DSH 先用 grep/glob 定位、只读必要片段（DSH 的 token 大头是 cacheRead）；大结果让它写文件、只回摘要，再用 max_chars/offset 分页读取。",
+  "durationMs": 6294,
+  "stderr": "[dsh-mcp-worker] DSH 兼容检查（pwsh-encoding）：未找到 dsh-pwsh-local（入口不是 node bin.js）；跳过编码补丁检查\n[dsh-mcp-worker] DSH 兼容检查（output-decoding）：未找到 dsh-subprocess-local（入口不是 node bin.js）；跳过输出解码补丁检查\n[dsh-mcp-worker] 传输=stdio\n[dsh-mcp-worker] 已启动：dsh 入口=PATH(dsh)\n[dsh-mcp-worker] 后端=sdk 长驻（profile=sdk，provider/model=deepseek-official/deepseek-flash，空闲回收=10min）\n[dsh-mcp-worker] 默认 cwd=(缺省用调用方 cwd)；任务目录=/tmp/.dsh/mcp-tasks\n[dsh-mcp-worker] 默认权限=auto；并发=2（每 cwd 1）；超时=1800s\n[dsh-mcp-worker] 任务保留=1440min / 上限 500 个；审计日志=/tmp/.dsh/mcp-audit/audit.jsonl\n[dsh-mcp-worker] 幂等索引=/tmp/.dsh/mcp-idem（TTL 24h）；费用单价 in/cacheRead/out=$0.28/$0.028/$0.42 per Mtok，汇率=6.65\n[dsh-mcp-worker] 收到 stdin 已关闭，正在退出…\n"
+}
