@@ -1,0 +1,882 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@j0hanz/filesystem-mcp",
+  "version": "2.20.0",
+  "integrity": {
+    "dist": "sha512-0S2uWcRYBurMsGgU9e8+xOQKCK6a8G6roiGNj+xAP+nSwuXRoLEXEryPBIMkJfJJcEQTTesD1iGdI/2QDIC+Lg==",
+    "installed": "sha512-0S2uWcRYBurMsGgU9e8+xOQKCK6a8G6roiGNj+xAP+nSwuXRoLEXEryPBIMkJfJJcEQTTesD1iGdI/2QDIC+Lg=="
+  },
+  "bin": "node_modules/@j0hanz/filesystem-mcp/dist/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "FS_ALLOWED_DIRS",
+    "FS_READ_ONLY_DIRS"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-12T13:12:53.104Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "create",
+      "description": "Write whole text files (new, overwrite, or append) and create empty directories, with missing parents. Use when you have full content or need folders. Do not use it for partial edits; use `edit`, `replace_text`, or `patch` instead, and `move` to copy or rename. Whole-file writes are atomic (temp file, then rename); appends are not. An existing file is replaced only with overwrite: true or after one user confirmation for the batch; nothing is written before the answer. Declined entries fail with CANCELLED; skipped ones land in skipped. Entries fail alone; the call errors only when all fail. Returns files (path, size, lineCount, mimeType, kind, resourceUri, created, modified), directories, failures, skipped, and an undo id for `undo` (30 min), or undoUnavailable.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "description": "Files to write. Give files, directories, or both. Combined content per call is at most FS_MAX_FILE_SIZE (default 10 MiB).",
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "description": "Absolute file path inside a writable root; one entry per file."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Full text to write, verbatim, as UTF-8."
+                },
+                "append": {
+                  "description": "Add content to the end, adding no newline; creates a missing file. Never asks; wins over overwrite. lineCount is 0 past FS_MAX_FILE_SIZE.",
+                  "type": "boolean"
+                },
+                "overwrite": {
+                  "description": "Replace an existing file without asking. Without it, a client that cannot show the prompt fails the whole call with INVALID_INPUT.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "directories": {
+            "description": "Empty directories, created recursively; an existing directory succeeds; a path also listed in files is rejected.",
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "File or directory path inside an allowed workspace root."
+            }
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "delete",
+      "description": "Delete files, directories, and symlinks. Use when a path should no longer exist. Do not use it to rename or relocate; use `move` instead, and `undo` to restore. A symlink is removed, never its target. A non-empty directory needs `recursive: true`, else that path fails INVALID_INPUT, and user confirmation; nothing is deleted until all are answered, and a client that cannot prompt fails the whole call INVALID_INPUT. Deleting a folder that holds protected files cannot be undone. Otherwise each path fails alone (ACCESS_DENIED: root, read-only, outside; CANCELLED: refused or changed; INVALID_INPUT: nested pair). Returns per-path { deleted } or { error } (a skipped prompt gives deleted: false), a summary, and an undo id valid 30 minutes, or undoUnavailable with the reason.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "minItems": 1,
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "File or directory path inside an allowed workspace root."
+            },
+            "description": "Exact paths (no globs): files, directories, or symlinks. Duplicates collapse"
+          },
+          "recursive": {
+            "default": false,
+            "description": "Required for a non-empty directory, else INVALID_INPUT.",
+            "type": "boolean"
+          },
+          "ignoreIfNotExists": {
+            "default": false,
+            "description": "True: a missing path returns deleted: true instead of failing NOT_FOUND",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "diff",
+      "description": "Compare two text files and return a unified diff from a to b. Use when you need line differences between two files on disk. Do not use it to find text across files; use `search_text` instead. To preview your own pending change, use the dryRun option of the write tools. Neither file is changed. Binary and non-UTF-8 files fail. A file over the size limit fails with TOO_LARGE. So does a diff not done within 1 s, or a full diff queue; retry once, then `read` matching line ranges. a is the - side and b the + side; swap them to reverse the diff. context only sets how many unchanged lines surround each hunk, not what counts as a change. Returns ---/+++ headers (basenames) and @@ hunks; identical files give headers only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Original file; its lines are the - side"
+          },
+          "b": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Changed file; its lines are the + side"
+          },
+          "context": {
+            "default": 3,
+            "description": "Unchanged lines shown around each hunk; output size only",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "a",
+          "b"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "edit",
+      "description": "Replace exact, unique text snippets in up to 5 existing text files. Use when you know the exact text to change. Do not use it for every match of a pattern; use `replace_text` instead. To apply a unified diff, use `patch`; for a new file or a whole rewrite, use `create`. Each file is all or nothing: an unmatched or ambiguous oldText writes nothing to that file, and other files still run; dryRun reports unmatched text instead of failing. Missing, binary, non-UTF-8, and over-size-cap (default 10 MiB) files fail. Returns one summary line per file (+added -removed, NO MATCH, or FAILED); a dry run appends unified diffs. With undo enabled, live runs add an undo id for `undo`, valid 30 minutes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "One file to edit; give edits with it. Not allowed with files",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "edits": {
+            "description": "Replacements for path, applied in order; each oldText is matched against the text the earlier edits left. Required with path",
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "oldText": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1048576,
+                  "description": "Exact text to find. It must match exactly once, so include 3-5 lines of context. Several matches fail and list up to 5 line numbers.",
+                  "examples": [
+                    "const x = 1;",
+                    "function oldName("
+                  ]
+                },
+                "newText": {
+                  "type": "string",
+                  "description": "Replacement text. Use an empty string to delete the matched oldText.",
+                  "examples": [
+                    "const x = 2;",
+                    "function newName(",
+                    ""
+                  ]
+                }
+              },
+              "required": [
+                "oldText",
+                "newText"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "files": {
+            "description": "Batch mode: one entry per file, each with its own edits",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "description": "File to edit; each file appears once"
+                },
+                "edits": {
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "oldText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1048576,
+                        "description": "Exact text to find. It must match exactly once, so include 3-5 lines of context. Several matches fail and list up to 5 line numbers.",
+                        "examples": [
+                          "const x = 1;",
+                          "function oldName("
+                        ]
+                      },
+                      "newText": {
+                        "type": "string",
+                        "description": "Replacement text. Use an empty string to delete the matched oldText.",
+                        "examples": [
+                          "const x = 2;",
+                          "function newName(",
+                          ""
+                        ]
+                      }
+                    },
+                    "required": [
+                      "oldText",
+                      "newText"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Replacements for this file, applied in order; each oldText is matched against the text the earlier edits left"
+                }
+              },
+              "required": [
+                "path",
+                "edits"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Write nothing; return a unified diff per file. An unmatched oldText is reported instead of failing; an ambiguous one still fails",
+            "type": "boolean"
+          },
+          "ignoreWhitespace": {
+            "default": false,
+            "description": "Match oldText ignoring indentation and spacing, never across line breaks; newText is re-indented to the match",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list",
+      "description": "List a directory inside the roots as a name tree, walking up to maxDepth levels. Use when you need to see what a folder holds. Do not use it to find files by name or glob; use `find_files` instead, `read` or `search_text` for contents, `stat` for one path. Skips hidden entries, .gitignore matches, and build and tool folders unless includeHidden or includeIgnored is set, naming the ignore-rule folders it hid. Folders at maxDepth are shown, but their contents are not listed or counted. At most 20,000 entries are kept. A timeout returns a partial result with stoppedReason. Errors: NOT_DIRECTORY for a file, ACCESS_DENIED outside the roots. Returns tree text, entries[{name, relativePath, type, size?}], totalEntries/Files/Directories, unexpandedDirectories, skippedInaccessible, and when cut nextCursor and resourceUri (about 60 s).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "Directory to list (default: the only root; required with several roots)",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "maxDepth": {
+            "default": 1,
+            "description": "Levels to walk; 1 = direct children. Directories at the limit are shown, not expanded.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 50
+          },
+          "maxEntries": {
+            "default": 1000,
+            "description": "Entries per page; changing it keeps a cursor valid",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20000
+          },
+          "includeHidden": {
+            "default": false,
+            "description": "Include hidden items (starting with .)",
+            "type": "boolean"
+          },
+          "includeIgnored": {
+            "default": false,
+            "description": "Include .gitignore matches and build and tool folders (node_modules, .git, dist, build, out, tmp, coverage)",
+            "type": "boolean"
+          },
+          "includeSizes": {
+            "default": false,
+            "description": "Show file sizes and a totals line in the tree (stats every file, slower on big trees)",
+            "type": "boolean"
+          },
+          "sortBy": {
+            "default": "name",
+            "description": "Order within each directory, after directories (size: largest file first; sizes appear only with includeSizes)",
+            "type": "string",
+            "enum": [
+              "name",
+              "size"
+            ]
+          },
+          "cursor": {
+            "description": "Opaque pagination cursor. Pass it unchanged for the next page. Pages come from one snapshot taken on the first call. It expires after ~60s; if rejected, retry without a cursor.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "move",
+      "description": "Move, rename, or copy files and directories inside the roots. Use when you need to rename, relocate, or duplicate (copy: true). Do not use to change contents (`edit`, `patch`) or remove paths (`delete`). Missing parents are created. An existing destination asks to confirm; declining cancels the call, skipping drops that pair. Only copies can bypass the prompt (overwrite: true). A directory move never merges into a non-empty directory; a copy merges. Pairs that share a destination or overlap another pair fail; run dependent moves separately. Returns summary lines naming each pair and failure, and { moves: [{ from, to }], failures?, skipped?, undo id for `undo` (30 minutes) or undoUnavailable }; an error only if every pair failed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "moves": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "description": "Existing file, directory, or symlink"
+                },
+                "destination": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "description": "Full target path including the new name, not a parent folder"
+                }
+              },
+              "required": [
+                "source",
+                "destination"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Pairs run independently, with no rollback; a declined overwrite still cancels them all"
+          },
+          "copy": {
+            "default": false,
+            "description": "Copy and leave sources in place instead of moving",
+            "type": "boolean"
+          },
+          "overwrite": {
+            "default": false,
+            "description": "Copy only: replace existing destinations without confirmation",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "moves"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "patch",
+      "description": "Apply a single-file unified diff to one existing UTF-8 text file. Use when you hold a unified diff. Do not use it for one exact snippet; use `edit` instead. For pattern matches use `replace_text`; for new files, `create`. All or nothing: if any hunk mismatches its context, nothing is written; INVALID_INPUT usually names it. Header line numbers may be off. A diff of context lines only writes nothing and records no undo. File lines x diff lines over 10,000,000 fails with TOO_LARGE. Returns path, linesAdded, linesRemoved, size, lineCount, mimeType, kind, modified, resourceUri when linkable, and an undo id for `undo` (30 minutes) or undoUnavailable; dryRun adds the resulting diff.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Existing text file to patch. Overrides the ---/+++ names in diff."
+          },
+          "diff": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1048576,
+            "description": "Single-file unified diff, at least one @@ hunk, hunks in file order. Multi-file diffs are rejected; a leading BOM is ignored."
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Check every hunk and return the resulting diff; write nothing. Counts come from the recomputed diff unless it times out.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "diff"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "read",
+      "description": "Read one file or up to 1000, whole or as a line slice. Use when you know the path. Do not use it to check size or existence; use `stat` instead. To locate content, use `search_text`, `find_files`, or `list`. Only whole reads return images and audio as media; other binary files fail with BINARY_FILE unless binary: true. Past the size limit, a whole read fails with TOO_LARGE; a single-path head or range is truncated. A batch shares a 512 KiB budget: an overflowing file is skipped and later files still read. isError means every path failed. Pick one slice (head, tail, or startLine/endLine); it applies to every batch file. Returns text plus per-path results[]: an error, or linesRead, hasMoreLines, continuation args, modified, optional contentHash. Full reads add totalLines; a tail gets no continuation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeHash": {
+            "default": false,
+            "description": "Include SHA-256 of the returned content (the slice for a partial read).",
+            "type": "boolean"
+          },
+          "binary": {
+            "default": false,
+            "description": "Return a non-image, non-audio binary file as a base64 resource. Whole reads only. Without it, such a file fails with BINARY_FILE.",
+            "type": "boolean"
+          },
+          "lineNumbers": {
+            "default": false,
+            "description": "Prefix each line with its number and a tab. Not with tail. Leave the prefix out of edit text.",
+            "type": "boolean"
+          },
+          "head": {
+            "description": "First N lines. Not with tail or startLine/endLine.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "tail": {
+            "description": "Last N lines. Not with head, startLine/endLine, or lineNumbers.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "startLine": {
+            "description": "First line, 1-based. Without endLine, reads to the end.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "endLine": {
+            "description": "Last line, inclusive. Requires startLine.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "path": {
+            "description": "Single file path; mutually exclusive with paths",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "paths": {
+            "description": "Array of file paths for batch mode (max 1000); mutually exclusive with path",
+            "minItems": 1,
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "File or directory path inside an allowed workspace root."
+            }
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "replace_text",
+      "description": "Replace every match of literal text or an RE2 regex in one file or across a directory tree. Use when the same change must land at every occurrence. Do not use it for one unique snippet; use `edit` instead, `patch` for a unified diff, or `search_text` to only find matches. A live run rewrites each file as the scan reaches it; one failed file does not stop the others. Reaching maxMatches (default 100), maxFiles, or the deadline stops the run; files already rewritten stay changed. Returns changed paths, failures, skip counts, stoppedReason, and an undo id (live runs, when undo is enabled) for `undo`, valid 30 minutes. isError is set when every file failed or the request is invalid (bad regex, path outside roots).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "File or directory to rewrite. A named file ignores pattern, hidden, and gitignore filters, and fails if binary or too large. Omitted, it targets the ENTIRE single root (required with several roots); try a wide scope with dryRun=true first",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "pattern": {
+            "description": "Glob limiting which files under a directory path are rewritten (e.g. **/*.ts). Without /, it matches file names at any depth. Ignored when path names a file",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "examples": [
+              "**/*.ts",
+              "src/**/*.js",
+              "**/*.{ts,tsx}"
+            ]
+          },
+          "searchPattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "Literal text or RE2 regex to find; can span lines. With isRegex=true, ^ and $ match per line (\\A and \\z for the whole file); no lookaround or backreferences. All-CRLF files match as LF: write \\n."
+          },
+          "replacement": {
+            "type": "string",
+            "maxLength": 10000,
+            "description": "Replacement text. An empty string deletes matches.",
+            "examples": [
+              "$1_renamed",
+              "",
+              "TODO: fix"
+            ]
+          },
+          "isRegex": {
+            "default": false,
+            "description": "Treat searchPattern as an RE2 regex and expand $1, $<name>, and $& in replacement (default: literal text match)",
+            "type": "boolean"
+          },
+          "includeHidden": {
+            "default": false,
+            "description": "Include hidden items (starting with .)",
+            "type": "boolean"
+          },
+          "includeIgnored": {
+            "default": false,
+            "description": "Include ignored items (node_modules, .git, etc).",
+            "type": "boolean"
+          },
+          "caseSensitive": {
+            "default": true,
+            "description": "Match case exactly. Unlike search_text, defaults to true.",
+            "type": "boolean"
+          },
+          "wholeWord": {
+            "default": false,
+            "description": "Match whole words only",
+            "type": "boolean"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Preview without writing. Always returns the diff, never an undo id.",
+            "type": "boolean"
+          },
+          "returnDiff": {
+            "default": false,
+            "description": "Include the unified diff in a live run. Cut at 20 KB.",
+            "type": "boolean"
+          },
+          "maxMatches": {
+            "description": "Maximum matches replaced across all files (default: 100). Setting it makes the scan sequential and exact.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "maxFiles": {
+            "description": "Stops after this many files scanned, counting files with no match; reports stoppedReason=maxFiles (default: no limit)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "maxDepth": {
+            "description": "Max directory depth. 0 scans only the base directory. Omit for no limit.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "searchPattern",
+          "replacement"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_roots",
+      "description": "List roots this server can access and its read-only directories. Use for allowed paths or after ACCESS_DENIED. Do not use it to browse; use `list`, `find_files`, or `stat` instead. Accepted grants add roots; call again after one. Outside paths prompt a grant only on elicitation clients, never for home, system paths, or anything outside FS_ROOT_BOUNDARY. Returns absolute { roots, readOnlyDirs (writes, moves, deletes refused), hint? when roots is empty }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "search_text",
+      "description": "Search file contents under the roots for literal text or an RE2 regex. Use when you need the files and lines that contain some text. Do not use it to find files by name; use `find_files` instead. A regex may span lines; the hit is on its first line. Skips hidden entries, .gitignore matches, and build folders unless includeHidden or includeIgnored. Lines over 1000 chars are clipped around the match. Stops early at 10000 matching lines or the timeout, setting stoppedReason. Returns root, `file:line: text` rows (a named file prints its path once), matches with column and context, totals, skip counts, nextCursor (expires after about 60 s), and resourceUri for a multi-page or stopped first page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "File or directory to search (default: the only root). A named file is searched alone: pattern, maxDepth, and hidden/ignored filtering do not apply. Result paths are relative to the root, not to path.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "pattern": {
+            "description": "Glob limiting which files are searched: *.ts matches names at any depth, src/**/*.ts matches paths relative to path. Default: all files.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "examples": [
+              "**/*.ts",
+              "src/**/*.js",
+              "**/*.{ts,tsx}"
+            ]
+          },
+          "searchPattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "Text to find, literal unless isRegex is true. RE2 has no lookahead, lookbehind, or backreferences."
+          },
+          "isRegex": {
+            "default": false,
+            "description": "Treat searchPattern as an RE2 regex",
+            "type": "boolean"
+          },
+          "includeHidden": {
+            "default": false,
+            "description": "Include hidden items (starting with .)",
+            "type": "boolean"
+          },
+          "includeIgnored": {
+            "default": false,
+            "description": "Include ignored items (node_modules, .git, etc).",
+            "type": "boolean"
+          },
+          "caseSensitive": {
+            "default": false,
+            "description": "Match case exactly. replace_text matches case by default, so pass true to preview what it will replace.",
+            "type": "boolean"
+          },
+          "maxResults": {
+            "default": 500,
+            "description": "Matching lines per page; context lines do not count. Later pages come via cursor.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "context": {
+            "default": 0,
+            "description": "Lines shown before and after each match, like grep -C.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "maxDepth": {
+            "description": "Max directory depth. 0 scans only the base directory. Omit for no limit.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "cursor": {
+            "description": "Opaque pagination cursor. Pass it unchanged for the next page. Pages come from one snapshot taken on the first call. It expires after ~60s; if rejected, retry without a cursor.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "searchPattern"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "find_files",
+      "description": "Find files whose name or path matches a glob under a directory. Use when you know a name or path pattern but not the location. Do not use it for file contents; use `search_text` instead. To browse a folder, use `list`. Matches files, never directories. Skips hidden entries, .gitignore matches, and build folders unless includeHidden or includeIgnored. Scanning stops at 10,000 matches (stoppedReason maxResults) or the time limit (FS_TOOL_TIMEOUT_MS, default 5 s; stoppedReason timeout) and still returns what it found. path must be an existing directory; a file path is rejected. maxResults sizes a page, not the scan; page on with nextCursor (expires after about 60 s, then search again without it). Returns root, results[{ path }], totalMatches, filesScanned, and when set nextCursor, stoppedReason, skippedInaccessible (entries it could not read), excludedDirs (skipped folders: total and first 5), resourceUri (all kept matches). Paths are relative to root when unambiguous, otherwise absolute.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "Existing directory to search under. Required with several roots. Patterns with / match from here.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Glob. Without / it matches file names at any depth (*.ts). With / it matches paths relative to path (src/**/*.ts).",
+            "examples": [
+              "**/*.ts",
+              "src/**/*.js",
+              "**/*.{ts,tsx}"
+            ]
+          },
+          "maxResults": {
+            "default": 100,
+            "description": "Files per page; totalMatches counts all kept matches.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "includeIgnored": {
+            "default": false,
+            "description": "Include ignored items (node_modules, .git, etc).",
+            "type": "boolean"
+          },
+          "includeHidden": {
+            "default": false,
+            "description": "Include hidden items (starting with .)",
+            "type": "boolean"
+          },
+          "sortBy": {
+            "default": "path",
+            "description": "name: by file name across folders, ties by path. Sorts the first 10,000 kept matches before paging.",
+            "type": "string",
+            "enum": [
+              "name",
+              "path"
+            ]
+          },
+          "maxDepth": {
+            "description": "Max directory depth. 0 scans only the base directory. Omit for no limit.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "cursor": {
+            "description": "Opaque pagination cursor. Pass it unchanged for the next page. Pages come from one snapshot taken on the first call. It expires after ~60s; if rejected, retry without a cursor.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "stat",
+      "description": "Get metadata for files or directories. Use when you need to check existence, size, or read cost. Do not use for contents; use `read` instead, `list` for directory entries, or `find_files` to find by name. Pass `path` or `paths` (up to 1000), never both. Paths settle independently (missing gives NOT_FOUND); the call errors only if all fail. Symlinks report their own metadata, not the target's. `path` gives one result; `paths` gives one per path, in input order. Returns per-path values or errors ({ code, message }), plus summary { total, succeeded, failed }. Values hold name, path, type, size or entryCount (directories), tokenEstimate (files, bytes/4), timestamps, permissions (POSIX) or readOnly (Windows), isHidden (dot prefix), mimeType, symlinkTarget.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "Single file path; mutually exclusive with paths",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "paths": {
+            "description": "Array of file paths for batch mode (max 1000); mutually exclusive with path",
+            "minItems": 1,
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "File or directory path inside an allowed workspace root."
+            }
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "undo",
+      "description": "Revert create, edit, replace_text, patch, move, or delete calls by undo id or the newest N calls. Use when a change made by this server must be reverted. Do not use for outside changes or expired ids; rewrite those with `edit` or `create`. Preview with dryRun, which lists ids. A path changed since that call is skipped while the rest revert; it stays under its id for a retry. The in-memory journal keeps up to 64 calls for 30 minutes, fewer when FS_MAX_UNDO_BYTES fills. No redo. Unknown ids fail NOT_FOUND. Returns steps[] of {id, tool, results[]}, each path restored or with an error code. A long list is cut (failures kept), marked truncated with totalResults. Errors only if every path fails.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Undo id from a mutating tool result. Required over HTTP, where all clients share the journal.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16
+          },
+          "steps": {
+            "description": "Revert the newest N calls, newest first. Not with id; rejected over HTTP. Omit both to revert the newest call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "dryRun": {
+            "default": false,
+            "description": "Preview without changing anything. With no id or steps, previews every journaled call and lists their ids.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "filesystem-mcp",
+    "version": "2.20.0"
+  },
+  "protocolVersion": null,
+  "instructions": "How to use the filesystem-mcp tools and their limits. Call list_roots to see the configured or accepted roots. Find paths with list or find_files, check them with stat, then read. Never guess paths. For full guidance, read internal://instructions or run the get-help prompt.",
+  "durationMs": 5884,
+  "stderr": "No root directories given. Pass directory arguments, set FS_ALLOWED_DIRS, or use --allow-cwd. A client with elicitation can also call a tool with a concrete path and approve the requested grant.\n[warning] Path in FS_ALLOWED_DIRS does not exist or is invalid: smallprint-placeholder (ENOENT: no such file or directory, stat '/pkg/smallprint-placeholder')\n[warning] Read-only root matches no allowed root: /pkg/smallprint-placeholder\n"
+}

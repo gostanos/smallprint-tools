@@ -1,0 +1,716 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "concepts-mcp",
+  "version": "0.2.1",
+  "integrity": {
+    "dist": "sha512-jUx6137D6itLfdh7Jmt7KhuSL37jz7iBhYYvfCKcNmp9IAsU5BmBfx4nDfykLVgN4H2qZhxaBDZfyXStf4Tp0g==",
+    "installed": "sha512-jUx6137D6itLfdh7Jmt7KhuSL37jz7iBhYYvfCKcNmp9IAsU5BmBfx4nDfykLVgN4H2qZhxaBDZfyXStf4Tp0g=="
+  },
+  "bin": "node_modules/concepts-mcp/src/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.4",
+    "sdk": "1.32.1",
+    "at": "2026-11-13T12:30:41.724Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "get_concepts_instructions",
+      "description": "Call first. Returns the steps for turning new commits into concept diagrams.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "setup_concepts",
+      "description": "Set up a repository, or change where diagrams are saved and how much each commit saves. Call it with no choices: the user gets a picker (where: this project docs/concepts/, their learning library ~/ConceptLibrary/<repo>/, or both; then per folder: Diagram (svg only, recommended), Editable (+ .excalidraw), Diagram + notes (+ README and concept notes), or Custom). If the client can't show it, this returns the questions for you to ask with your own multiple-choice tool; then call again with `destinations`. Changes apply to new commits; files already saved stay where they are. Writes .concepts.json (or the gitignored .concepts.local.json for scope \"personal\"), adds the workflow to AGENTS.md (and an @AGENTS.md import to CLAUDE.md for Claude Code), and optionally a post-commit reminder hook.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoPath": {
+            "description": "Absolute path of the repository root. Defaults to the server's working directory.",
+            "type": "string",
+            "maxLength": 2000
+          },
+          "destinations": {
+            "description": "One entry per folder. Omit to show the user a picker.",
+            "minItems": 1,
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "output": {
+                  "type": "string",
+                  "enum": [
+                    "project",
+                    "library"
+                  ],
+                  "description": "project = a folder in the repo; library = the user's learning library on this computer"
+                },
+                "dir": {
+                  "description": "Folder inside the repo (project) or the library root (library). Omit to keep the current one, or for the default.",
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "detail": {
+                  "description": "diagram = concepts.svg only (default); editable = svg + .excalidraw; notes = svg + a README per commit + concept notes",
+                  "type": "string",
+                  "enum": [
+                    "diagram",
+                    "editable",
+                    "notes"
+                  ]
+                },
+                "files": {
+                  "description": "Custom: exactly which files to write. Overrides detail.",
+                  "minItems": 1,
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "svg",
+                      "excalidraw",
+                      "notes"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "output"
+              ]
+            }
+          },
+          "output": {
+            "description": "Shorthand for a single destination",
+            "type": "string",
+            "enum": [
+              "project",
+              "library"
+            ]
+          },
+          "dir": {
+            "description": "Shorthand: the folder for `output`",
+            "type": "string",
+            "maxLength": 500
+          },
+          "detail": {
+            "description": "Shorthand: the level for `output`",
+            "type": "string",
+            "enum": [
+              "diagram",
+              "editable",
+              "notes"
+            ]
+          },
+          "scope": {
+            "description": "shared = .concepts.json for everyone (default); personal = .concepts.local.json, just for this user",
+            "type": "string",
+            "enum": [
+              "shared",
+              "personal"
+            ]
+          },
+          "agents": {
+            "default": [
+              "claude",
+              "cursor",
+              "codex",
+              "generic"
+            ],
+            "description": "Agents to write instructions for",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "cursor",
+                "codex",
+                "generic"
+              ]
+            }
+          },
+          "gitHook": {
+            "default": false,
+            "description": "Add a post-commit hook that reminds people and agents when a commit is waiting",
+            "type": "boolean"
+          },
+          "backfill": {
+            "default": 0,
+            "description": "Also diagram this many commits from before setup",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      }
+    },
+    {
+      "name": "get_unprocessed_commits",
+      "description": "Returns commits since setup that have no diagram yet, oldest first, each with its sequence number (its place in history), message, changed files and a trimmed diff (lockfiles and generated files removed). Call record_commit_concepts for each one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoPath": {
+            "description": "Absolute path of the repository root. Defaults to the server's working directory.",
+            "type": "string",
+            "maxLength": 2000
+          },
+          "limit": {
+            "default": 3,
+            "description": "How many commits to return at once",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "maxDiffChars": {
+            "default": 24000,
+            "description": "Diff budget per commit",
+            "type": "integer",
+            "minimum": 2000,
+            "maximum": 100000
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_concept_library",
+      "description": "Returns every concept recorded for this repository (id, name, kind, level, times seen). Reuse these ids so a concept's note keeps growing instead of being duplicated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoPath": {
+            "description": "Absolute path of the repository root. Defaults to the server's working directory.",
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "record_commit_concepts",
+      "description": "Save one commit as system-design diagrams. Views (architecture, sequence, flow, state, data-model) are laid out and drawn for you in Excalidraw style; each concept becomes a numbered marker on the parts where it lives, with names in a key beside the diagram. Always send the full record (explanations included): each configured folder keeps the files the user chose (concepts.svg, concepts.excalidraw, a README and concept notes), and marks the commit done. Pass skipReason instead for commits with nothing to learn.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoPath": {
+            "description": "Absolute path of the repository root. Defaults to the server's working directory.",
+            "type": "string",
+            "maxLength": 2000
+          },
+          "commit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{7,40}$",
+            "description": "Commit SHA from get_unprocessed_commits"
+          },
+          "skipReason": {
+            "description": "Set instead of a diagram for commits with nothing to learn (typos, formatting, version bumps)",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "title": {
+            "description": "What the commit built, e.g. 'Retrying failed webhooks'",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "summary": {
+            "description": "A short paragraph on what changed and the main idea. Goes in the README beside the diagram.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1200
+          },
+          "views": {
+            "description": "One or more system-design views; as many as the change needs",
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "architecture",
+                        "flow",
+                        "state",
+                        "data-model"
+                      ]
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 60,
+                      "description": "What this view shows, e.g. 'Where retries fit'"
+                    },
+                    "direction": {
+                      "description": "Layout direction; defaults to right, or down for flow",
+                      "type": "string",
+                      "enum": [
+                        "right",
+                        "down"
+                      ]
+                    },
+                    "groups": {
+                      "default": [],
+                      "description": "Boundaries such as services, layers or trust zones",
+                      "maxItems": 16,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ]
+                      }
+                    },
+                    "nodes": {
+                      "minItems": 1,
+                      "maxItems": 48,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32,
+                            "description": "A name, 1-4 words"
+                          },
+                          "shape": {
+                            "type": "string",
+                            "enum": [
+                              "service",
+                              "module",
+                              "function",
+                              "process",
+                              "config",
+                              "client",
+                              "user",
+                              "database",
+                              "cache",
+                              "storage",
+                              "queue",
+                              "event",
+                              "external",
+                              "decision",
+                              "start",
+                              "end",
+                              "state",
+                              "entity",
+                              "document"
+                            ]
+                          },
+                          "group": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "status": {
+                            "default": "existing",
+                            "description": "new = added by this commit, changed = modified by it, existing = context the reader needs",
+                            "type": "string",
+                            "enum": [
+                              "new",
+                              "changed",
+                              "existing"
+                            ]
+                          },
+                          "fields": {
+                            "description": "data-model entities only: 'id: uuid', 'email: text'",
+                            "maxItems": 14,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 40
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "shape"
+                        ]
+                      }
+                    },
+                    "edges": {
+                      "default": [],
+                      "maxItems": 120,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "description": "Needed only to attach a concept to this edge",
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "from": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "to": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "label": {
+                            "description": "A verb or message name, e.g. 'enqueue', 'POST /hooks', '1..*'",
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 28
+                          },
+                          "style": {
+                            "default": "sync",
+                            "description": "sync call, async message/event, data flow, or dependency",
+                            "type": "string",
+                            "enum": [
+                              "sync",
+                              "async",
+                              "data",
+                              "dependency"
+                            ]
+                          },
+                          "status": {
+                            "default": "existing",
+                            "description": "new = added by this commit, changed = modified by it, existing = context the reader needs",
+                            "type": "string",
+                            "enum": [
+                              "new",
+                              "changed",
+                              "existing"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "from",
+                          "to"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "nodes"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "sequence"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 60
+                    },
+                    "participants": {
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 28
+                          },
+                          "shape": {
+                            "default": "service",
+                            "type": "string",
+                            "enum": [
+                              "user",
+                              "client",
+                              "service",
+                              "database",
+                              "cache",
+                              "queue",
+                              "external",
+                              "function"
+                            ]
+                          },
+                          "status": {
+                            "default": "existing",
+                            "description": "new = added by this commit, changed = modified by it, existing = context the reader needs",
+                            "type": "string",
+                            "enum": [
+                              "new",
+                              "changed",
+                              "existing"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ]
+                      }
+                    },
+                    "messages": {
+                      "minItems": 1,
+                      "maxItems": 60,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "from": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "to": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 36,
+                            "description": "The call or message, e.g. 'POST /charge', 'retry in 4s'"
+                          },
+                          "style": {
+                            "default": "sync",
+                            "type": "string",
+                            "enum": [
+                              "sync",
+                              "async",
+                              "reply"
+                            ]
+                          },
+                          "status": {
+                            "default": "existing",
+                            "description": "new = added by this commit, changed = modified by it, existing = context the reader needs",
+                            "type": "string",
+                            "enum": [
+                              "new",
+                              "changed",
+                              "existing"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "from",
+                          "to",
+                          "label"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "participants",
+                    "messages"
+                  ]
+                }
+              ]
+            }
+          },
+          "concepts": {
+            "description": "Every concept worth learning in this commit; no fixed number",
+            "maxItems": 80,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                  "description": "Stable slug. Reuse the id from get_concept_library when the concept is already known."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60,
+                  "description": "Short display name, e.g. 'Exponential backoff'"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "pattern",
+                    "algorithm",
+                    "data-structure",
+                    "architecture",
+                    "library",
+                    "framework",
+                    "language-feature",
+                    "protocol",
+                    "tooling",
+                    "testing",
+                    "security",
+                    "performance",
+                    "concept"
+                  ]
+                },
+                "level": {
+                  "type": "string",
+                  "enum": [
+                    "beginner",
+                    "intermediate",
+                    "advanced"
+                  ],
+                  "description": "How advanced the concept is for a working developer"
+                },
+                "appearsIn": {
+                  "default": [],
+                  "description": "Ids of the nodes, edges, participants or messages where this concept lives; each gets a numbered marker",
+                  "maxItems": 16,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                  }
+                },
+                "explanation": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 800,
+                  "description": "What it is, for someone who has never met it. Shown beside the diagram, not in it."
+                },
+                "whyHere": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "description": "Why this commit needed it"
+                },
+                "files": {
+                  "default": [],
+                  "maxItems": 12,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 300
+                      },
+                      "lines": {
+                        "type": "string",
+                        "maxLength": 40
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                },
+                "prerequisites": {
+                  "default": [],
+                  "description": "Concepts worth knowing first",
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  }
+                },
+                "learnMore": {
+                  "default": [],
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "url": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    "required": [
+                      "title",
+                      "url"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "kind",
+                "level",
+                "explanation",
+                "whyHere"
+              ]
+            }
+          }
+        },
+        "required": [
+          "commit"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "concepts",
+    "version": "0.2.1"
+  },
+  "protocolVersion": null,
+  "instructions": "concepts-mcp turns a repository's recent commits into hand-drawn Excalidraw diagrams of the concepts they use, so the user can learn from code an AI wrote. After committing, or when asked to update concepts, call get_concepts_instructions once and follow it. You do the analysis; these tools read git and write the files.",
+  "durationMs": 2354,
+  "stderr": ""
+}
