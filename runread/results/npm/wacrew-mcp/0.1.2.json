@@ -1,0 +1,1074 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "wacrew-mcp",
+  "version": "0.1.2",
+  "integrity": {
+    "dist": "sha512-ot7SU40VVlqW3bofJJsZseMHqiB562K4RkFtGJ40h5MRhu6ebudDRksu6dppRp5FSw3cTIDREJOntX834iCP3g==",
+    "installed": "sha512-ot7SU40VVlqW3bofJJsZseMHqiB562K4RkFtGJ40h5MRhu6ebudDRksu6dppRp5FSw3cTIDREJOntX834iCP3g=="
+  },
+  "bin": "node_modules/wacrew-mcp/dist/wacrew-mcp.cjs",
+  "main": null,
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.5",
+    "sdk": "1.32.1",
+    "at": "2026-11-15T15:50:40.099Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "listar_grupos",
+      "description": "Lista todos os chats coletados, grupos e DMs (slug, nome, nº de mensagens, data da última), mais os grupos monitorados e os renomeados. Comece por aqui: o slug é o identificador que as outras ferramentas pedem. Pra achar uma pessoa por nome ou número, use 'listar_contatos'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ler_mensagens",
+      "description": "Lê o histórico de UM chat, grupo ou DM (texto + transcrições já feitas). Pra 'quem está esperando' em todos os chats use 'caixa_de_entrada'; o que chegou desde a última checagem nos chats com alerta, 'novidades'; um dia inteiro pra resumir, 'resumo_do_dia'; achar um termo, 'buscar'. Filtra por data inicial e limita a quantidade. Default: as 50 mais recentes (passe 'limite' maior, ou 'desde', pra ir além) — evita despejar o grupo inteiro quando você só quer o contexto recente. Cada msg traz `timestamp` (UTC) e `hora_brt` (hora de Brasília já convertida) — use a hora_brt pra falar de horário com o operador, NÃO leia o UTC como se fosse local. Mídia com texto junto traz esse texto em `legenda` (descreve a mídia), não em `texto` (que é msg de texto solta) — assim você sabe que a legenda se refere ÀQUELE vídeo/imagem, e não confunde com um texto enviado depois. Mensagens coladas do mesmo remetente (rajada: vídeo+texto+áudio numa tacada) compartilham um `rajada` (id) — trate-as como um bloco do mesmo assunto, não itens soltos.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo (de listar_grupos) OU de uma DM: `dm-<55DDDnúmero>` (o número que você já tem, só dígitos) ou o jid. Telefone e LID da mesma pessoa são fundidos na leitura."
+          },
+          "desde": {
+            "description": "ISO date/datetime; só mensagens a partir daí",
+            "type": "string"
+          },
+          "limite": {
+            "description": "máximo de mensagens (mais recentes); default 50 quando 'desde' também é ausente",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "buscar",
+      "description": "Busca um texto nas mensagens e transcrições. Sem 'grupo', procura em todos. Retorna os trechos que casam (mais recentes primeiro), limitado a 'limite' (default 50) pra não estourar — se truncar, o retorno avisa em 'truncado'. Pra ler a conversa em volta de um resultado, use 'ler_mensagens' com 'desde'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "texto": {
+            "type": "string",
+            "description": "termo a procurar (case-insensitive)"
+          },
+          "grupo": {
+            "description": "slug para restringir a um grupo",
+            "type": "string"
+          },
+          "limite": {
+            "description": "máx. de resultados (default 50); evita varrer todos os grupos e estourar",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "texto"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "transcrever",
+      "description": "Transcreve áudio/vídeo (MLX local, large-v3) e devolve o texto; reusa cache. UMA mídia específica: passe `mediaPath` (campo 'midia' de ler_mensagens) OU `id` (campo 'id' da mensagem) — os dois funcionam; qualquer outro nome de parâmetro é ignorado. SEM os dois: transcreve um lote dos pendentes do grupo (até 8 NOVOS por chamada; o que já tem transcrição não ocupa vaga e vem em `em_cache`; os que só estão na nuvem baixam em paralelo). Se sobrar além do teto, o retorno traz `restantes` — chame de novo e o lote AVANÇA. Em modo remoto a transcrição é publicada na nuvem, então ler_mensagens passa a trazer `transcricao`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo"
+          },
+          "mediaPath": {
+            "description": "mediaPath relativo (campo 'midia') de UMA mídia",
+            "type": "string"
+          },
+          "id": {
+            "description": "id da mensagem (campo 'id' de ler_mensagens) de UMA mídia — alternativa ao mediaPath",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "resumo_do_dia",
+      "description": "Devolve TODAS as mensagens de um chat num dia (texto + transcrições, transcrevendo os áudios que faltam) pra você resumir. Default: hoje (data em UTC). Pras mensagens recentes sem recorte por dia, use 'ler_mensagens'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo"
+          },
+          "data": {
+            "description": "YYYY-MM-DD; default = hoje",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ver_imagem",
+      "description": "Mostra de fato uma imagem (print/screenshot/sticker) de um grupo para a IA enxergar. Use quando precisar entender o conteúdo visual — ex.: print de um bug que o cliente mandou. Sem mediaPath, mostra a ÚLTIMA imagem/figurinha do grupo (atalho pra 'vê a imagem que acabou de chegar', sem precisar de ler_mensagens antes).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo"
+          },
+          "mediaPath": {
+            "description": "mediaPath da mensagem (campo 'midia'); ausente = última imagem/figurinha do grupo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ver_video",
+      "description": "Tira alguns quadros (imagens paradas) de um vídeo ou GIF do chat, sem áudio e sem custo (ffmpeg local). Use pra GIF/meme ou pra uma olhada rápida no visual. Não ouve nada: pra entender o que é mostrado E falado (ex.: cliente gravando um erro na tela) use 'assistir_video' (pago); pra só a fala, 'transcrever'. Sem mediaPath, usa o ÚLTIMO vídeo/GIF do grupo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo"
+          },
+          "mediaPath": {
+            "description": "mediaPath da mensagem (campo 'midia'); ausente = último vídeo/GIF do grupo",
+            "type": "string"
+          },
+          "frames": {
+            "description": "nº de frames a amostrar (default 3)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "assistir_video",
+      "description": "Assiste um vídeo inteiro com o Gemini (imagem e áudio juntos) e devolve o que aparece e o que é falado, com tempos MM:SS. Diferente de 'ver_video', que só tira quadros sem som. Use quando o conteúdo do vídeo importa: cliente mostrando erro na tela, explicando algo em vídeo, ou mandando LINK de vídeo (YouTube, Instagram, TikTok). Custa ~US$ 0,03–0,05 por minuto de vídeo (OpenRouter): chame sob demanda, nunca em lote. GIF/meme ou só uma olhada rápida: prefira 'ver_video' (grátis). Vídeo do chat: `grupo` + `id` (campo 'id' de ler_mensagens) ou `mediaPath`; sem os dois, o ÚLTIMO vídeo do grupo. Link: `url` (grupo opcional). `pergunta` foca a resposta. Teto: 20 min de vídeo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "description": "slug do grupo (obrigatório quando não há url)",
+            "type": "string"
+          },
+          "id": {
+            "description": "id da mensagem de vídeo (campo 'id' de ler_mensagens)",
+            "type": "string"
+          },
+          "mediaPath": {
+            "description": "mediaPath do vídeo (campo 'midia')",
+            "type": "string"
+          },
+          "url": {
+            "description": "link do vídeo (YouTube, Instagram, TikTok…) em vez de um anexo do chat",
+            "type": "string"
+          },
+          "pergunta": {
+            "description": "o que você quer saber do vídeo; ausente = descrição completa",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ler_documento",
+      "description": "Lê o conteúdo de texto de um documento que o cliente mandou (PDF, .docx, .txt, .csv...). Use quando precisar entender o que diz um arquivo recebido — ex.: contrato, orçamento, planilha exportada. Se vier 'note' avisando que não há texto extraível (PDF escaneado), tente 'ver_imagem' no mesmo arquivo. Sem mediaPath, lê o ÚLTIMO documento do grupo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo"
+          },
+          "mediaPath": {
+            "description": "mediaPath da mensagem (campo 'midia'); ausente = último documento do grupo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "listar_contatos",
+      "description": "Acha QUEM é quem: nome, papel (me = você, team = seu time, client = cliente), jid de DM e o slug da DM pronto pra ler_mensagens. Telefone e LID da mesma pessoa vêm numa linha só. PASSE `busca` (pedaço do nome ou o número, com ou sem formatação/nono dígito) — a conta pode ter milhares de contatos e sem filtro só vêm os 100 primeiros. Se você JÁ TEM o número, nem precisa: a DM é o slug `dm-<55DDDnúmero>` direto em ler_mensagens/responder.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "busca": {
+            "description": "pedaço do nome ou número (ex.: 'ana', '+55 11 98765-4321')",
+            "type": "string"
+          },
+          "limite": {
+            "description": "máximo de pessoas (default 100)",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 500
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "preparar_resposta",
+      "description": "Passo 1 de 2 do envio: chame ANTES de escrever qualquer mensagem pra um chat (não recebe texto). Devolve o que a conta já usou nas últimas 5 mensagens ali (aberturas, verbos, pontuação, tamanhos), o estado da conversa (ativa/fria, o que o cliente deixou em aberto, se o operador já respondeu na mão) e `instrucoes` numéricas pra variar. Escreva seguindo as instruções; o `responder` revisa e recusa o que estourar. Pra conferir um rascunho já escrito, use 'revisar_texto'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug, nome exato ou jid do chat"
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "revisar_texto",
+      "description": "Passo 2 de 2 do envio: revisa um rascunho JÁ ESCRITO, sem enviar (o contexto antes de escrever vem de 'preparar_resposta'). Confere repetição contra as últimas mensagens do chat, dois-pontos e outros tells, auto-incriminação, desculpa, tratamento. Devolve ok/score/hits/sugestoes. No modo 'confirmar', revise, corrija e só então mostre o texto ao operador. O 'responder' roda esta mesma revisão ao enviar.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug, nome exato ou jid do chat"
+          },
+          "baloes": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "rascunho, um item por balão"
+          }
+        },
+        "required": [
+          "grupo",
+          "baloes"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "responder",
+      "description": "Envia uma mensagem de texto no WhatsApp — para um GRUPO (slug/nome/jid) ou um CONTATO em DM (`dm-<55DDDnúmero>`). PRIMEIRO CONTATO funciona: o número NÃO precisa estar em listar_contatos nem ter conversa anterior — passe `dm-<55DDDnúmero>` do jeito que o número veio (com ou sem o nono dígito) e o coletor confirma no WhatsApp qual é a conta antes de enviar. Se o retorno trouxer `jid_corrigido_de`, use o `slug_correto` dali em diante; número fora do WhatsApp é recusado com motivo, nada sai. Primeiro contato SEMPRE passa pelo OK do operador no texto, mesmo se outros chats rodam em modo autônomo (conduta na skill `comunicacao-cliente`). VOZ: carregue a skill de voz do operador (`voz-do-operador` ou a preenchida desta máquina) ANTES de redigir — ela define grafia, registro e a camada de venda do operador, medidos no texto real dele. Depois `comunicacao-cliente` (conduta: o que responder, três modos, erro sem se rebaixar, urgencia). CONFIRMAÇÃO: cada chat tem um modo (definir_modo). No modo 'confirmar' (DEFAULT), você DEVE ter mostrado o texto e recebido OK do operador antes de chamar. No modo 'autonomo', pode enviar direto. O retorno traz o `modo` do chat. (Isto é convenção que você respeita, não trava de código — não burle o 'confirmar'.) BALÕES: por default o texto é fatiado em até 3 balões (parágrafos em branco = quebras explícitas suas). Use `um_balao: true` quando a mensagem deve chegar INTEIRA num balão só — texto coeso/técnico (changelog, lista, instruções passo a passo), ou quando o operador pedir 'manda numa mensagem só'. Quando VOCÊ já decidiu a quebra (4, 5 balões…), passe `baloes` (lista, um item = um balão, até 8) em UMA chamada — NUNCA chame responder várias vezes pra simular balões: cada chamada é uma entrega separada com visto/digitando. Conversa curta e informal fica melhor em balões. REVISÃO: antes de enviar, o texto passa por revisão (repetição contra as últimas mensagens do chat, dois-pontos e tells, auto-incriminação, desculpa). Recusa devolve hits e sugestões; reescreva e chame de novo. Chame preparar_resposta ANTES de redigir. ENTREGA: devolve um TICKET na hora; a mensagem sai depois com latência humana (segundos numa conversa ativa, minutos a horas numa fria), visto antes do digitando, digitação na velocidade do operador. Novo responder no mesmo chat SUBSTITUI o ticket anterior. Acompanhe com status_envio; cancelar_envio cancela. Se o plantão avisar 'Entrega interrompida', releia o chat e responda de novo.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo (o mesmo de ler_mensagens/listar_grupos), nome exato, `dm-<55DDDnúmero>` pra DM (vale pra número novo, sem conversa anterior), OU um jid (grupo @g.us / DM '<numero>@s.whatsapp.net'). Slug é o jeito mais seguro."
+          },
+          "texto": {
+            "description": "mensagem a enviar (obrigatório se não passar `baloes`)",
+            "type": "string"
+          },
+          "baloes": {
+            "description": "balões já decididos por você, na ordem (um item = um balão). Substitui `texto`/`um_balao`; tudo sai numa entrega humanizada só.",
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "um_balao": {
+            "description": "true = envia o texto INTEIRO num único balão (sem fatiar), mantendo a entrega humanizada (visto/digitando). Default false = quebra em até 3 balões.",
+            "type": "boolean"
+          },
+          "candidatos": {
+            "description": "2 ou 3 versões alternativas da MESMA resposta (cada uma = lista de balões). O código revisa todas e envia só a que menos destoa do operador. Exclusivo com texto/baloes. Use quando a mensagem for mais que um 'ok'.",
+            "minItems": 2,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "minItems": 1,
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "revisao": {
+            "description": "'ignorar' pula APENAS o score de estilo (nunca bloqueios de tratamento/culpa). Só quando o operador aprovou o texto exatamente assim e a revisão recusou.",
+            "type": "string",
+            "enum": [
+              "ignorar"
+            ]
+          },
+          "urgencia": {
+            "description": "'agora' = cliente esperando um ok (só a janela de 5 s); 'normal' (default) = latência humana pelo estado da conversa; 'calma' = update sem pressa (força o regime frio: minutos a horas).",
+            "type": "string",
+            "enum": [
+              "agora",
+              "normal",
+              "calma"
+            ]
+          },
+          "operador_pediu": {
+            "description": "true SÓ quando o operador pediu, nesta conversa, este envio pra este chat. Libera a trava do autônomo de quando ele respondeu pelo celular (`operador_assumiu`); nunca a de 'é IA?' (`perguntou_ia`). Nunca use por conta própria pra contornar a trava.",
+            "type": "boolean"
+          },
+          "tempo_humano_s": {
+            "description": "quanto uma PESSOA levaria entre ler a mensagem e mandar ESTA resposta: 'blz' = segundos; responder depois de pensar = 1-3 min; corrigir um bug e subir = 15-30 min. Pese o clima: cliente insistente ou grosso, estime menos. O código aplica só uma fração (teto de 4 min) e desconta o tempo que você já gastou trabalhando; assistir/ler a mídia do cliente já entra sozinho. Não atrasa o seu trabalho, só a entrega.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 86400
+          },
+          "citar": {
+            "description": "id da mensagem recebida a responder (reply): o 1º balão sai citando ela",
+            "type": "string"
+          },
+          "aguardar": {
+            "description": "true = segura a chamada até a entrega terminar (comportamento antigo; Esc cancela). Default false: devolve o ticket na hora.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "responder_midia",
+      "description": "Envia um arquivo para um grupo no WhatsApp: imagem com legenda, documento/PDF, áudio (nota de voz) ou vídeo. REGRA: só chame DEPOIS de confirmar com o usuário o destinatário e o arquivo. Se houver legenda (caption), o texto deve passar pela skill de voz do operador e ser confirmado, igual ao 'responder'. O 'path' pode ser absoluto (arquivo novo no disco) OU o mediaPath de uma mensagem já recebida (campo 'midia') para reenviar.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "nome exato do grupo OU o jid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "image",
+              "document",
+              "audio",
+              "video"
+            ],
+            "description": "tipo do arquivo"
+          },
+          "path": {
+            "type": "string",
+            "description": "caminho absoluto do arquivo OU mediaPath relativo (de uma mensagem recebida)"
+          },
+          "caption": {
+            "description": "legenda (ignorada em audio); escreva na voz do operador, é revisada como o responder",
+            "type": "string"
+          },
+          "fileName": {
+            "description": "obrigatório para document — nome exibido",
+            "type": "string"
+          },
+          "mimetype": {
+            "description": "opcional (document); inferido pela extensão se ausente",
+            "type": "string"
+          },
+          "operador_pediu": {
+            "description": "true SÓ quando o operador pediu, nesta conversa, este envio pra este chat. Libera a trava do autônomo de quando ele respondeu pelo celular (`operador_assumiu`); nunca a de 'é IA?' (`perguntou_ia`). Nunca use por conta própria pra contornar a trava.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "grupo",
+          "kind",
+          "path"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "cancelar_envio",
+      "description": "Cancela uma entrega humanizada AGENDADA ou EM ANDAMENTO: o balão que ainda não saiu não sai; o que já saiu fica. Use na hora, SEM confirmar, quando o operador disser 'cancela'/'para'/'não manda'. Por chat (grupo) ou por ticket. Depois chame ler_mensagens no chat pra ver o que chegou a sair antes de reenviar.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "description": "slug, nome exato ou jid do chat cujo envio deve parar",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "id do ticket devolvido pelo responder",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "status_envio",
+      "description": "Estado de uma entrega humanizada: por chat (grupo) ou por ticket. Devolve estado (agendado/entregando/entregue/cancelado/interrompido), motivo, balões enviados/total e previsão. Use depois do 'responder' pra saber se a mensagem já saiu: 'entregando 0/N' por alguns minutos é o ritmo humano, não travamento. Passe grupo OU ticket; pra cancelar, 'cancelar_envio'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "description": "slug, nome exato ou jid",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "id do ticket devolvido pelo responder",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "editar_mensagem",
+      "description": "Edita uma mensagem JÁ ENVIADA por você/pela IA (o WhatsApp marca 'editada'). Use pra corrigir erro ou atualizar info numa msg recente. Só funciona em mensagem PRÓPRIA (fromMe) — ATENÇÃO: mensagens que o OPERADOR mandou do celular também são fromMe (mesma conta) e são editáveis por esta tool. Por isso NUNCA escolha o msgId por posição ('a última'): pegue via ler_mensagens e CONFIRA que o texto da msg alvo é exatamente o que você quer substituir antes de chamar. CONFIRMAÇÃO: mesma convenção do responder — no modo 'confirmar', mostre o texto novo e espere OK antes de chamar.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo/DM, nome exato, OU jid"
+          },
+          "msgId": {
+            "type": "string",
+            "description": "id da mensagem a editar (de ler_mensagens)"
+          },
+          "texto": {
+            "type": "string",
+            "description": "texto NOVO completo (substitui o anterior)"
+          },
+          "operador_pediu": {
+            "description": "true SÓ quando o operador pediu, nesta conversa, este envio pra este chat. Libera a trava do autônomo de quando ele respondeu pelo celular (`operador_assumiu`); nunca a de 'é IA?' (`perguntou_ia`). Nunca use por conta própria pra contornar a trava.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "grupo",
+          "msgId",
+          "texto"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "reagir",
+      "description": "Reage com um emoji a uma mensagem (👍, ❤️, 😂...). Às vezes a resposta humana é SÓ uma reação — prefira isso a um balão de 'ok!' quando couber. Emoji vazio ('') REMOVE a reação. O msgId vem do ler_mensagens. A tool resolve sozinha a key completa (autor/fromMe) pelo histórico — participant/fromMe manuais só como override raro.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo/DM, nome exato, OU jid"
+          },
+          "msgId": {
+            "type": "string",
+            "description": "id da mensagem alvo (de ler_mensagens)"
+          },
+          "emoji": {
+            "type": "string",
+            "description": "emoji da reação; '' remove"
+          },
+          "participant": {
+            "description": "override raro: jid do autor da msg",
+            "type": "string"
+          },
+          "fromMe": {
+            "description": "override raro: true se a msg alvo é do coletor",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "grupo",
+          "msgId",
+          "emoji"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "editar_perfil",
+      "description": "Edita o PERFIL do WhatsApp do operador: nome, recado/'sobre' (status) e/ou foto. Passe só os campos que quer mudar. 'foto' é caminho absoluto de imagem OU o mediaPath de uma mensagem recebida. CONFIRMAÇÃO: o perfil é PÚBLICO (todo contato vê). Você DEVE mostrar ao operador o que vai mudar e ter o OK ANTES de chamar — mesma convenção do 'responder'. Não é trava de código; não burle. LIMITE: catálogo, localização, link e horário-oficial do business são read-only no WhatsApp (não editáveis por aqui).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nome": {
+            "description": "novo nome do perfil (push name)",
+            "type": "string"
+          },
+          "recado": {
+            "description": "novo recado/'sobre' (status do perfil)",
+            "type": "string"
+          },
+          "foto": {
+            "description": "caminho absoluto de uma imagem OU mediaPath relativo (de uma mensagem recebida)",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "marcar_resolvido",
+      "description": "Tira um chat (grupo ou DM) da fila de pendências marcando-o como resolvido até um momento: mensagem de cliente que chegar DEPOIS faz ele voltar pra fila. Não envia nada nem avisa o cliente. Sem 'ate', usa agora. Pra parar de alertar o chat de vez, use 'silenciar_grupo'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo (de listar_grupos)"
+          },
+          "ate": {
+            "description": "ISO timestamp 'resolvido até aqui'; default = agora",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "silenciar_grupo",
+      "description": "Silencia (true) ou reativa (false) um chat, grupo ou DM: as mensagens continuam sendo coletadas e lidas, mas o chat sai da fila de pendências e não alerta. Use em grupo de aviso ou conversa que não pede resposta. Reversível. Pra tirar da fila só até agora (volta se o cliente escrever), use 'marcar_resolvido'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo (de listar_grupos)"
+          },
+          "silenciar": {
+            "type": "boolean",
+            "description": "true = silencia; false = dessilencia"
+          }
+        },
+        "required": [
+          "grupo",
+          "silenciar"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "anotar",
+      "description": "Grava a nota livre (mini-CRM) de um chat, SUBSTITUINDO a anterior por inteiro: pra acrescentar, leia antes com 'ler_notas'. Use pra contexto que não está nas mensagens (combinados, contatos, preferências do cliente). Fica só no painel, o cliente não vê. Nota vazia apaga.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo (de listar_grupos)"
+          },
+          "nota": {
+            "type": "string",
+            "description": "texto da nota; vazio remove a entrada"
+          }
+        },
+        "required": [
+          "grupo",
+          "nota"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "ler_notas",
+      "description": "Lê as notas livres (mini-CRM) gravadas com 'anotar'. Com 'grupo', só a daquele chat; sem, todas. Só lê.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "description": "slug para restringir a um grupo",
+            "type": "string"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "alertar_chat",
+      "description": "Liga/desliga a NOTIFICAÇÃO NO MAC (pro humano) quando chega mensagem de cliente num chat — grupo OU DM — por slug. NÃO acorda o agente nem faz o Claude reagir sozinho: é só um aviso de tela pro operador. (Pra o AGENTE ser acordado por mensagem nova — modo monitor/autônomo — arme um Monitor no `data/<slug>/messages.jsonl`, ver CLAUDE.md.) Opt-in por conversa. Depois de notificado, use `novidades` pra puxar o que chegou.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo ou DM (de listar_grupos; DM = dm-<id>)"
+          },
+          "ativar": {
+            "type": "boolean",
+            "description": "true = passa a te notificar; false = para"
+          }
+        },
+        "required": [
+          "grupo",
+          "ativar"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "definir_modo",
+      "description": "Define se um chat está em modo AUTÔNOMO (a IA envia sem confirmar) ou CONFIRMAR (default: a IA mostra o texto e espera OK do operador antes de enviar). Persiste por chat — você liga uma vez e vale até desligar, sem depender de re-combinar a cada msg. O `responder` lê esse modo. É convenção respeitada pela IA, não trava de código. Também liga o agente de triagem do chat (agente: off/issue/pr) e escolhe o executor (claude/copilot).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo ou DM (de listar_grupos; DM = dm-<id>)"
+          },
+          "autonomo": {
+            "description": "true = IA envia direto; false = volta pro padrão 'confirmar antes'; ausente = não mexe",
+            "type": "boolean"
+          },
+          "typos": {
+            "description": "liga/desliga typo proposital (raro, ~3%) corrigido com um balão '*palavra' — humanização; default OFF",
+            "type": "boolean"
+          },
+          "latencia_maxima_s": {
+            "description": "teto (segundos) da latência humana das entregas desse chat; null = padrão (4 h)",
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agente": {
+            "description": "agente de triagem do chat: off (não lê), issue (cria issue e espera seu ok), pr (issue já sai marcada pro executor)",
+            "type": "string",
+            "enum": [
+              "off",
+              "issue",
+              "pr"
+            ]
+          },
+          "executor": {
+            "description": "quem executa a issue aprovada; default claude",
+            "type": "string",
+            "enum": [
+              "claude",
+              "copilot"
+            ]
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "novidades",
+      "description": "Puxa as mensagens novas dos chats marcados com alerta desde a última vez que você viu, e marca como visto. Pra ver quem espera em todos os chats sem marcar nada, use 'caixa_de_entrada'. FILTRA só mensagens de CLIENTE (descarta as suas e as do time) — em grupo interno isso pode voltar vazio mesmo tendo msg nova; nesse caso o retorno traz `ignoradas_por_papel` e uma nota sugerindo ler_mensagens. Use ao ser notificado de mensagem nova. Avança o checkpoint (não repete na próxima) a menos que marcar=false. Com 'grupo', restringe a um chat.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "description": "slug pra restringir a um chat; ausente = todos os alertados",
+            "type": "string"
+          },
+          "marcar": {
+            "description": "default true (avança o checkpoint); false = só espia, não marca como visto",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "etiquetar",
+      "description": "Define as ETIQUETAS de um chat (empresa/contrato/pessoal — ex.: 'Empresa A', 'Freelance'). É o rótulo que diz de qual contexto de trabalho aquele grupo/contato é — use pra saber COM QUEM está falando antes de redigir. Lista vazia remove todas. Pra LER as etiquetas de todos os chats, use estado_triagem (campo `etiquetas`).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo ou DM (de listar_grupos; DM = dm-<id>)"
+          },
+          "etiquetas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "lista completa de etiquetas do chat (substitui as atuais; [] remove)"
+          }
+        },
+        "required": [
+          "grupo",
+          "etiquetas"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "definir_contrato",
+      "description": "Define o estado comercial de um chat: estado (ativo/encerrado/pausado/sem), início e fim (YYYY-MM-DD), valor mensal e nota. Só os campos passados mudam. O dashboard cruza isso com a atividade pra apontar cliente ativo demais pro contrato, renovação próxima e custo por entrega. Pra ler, use a tool dashboard. limite_mensagens = mensagens do cliente em 30 dias que o plano comporta (null tira o limite); acima dele o dashboard aponta acima-do-contrato.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo ou DM"
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "ativo",
+              "encerrado",
+              "pausado",
+              "sem"
+            ]
+          },
+          "inicio": {
+            "description": "YYYY-MM-DD ou null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fim": {
+            "description": "YYYY-MM-DD ou null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "valorMensal": {
+            "description": "reais por mês, ou null",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "limite_mensagens": {
+            "description": "mensagens do cliente em 30 dias que o plano comporta (inteiro ≥ 1); null tira o limite",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nota": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "registrar_feature",
+      "description": "Registra uma funcionalidade ENTREGUE pra um cliente (chame ao concluir uma entrega). Alimenta o contador de entregas por cliente do dashboard. Se passar `ref` (URL do PR/issue) e ela já estiver registrada NESTE chat, não duplica (a mesma ref em outro cliente é outra entrega). PRs mergeados que fecham issues da triagem entram sozinhos; use esta tool pro que não passou por PR.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grupo": {
+            "type": "string",
+            "description": "slug do grupo ou DM do cliente"
+          },
+          "nome": {
+            "type": "string",
+            "description": "nome curto da funcionalidade, em pt-BR"
+          },
+          "ref": {
+            "description": "URL do PR, issue ou commit (opcional; deduplica)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo",
+          "nome"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "dashboard",
+      "description": "Visão de negócio por cliente: atividade 30 d, contrato, entregas 30 d/total, mensagens e valor por entrega, e SINAIS (encerrado-ativo, sem-contrato-ativo, pausado-ativo, renovacao-30d, sem-entrega-30d) com uma frase explicando cada um. Use pra responder 'quem está ativo demais pro contrato', 'quem renova este mês', 'quantas entregas o cliente X recebeu'. `so_sinais: true` devolve só as linhas com sinal. Contratos e entregas refletem na hora; atividade de mensagens pode ter até 60 s de atraso.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "so_sinais": {
+            "description": "true = só clientes com algum sinal",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "caixa_de_entrada",
+      "description": "Quem está esperando resposta e de qual projeto, em todos os chats coletados (o operador não precisa abrir o WhatsApp). Use pra 'quem me mandou mensagem?', 'tem cliente esperando?', 'o que rolou hoje?'. Cada item traz o chat, o `projeto` (cliente, pasta do repo e GitHub, quando o chat está linkado) e, se alguém espera, `esperando` (quem, prévia, desde quando, há quanto tempo); pendentes vêm primeiro, quem espera há mais tempo no topo. Esperando = a última fala é de cliente (ou te mencionaram) e ninguém da conta respondeu depois; chat silenciado ou marcado resolvido não entra. Só lê: não marca nada como visto (ao contrário de `novidades`). `todos: true` inclui os chats em que cliente escreveu desde `desde` mesmo já respondidos, com `do_cliente_desde`. Conversa que o cliente fechou (\"ok\", \"combinado\", \"valeu\", figurinha) não entra: vem só a contagem em `encerrados`. Espera cuja última fala do cliente passou de `dias` (default 7) vem resumida em `antigos` (nome e tempo). Ao responder o operador, agrupe por projeto, diga em uma linha o que cada um quer e ainda descarte o que for só social; cite os `antigos` numa linha. Num repositório ligado a um chat (`.claude/whatsapp.json`, bloco wa-link no CLAUDE.md), passe `grupos` com o(s) slug(s) dele em vez de ler a caixa inteira; pra 'teve mensagem nova?' esta tool basta, e `ler_mensagens` (bem mais caro) só entra se precisar do conteúdo. Se vier `avisos` (serviço de IA falhando), mostre ANTES de tudo, numa linha cada. Mostre a data e hora de Brasília da última mensagem (`ultima_brt`) com quanto tempo faz em relação a `agora_brt` (ex: \"28/10 09:34, há 2h\"). Pra ler a conversa, `ler_mensagens(grupo)`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "todos": {
+            "description": "default false = só quem espera resposta; true = também o que se mexeu desde `desde`",
+            "type": "boolean"
+          },
+          "desde": {
+            "description": "ISO (ex 2026-10-28T09:00:00-03:00); só no modo todos; default = últimas 24 h",
+            "type": "string"
+          },
+          "grupos": {
+            "description": "slugs pra restringir",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dias": {
+            "description": "default 7: espera mais velha que isso vai pra `antigos`",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "estado_triagem",
+      "description": "Retorna o estado de triagem inteiro (resolved/muted/notes/lastSeen/copilot/alertar/autonomo/etiquetas/agente/executor) pra IA saber o que já foi tratado, quais chats acompanha (copilot), quais alertam, e o modo de envio de cada um (autonomo: true = envia direto; ausente = confirmar antes). Contrato de cliente não vem aqui: ele fica nas tools dashboard e definir_contrato.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agenda_ver",
+      "description": "Lê o Google Agenda do operador (todas as agendas da conta) numa janela de datas; padrão hoje até daqui a 7 dias. Cada evento traz `agenda` e `id` (use em agenda_editar/agenda_apagar) e `hora_brt` em horário de Brasília; `organizador` = reunião de outra pessoa, que só ela altera. Desconectado = erro pedindo para reconectar em /agenda no painel.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "de": {
+            "description": "início: YYYY-MM-DD ou data-hora ISO (sem fuso = Brasília)",
+            "type": "string"
+          },
+          "ate": {
+            "description": "fim exclusivo: YYYY-MM-DD ou data-hora ISO; no máximo 62 dias depois de `de`",
+            "type": "string"
+          },
+          "agendas": {
+            "description": "ids de agenda para filtrar; omitido = todas",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agenda_marcar",
+      "description": "Cria um evento no Google Agenda do operador. Marque só o que foi combinado de fato (data e hora claras) ou o que o operador pediu. CONVIDADOS: o Google manda e-mail de convite na hora. Só inclua convidados quando o operador pedir, e antes mostre a ele o evento (título, quando, quem) e espere o OK. Sem convidados, ninguém recebe nada. Devolve o evento criado com `id`, `agenda`, `hora_brt`, `link` e o link do Meet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "titulo": {
+            "type": "string",
+            "description": "título do evento"
+          },
+          "inicio": {
+            "type": "string",
+            "description": "data-hora ISO (sem fuso = Brasília) ou YYYY-MM-DD com dia_inteiro"
+          },
+          "fim": {
+            "description": "fim; sem ele vale duracao_min",
+            "type": "string"
+          },
+          "duracao_min": {
+            "description": "duração em minutos quando não há fim; padrão 30",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "dia_inteiro": {
+            "description": "true = evento de dia inteiro",
+            "type": "boolean"
+          },
+          "agenda": {
+            "description": "id da agenda; padrão a principal",
+            "type": "string"
+          },
+          "descricao": {
+            "type": "string"
+          },
+          "local": {
+            "type": "string"
+          },
+          "convidados": {
+            "description": "e-mails; o Google manda convite por e-mail",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "meet": {
+            "description": "true = cria link do Google Meet",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "titulo",
+          "inicio"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agenda_editar",
+      "description": "Altera um evento (só os campos passados). Início sem fim mantém a duração. `convidados` SUBSTITUI a lista. CONVIDADOS: o Google manda e-mail de convite na hora. Só inclua convidados quando o operador pedir, e antes mostre a ele o evento (título, quando, quem) e espere o OK. Sem convidados, ninguém recebe nada. Em evento recorrente, muda só esta ocorrência.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agenda": {
+            "type": "string",
+            "description": "id da agenda (vem do agenda_ver)"
+          },
+          "id": {
+            "type": "string",
+            "description": "id do evento (vem do agenda_ver)"
+          },
+          "titulo": {
+            "type": "string"
+          },
+          "inicio": {
+            "type": "string"
+          },
+          "fim": {
+            "type": "string"
+          },
+          "duracao_min": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "dia_inteiro": {
+            "type": "boolean"
+          },
+          "descricao": {
+            "description": "'' apaga",
+            "type": "string"
+          },
+          "local": {
+            "description": "'' apaga",
+            "type": "string"
+          },
+          "convidados": {
+            "description": "lista nova completa de e-mails",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "meet": {
+            "description": "true = cria link do Meet se ainda não houver",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agenda",
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "agenda_apagar",
+      "description": "Apaga um evento do Google Agenda. Só apague o que o operador pediu explicitamente. Se o evento tiver convidados, o Google avisa o cancelamento por e-mail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agenda": {
+            "type": "string",
+            "description": "id da agenda (vem do agenda_ver)"
+          },
+          "id": {
+            "type": "string",
+            "description": "id do evento (vem do agenda_ver)"
+          }
+        },
+        "required": [
+          "agenda",
+          "id"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "whatsapp-collector",
+    "version": "0.1.2"
+  },
+  "protocolVersion": null,
+  "instructions": "Coletor de WhatsApp: ler histórico, acompanhar chats e responder por eles.\n\nANTES DE ESCREVER QUALQUER MENSAGEM que vá pro WhatsApp (responder,\nresponder_midia, editar_mensagem), CARREGUE a skill de voz do operador (tool\nSkill): `voz-do-operador`, ou a versão já preenchida que existir nesta máquina.\nEla define a grafia, o registro e a camada de venda do operador, medidos no texto\nreal dele. Escrever sem ela produz mensagem com cara de IA — que é exatamente o\nque o operador não quer que o cliente receba. Se ainda estiver com placeholders,\nou não existir aqui, siga com cuidado normal e avise o operador.\n\nDepois dela, `comunicacao-cliente` (conduta: o que responder, modos, erro sem se\nrebaixar, urgencia). Nunca `humanizer` em balão de conversa.\n\nANTES DE REDIGIR: preparar_resposta(grupo) — devolve o que a conta já usou nas\núltimas msgs do chat e o que o cliente deixou em aberto. O responder REVISA o\ntexto (repetição, dois-pontos, culpa, desculpa) e RECUSA o que estourar, com o\nque trocar; mande 2-3 `candidatos` e o código escolhe o que menos destoa.\n\nMODO POR CHAT: cada chat tem um modo (estado_triagem / definir_modo). No modo\n'confirmar' (o default) MOSTRE o texto e espere o OK do operador antes de chamar\nas tools de envio. Convenção respeitada, não trava de código — não burle.\n\nREGISTRE ENTREGAS: ao concluir uma funcionalidade pra cliente, chame\nregistrar_feature(grupo, nome, ref).\n\nENTREGA: responder devolve um TICKET na hora; a mensagem sai depois, com latência\nhumana (segundos numa conversa ativa, minutos a horas numa fria). status_envio\nacompanha; cancelar_envio cancela agendado ou em andamento — se o operador disser\n'cancela', chame NA HORA, sem confirmar. Se o plantão avisar 'Entrega interrompida',\nreleia o chat e responda de novo. `urgencia: 'agora'` só quando o cliente espera um\nok. Depois de cancelar ou interromper, ler_mensagens antes de reenviar.\nPasse `tempo_humano_s` (quanto uma pessoa levaria pra chegar a essa resposta): o\ncódigo atrasa só a entrega, uma fração disso, e já soma o tempo de assistir a mídia.",
+  "durationMs": 3326,
+  "stderr": "[whatsapp-mcp] dados em /tmp/.wacrew/data\ntime=\"2026-11-15T10:50:43-05:00\" level=error msg=\"Error forwarding signal 15 to container 1a77a768ff242fc56dbb102a274ce9577b408d5b3d2e7cfc17b1c459fea9f098: container has already been removed\"\n"
+}
