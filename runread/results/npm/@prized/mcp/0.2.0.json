@@ -1,0 +1,701 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "@prized/mcp",
+  "version": "0.2.0",
+  "integrity": {
+    "dist": "sha512-n2Z2n6UeCIl1nilpWAbn+CKcRF9qHqCwi5oO5AogTsiFsmVEiAqDA4aXw9nNRW6bbZZp55RdaBM79ZkQWzFoXQ==",
+    "installed": "sha512-n2Z2n6UeCIl1nilpWAbn+CKcRF9qHqCwi5oO5AogTsiFsmVEiAqDA4aXw9nNRW6bbZZp55RdaBM79ZkQWzFoXQ=="
+  },
+  "bin": "node_modules/@prized/mcp/dist/index.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [
+    "PRIZED_API_KEY",
+    "PRIZED_API_URL",
+    "PRIZED_MCP_LOCAL_DIRS",
+    "PRIZED_MCP_ALL_BOXES",
+    "PRIZED_MCP_ALL_SANDBOXES",
+    "PRIZED_MCP_ALLOW_CONFIG_FILES"
+  ],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.5",
+    "sdk": "1.32.1",
+    "at": "2026-11-17T14:54:57.826Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "list_boxes",
+      "description": "List the Prized boxes this key can see, newest first: name, id, state, size and region. A box is a persistent cloud dev machine that keeps its files and setup between sessions. Each is marked usable or not: the other box tools act only on boxes your person owns and boxes this server created, unless the person set PRIZED_MCP_ALL_BOXES=1 or gave this server a key limited to some boxes. Teammates' boxes are listed but left alone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "create_box",
+      "description": "Create a Prized box: a persistent cloud dev machine (Linux, with your own user and sudo) that keeps its files, tools and running work between sessions. This spends the workspace's money: a box bills while awake, and a smaller amount for its disk while paused (a Nano costs $10 a month awake around the clock; rates at https://prized.dev/docs/billing). Ask your person before creating one. It creates a Nano (2 vCPU, 2 GB memory, 40 GB disk) unless size names another, and never a GPU box. It waits until the box is running and returns its name, which the other box tools take. It pauses itself after 120 idle minutes unless auto_pause_minutes says otherwise, and is kept, files and all, until someone deletes it (the dashboard, or `prized box delete`); these tools do not delete boxes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "A name for the box, such as api-dev. Default: Prized picks one.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+          },
+          "size": {
+            "default": "nano",
+            "description": "nano (default: Nano, 2 vCPU, 2 GB), micro (Micro, 2 vCPU, 4 GB), lite (Extra Small, 2 vCPU, 8 GB), flow (Small, 4 vCPU, 16 GB), pro (Medium, 8 vCPU, 32 GB), max (Large, 16 vCPU, 64 GB) or ultra (Extra Large, 32 vCPU, 128 GB). Bigger costs more; on the free credit only nano through flow start.",
+            "type": "string",
+            "enum": [
+              "nano",
+              "micro",
+              "lite",
+              "flow",
+              "pro",
+              "max",
+              "ultra"
+            ]
+          },
+          "auto_pause_minutes": {
+            "description": "Pause after this many idle minutes, 30 to 10,080 (7 days). Default 120, so a box nobody uses stops billing for compute (or the workspace's own rule, when it sets a shorter one); on the free credit at most 720.",
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 10080
+          },
+          "region": {
+            "description": "The AWS region. Default us-west-2 (US West, Oregon).",
+            "type": "string",
+            "enum": [
+              "us-west-2",
+              "us-west-1",
+              "us-east-1",
+              "us-east-2",
+              "eu-central-1"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "run_on_box",
+      "description": "Run a shell command on one of your Prized boxes and return its exit code, stdout and stderr when it ends. It runs under sh -c as your box user, in your home directory unless cwd says otherwise, with the tools set up on the box on PATH. A paused box is woken first, which spends the workspace's money: it bills while awake until it pauses again (longer for a box in deep sleep). A non-zero exit code is a result, not a tool error. Each stream is cut to its first 5,000 and last 15,000 characters. It is killed after timeout_seconds (default 240, at most 600). For a longer job, start it in the background (nohup cmd > log.txt 2>&1 &) and check on it later; the box's auto-pause may pause an idle box with it. A box is a persistent machine with your person's files and credentials on it: run only what they asked for.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "box": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "description": "The box: its name (such as mango) or its id, from list_boxes."
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 524288,
+            "description": "The shell command, such as \"cd app && git pull && make test\"."
+          },
+          "cwd": {
+            "description": "Working directory: relative to your home on the box, ~/..., or absolute. Default: your home.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "env": {
+            "description": "Extra environment variables for this command only, at most 32.",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 16384
+            }
+          },
+          "timeout_seconds": {
+            "description": "Kill the command after this many seconds. Default 240, at most 600.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600
+          }
+        },
+        "required": [
+          "box",
+          "command"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "write_box_file",
+      "description": "Write a file on one of your Prized boxes, replacing it whole if it exists; missing parent directories are created. Content is UTF-8 text, or base64 with encoding \"base64\"; up to 1 MiB (for bigger files, your person can use `prized cp`). Paths are relative to your home on the box, ~/..., or absolute. It does not wake a paused box: resume_box first, or use run_on_box.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "box": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "description": "The box: its name (such as mango) or its id, from list_boxes."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Where to write, such as app/config.json (under your home on the box) or /tmp/notes.txt."
+          },
+          "content": {
+            "type": "string",
+            "description": "The file content: text, or base64 when encoding is \"base64\"."
+          },
+          "encoding": {
+            "default": "utf8",
+            "description": "\"utf8\" (default) for text, \"base64\" for binary content.",
+            "type": "string",
+            "enum": [
+              "utf8",
+              "base64"
+            ]
+          }
+        },
+        "required": [
+          "box",
+          "path",
+          "content"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "read_box_file",
+      "description": "Read a file from one of your Prized boxes, up to 1 MiB. Text comes back 60,000 characters at a time (a longer file's answer gives the offset to read on from); PNG, JPEG, GIF and WebP images come back as images; other binary files need encoding \"base64\". Paths are relative to your home on the box, ~/..., or absolute. It does not wake a paused box: resume_box first, or use run_on_box (cat, head, tail).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "box": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "description": "The box: its name (such as mango) or its id, from list_boxes."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The file, such as app/out.json (under your home on the box) or /var/log/syslog."
+          },
+          "encoding": {
+            "description": "Leave out for text (or an image); \"base64\" for the raw bytes of a binary file.",
+            "type": "string",
+            "enum": [
+              "utf8",
+              "base64"
+            ]
+          },
+          "offset": {
+            "description": "For text: the character to read from, as the previous answer gave it. Default 0.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "box",
+          "path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "pause_box",
+      "description": "Pause one of your Prized boxes and wait until it is paused, which stops the awake billing; only its disk is billed while it sleeps. Files are always kept. Nano through Small keep their memory too, so processes resume where they were; Medium and larger stop clean, so processes restart on resume: check nothing your person needs is running first. run_on_box or resume_box wakes it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "box": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "description": "The box: its name (such as mango) or its id, from list_boxes."
+          }
+        },
+        "required": [
+          "box"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "resume_box",
+      "description": "Wake one of your paused Prized boxes and wait until it is running. This spends the workspace's money: the box bills while awake until it pauses again (by its auto-pause, or pause_box). A box in deep sleep (paused for days) takes longer. run_on_box wakes a box on its own; this wakes one ahead of time, or before read_box_file and write_box_file, which do not.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "box": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "description": "The box: its name (such as mango) or its id, from list_boxes."
+          }
+        },
+        "required": [
+          "box"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "create_sandbox",
+      "description": "Create a Prized sandbox: an isolated Linux microVM (Ubuntu 24.04) to run code in, away from this machine. Returns once it is running, usually within seconds, with the id the other tools take. Templates: prized-base-v1 (default; Python 3, Node.js 22, git, build tools) or prized-agent-v1 (adds Claude Code and Codex). Commands run as the user prized in /home/prized/work, with outbound internet; no sudo or apt, and Python packages go in a venv (python3 -m venv ~/.venv). It bills per second while running. By default it pauses after 15 idle minutes (memory and processes kept; the next call resumes it) and is deleted 7 days after it pauses or when its run time ends; delete it with delete_sandbox when done.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "default": "prized-base-v1",
+            "description": "prized-base-v1 (default) or prized-agent-v1 (adds Claude Code and Codex).",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$"
+          },
+          "vcpu": {
+            "description": "vCPUs, 1 to 32. Default 4 (2 on the free tier).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "memory_gb": {
+            "description": "Memory in GB, 1 to 128. Default 8 (4 on the free tier).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 128
+          },
+          "disk_gb": {
+            "description": "Disk in GB, 10 to 128. Default 10.",
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 128
+          },
+          "max_runtime_minutes": {
+            "description": "Minutes of running before it is deleted; each resume starts them again (on the free tier the time left carries on). Default 1,440 (60 on the free tier), at most 10,080.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10080
+          },
+          "auto_pause_minutes": {
+            "default": 15,
+            "description": "Pause after this many minutes without a command or file call. Default 15; 0 never. A background job pauses with it, so use 0 for one that must run unattended.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 40320
+          },
+          "auto_delete_minutes": {
+            "default": 10080,
+            "description": "Delete it this many minutes after it pauses, up to 40,320 (28 days). Default 10,080 (7 days); 0 keeps a paused sandbox until you delete it.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 40320
+          },
+          "env_vars": {
+            "description": "Environment variables for every command in the sandbox, such as a key the code inside needs. Prized stores them encrypted and its API never returns them; anything running in the sandbox can read them.",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 16384
+            }
+          },
+          "labels": {
+            "description": "Your own key/value tags, for list_sandboxes and the dashboard, at most 30. created-by=prized-sandbox-mcp and this install's prized-mcp-scope are always added; prized-mcp-scope cannot be passed.",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "run_command",
+      "description": "Run a shell command in a sandbox and return its exit code, stdout and stderr when it ends. It runs under bash -c as the user prized (no sudo), in /home/prized/work unless cwd says otherwise. A non-zero exit code is a result, not a tool error. Each stream is cut to its first 5,000 and last 15,000 characters; redirect long output to a file and read parts of it. It is killed after timeout_seconds (default 240, at most 3,600); progress is reported while it runs. For a server or a longer job, start it in the background (nohup cmd > log.txt 2>&1 &) and check on it with later commands; a sandbox with auto-pause on pauses it after the idle minutes. A paused sandbox is resumed first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]{1,64}$",
+            "description": "The sandbox id (sbx_...), from create_sandbox or list_sandboxes."
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 524288,
+            "description": "The shell command, such as \"python3 -m venv ~/.venv && ~/.venv/bin/pip install -r requirements.txt && ~/.venv/bin/python app.py\"."
+          },
+          "cwd": {
+            "description": "Working directory. Absolute, or relative to /home/prized/work; ~ is /home/prized. Default /home/prized/work.",
+            "type": "string",
+            "minLength": 1
+          },
+          "env": {
+            "description": "Extra environment variables for this command only, on top of the sandbox's own.",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 16384
+            }
+          },
+          "timeout_seconds": {
+            "description": "Kill the command after this many seconds. Default 240, at most 3,600.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600
+          }
+        },
+        "required": [
+          "sandbox_id",
+          "command"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Write a file in a sandbox, replacing it whole if it exists; missing parent directories are created. Content is UTF-8 text, or base64 with encoding \"base64\"; up to 100 MiB. Paths are absolute under /home/prized, or relative to /home/prized/work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]{1,64}$",
+            "description": "The sandbox id (sbx_...), from create_sandbox or list_sandboxes."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Where to write: /home/prized/work/app.py, or app.py (relative to /home/prized/work)."
+          },
+          "content": {
+            "type": "string",
+            "description": "The file content: text, or base64 when encoding is \"base64\"."
+          },
+          "encoding": {
+            "default": "utf8",
+            "description": "\"utf8\" (default) for text, \"base64\" for binary content.",
+            "type": "string",
+            "enum": [
+              "utf8",
+              "base64"
+            ]
+          }
+        },
+        "required": [
+          "sandbox_id",
+          "path",
+          "content"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "read_file",
+      "description": "Read a file from a sandbox. Text comes back 60,000 bytes at a time (a longer file's answer gives the offset to read on from). PNG, JPEG, GIF and WebP images up to 5 MB come back as images; other binary files need encoding \"base64\" (up to 1 MiB). Paths are absolute under /home/prized, or relative to /home/prized/work. To list a directory, use run_command (ls -la).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]{1,64}$",
+            "description": "The sandbox id (sbx_...), from create_sandbox or list_sandboxes."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The file: /home/prized/work/out.json, or out.json (relative to /home/prized/work)."
+          },
+          "encoding": {
+            "description": "Leave out to get text (or an image); \"base64\" for the raw bytes of a binary file; \"utf8\" to force text.",
+            "type": "string",
+            "enum": [
+              "utf8",
+              "base64"
+            ]
+          },
+          "offset": {
+            "description": "For text: the byte to read from, as the previous answer gave it. Default 0.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "sandbox_id",
+          "path"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_sandboxes",
+      "description": "List sandboxes, newest first: id, state, template, shape, labels, and when each is deleted. Lists only the sandboxes this server made on this machine (the ones carrying this install's prized-mcp-scope label), the only ones its tools use, unless the person set PRIZED_MCP_ALL_SANDBOXES=1, which lists and opens every sandbox in the workspace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "Only sandboxes in this state, such as running or paused.",
+            "type": "string",
+            "enum": [
+              "starting",
+              "running",
+              "pausing",
+              "paused",
+              "resizing",
+              "deleting",
+              "error"
+            ]
+          },
+          "labels": {
+            "description": "Only sandboxes carrying every one of these labels. prized-mcp-scope cannot be passed: this server sets it.",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "fork_sandbox",
+      "description": "Copy a running or paused sandbox into count live copies, each with the parent's disk, memory and running processes as they were at the fork, and its own id; the parent carries on. Set a machine up once (clone, install, build, start a server), then fork it to try several approaches in parallel from the same state. Returns once every copy is running. All or nothing: if one cannot start, none is kept and the error says why. One machine holds about 7 copies of the default 4 vCPU shape (more of smaller ones). Copies bill and count against quotas like any sandbox, keep the parent's auto-pause and auto-delete, and on the free tier keep its deletion time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]{1,64}$",
+            "description": "The running or paused sandbox to copy."
+          },
+          "count": {
+            "default": 1,
+            "description": "How many copies, 1 to 256. Default 1.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256
+          },
+          "labels": {
+            "description": "Labels for the copies, replacing the parent's (which they keep otherwise), at most 30. created-by=prized-sandbox-mcp and this install's prized-mcp-scope are always added; prized-mcp-scope cannot be passed.",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        },
+        "required": [
+          "sandbox_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "pause_sandbox",
+      "description": "Pause a sandbox and wait until it is paused. Memory and disk are kept, so every process carries on where it stopped when it resumes; only storage is billed. It is kept until it is deleted: by delete_sandbox, or by its auto-delete (7 days after pausing for sandboxes this server created, unless set otherwise). run_command and the file tools resume it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]{1,64}$",
+            "description": "The sandbox id (sbx_...), from create_sandbox or list_sandboxes."
+          }
+        },
+        "required": [
+          "sandbox_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "resume_sandbox",
+      "description": "Resume a paused sandbox, every process where it stopped, and wait until it is running (usually under a second). run_command and the file tools resume a sandbox on their own; this wakes one ahead of time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]{1,64}$",
+            "description": "The sandbox id (sbx_...), from create_sandbox or list_sandboxes."
+          }
+        },
+        "required": [
+          "sandbox_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "delete_sandbox",
+      "description": "Delete a sandbox for good: its disk, memory and processes are erased, with no undo. Copy out what you need first. Billing stops once it is gone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "pattern": "^sbx_[A-Za-z0-9]{1,64}$",
+            "description": "The sandbox id (sbx_...), from create_sandbox or list_sandboxes."
+          }
+        },
+        "required": [
+          "sandbox_id"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "prized",
+    "version": "0.2.0"
+  },
+  "protocolVersion": null,
+  "instructions": "Prized boxes are your person's persistent cloud dev machines: list_boxes, create_box, run_on_box, write_box_file, read_box_file, pause_box and resume_box work on them. Creating a box, and waking a paused one (resume_box, or run_on_box on a paused box), spend the workspace's money, so ask first. The box tools act only on boxes your person owns and boxes this server created; teammates' boxes are listed but left alone unless the person sets PRIZED_MCP_ALL_BOXES=1. Prized Sandboxes are isolated Linux microVMs (Ubuntu 24.04) for running throwaway code away from this machine. Typical flow: create_sandbox, then run_command, write_file and read_file with the id it returns, then delete_sandbox when done. fork_sandbox copies a sandbox, memory and running processes included, into several live copies to try things in parallel from one state. The tools use only sandboxes this server made on this machine (the ones carrying this install's prized-mcp-scope label, which it sets itself); others in the workspace are left alone unless the person sets PRIZED_MCP_ALL_SANDBOXES=1. Sandboxes bill per second while running and pause themselves when idle (a call resumes them), so delete the ones you no longer need. Commands run as the user prized without sudo, in /home/prized/work, with outbound internet; nothing reaches a sandbox from outside unless someone opens one of its ports with the Prized CLI or API.",
+  "durationMs": 2867,
+  "stderr": "prized-mcp: PRIZED_API_URL is not a URL: smallprint-placeholder. Fix it in this MCP server's configuration, or remove it to use https://api.prized.dev.\nprized-mcp: upload and download are off: none of the directories in PRIZED_MCP_LOCAL_DIRS exists.\nprized-mcp: PRIZED_MCP_ALLOW_CONFIG_FILES=smallprint-placeholder is not 1, true, yes or on, so it stays off.\n"
+}

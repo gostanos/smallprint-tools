@@ -1,0 +1,811 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "knowmind",
+  "version": "0.4.10",
+  "integrity": {
+    "dist": "sha512-qtp/GwuouRXY0qneiDQdgX/KSlcAcIZ0JH7UKCMa6hpD8UWB/rRxtxSEzG9eB4MK4nXYI2mkRbCsSucPu0tnxA==",
+    "installed": "sha512-qtp/GwuouRXY0qneiDQdgX/KSlcAcIZ0JH7UKCMa6hpD8UWB/rRxtxSEzG9eB4MK4nXYI2mkRbCsSucPu0tnxA=="
+  },
+  "bin": "node_modules/knowmind/bin/knowmind.js",
+  "main": null,
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [
+    "mcp"
+  ],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.5",
+    "sdk": "1.32.1",
+    "at": "2026-11-17T13:43:24.306Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "knowmind_recall_memories",
+      "description": "Retrieve relevant knowledge before answering anything that benefits from prior context - decisions, preferences, project state, people, deadlines, past conversations. Hybrid recall (BM25 + pgvector + knowledge graph) over the tenant corpus; returns the top-k memory chunks, each with a relevance score and source reference. Suitable whenever earlier context would improve the answer; use knowmind_recall_at_time when you need what was valid at a past point in time. Passages from pages in Open Knowledge Format carry metadata.review_flags: stale once stale_after is reached, unverified when no verification is recorded, superseded when the page's status is deprecated or superseded or its valid_to is reached, drifted when code cited by the page's claims changed or was removed since the page was written; an empty list means none applies. When kein_belastbarer_treffer is true, the corpus most likely holds no answer; unless the hits clearly answer the question, say so. Read scope suffices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "One natural-language question about one topic; full sentences retrieve better than keyword lists. For several topics, make several calls."
+          },
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 5,
+            "description": "Number of chunks to return (1-25, default 5)."
+          },
+          "hops": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3,
+            "default": 2,
+            "description": "Accepted for compatibility (0-3, default 2); currently has no effect on recall."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "title": "Recall - retrieve knowledge",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_get_health",
+      "description": "Return the health of the knowmind backend (Postgres, memory service, graph). Use before a batch of writes or when calls fail, to tell an outage apart from an empty result. Returns a status object per component. Read scope suffices; takes no parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Service health",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_get_stats",
+      "description": "Return current counts for the tenant corpus: memories, graph edges and vector chunks. Use to gauge how much has been stored; for the actual entries use knowmind_list_recent or knowmind_recall. Read scope suffices; takes no parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Corpus statistics",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_list_recent",
+      "description": "List the most recently created documents/memories in the tenant corpus, newest first (by created_at). Same corpus that recall searches. Use to review what was just stored or confirm a write landed; use knowmind_recall when you already know what you are looking for. Graph-only entities without a timestamp do not appear, so this count intentionally differs from stats.memories. Read scope suffices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "Number of newest entries to return (1-50, default 10)."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Recent entries",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_store_memory",
+      "description": "Store durable insights the moment they arise - decisions, preferences, facts, results, appointments. Persists one memory entry in the tenant corpus (Postgres + vector index + graph node), afterwards findable via knowmind_recall and knowmind_list_recent. Always creates a new entry; an earlier entry with the same title stays valid, because titles do not identify entries here (to supersede, use knowmind_update_fact, or knowmind_upload_document, which replaces by title); sha-identical content is detected as idempotent (unchanged). Returns the new memory id. Use for a single short fact; for long or multi-fact text use knowmind_upload_document. GIVE THE EDGES ALONG: whatever the text says about people, organisations, projects, hosts or technologies belongs into `relations` in THIS call - name the counterpart, the server creates its node and the edge, no second call needed. A memory without edges is a note; with edges it becomes a graph that answers questions nobody wrote down. Use knowmind_link separately only to connect two entries that already exist. ENTRIES ARE NEVER HARD-DELETED, they are superseded: correct a fact with knowmind_update_fact, remove an edge with knowmind_unlink_entities. Both keep the history auditable, which is the point of this store - what was true when, and when that changed. Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short human-readable title (a few words). Not a uniqueness key - duplicate titles create separate entries."
+          },
+          "content": {
+            "type": "string",
+            "description": "The memory text. Keep it to one atomic fact per entry so it stays retrievable and updatable."
+          },
+          "memory_type": {
+            "type": "string",
+            "enum": [
+              "semantic",
+              "episodic",
+              "procedural",
+              "reference"
+            ],
+            "default": "semantic",
+            "description": "Kind of memory: semantic (durable fact), episodic (event), procedural (how-to), reference (pointer to a resource). Default semantic."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Free-text keywords for later filtering (lowercase, no spaces recommended)."
+          },
+          "source": {
+            "type": "string",
+            "description": "Where this came from - URL, file path, or a short note. Free text, stored for provenance."
+          },
+          "domain": {
+            "type": "string",
+            "description": "Knowledge domain this entry belongs to, by its short key (e.g. 'sales', 'engineering'). Unknown keys are ignored and the entry stays unassigned - it is never guessed into a domain."
+          },
+          "relations": {
+            "type": "array",
+            "description": "Edges from this entry to the things it talks about - set them HERE, in the same call. Name the counterpart in plain words; the server finds or creates its node and draws the edge, so you need neither knowmind_recall nor knowmind_entity nor knowmind_link for it. Example: storing 'Anna Meier leitet die IT bei der Muster GmbH' carries [{predicate: 'WORKS_FOR', object: 'Muster GmbH', object_class: 'Organization'}]. An entry without edges is a note; with edges it answers questions nobody wrote down. Allowed predicate values: ABOUT (Application|Contract|Course|CreativeWork|Document|Event|FileResource|Product|Project|Service|Training → Topic), AFFECTED_BY_DECISION (Application|Organization|Product|Project → Decision), ALUMNI_OF (Person → Organization), APPLICATION_USED_BY (Application|Product → Process), ASSIGNED_TO (ActionRecord|Task → Agent|Organization|Person|SoftwareAgent), ATTENDED_BY (Event → Organization|Person), ATTENDS (Organization|Person → Event), AUTHOR_OF (Person → Course|CreativeWork|Patent), AUTOMATED_BY (Process → Process), AUTOMATES (Process → Process), BASED_ON (Application|CreativeWork|Product|Project → Application|CreativeWork|Product|Project), BILLED_TO (Invoice → Organization|Person), CLIENT_OF (Agent|Organization|Person|SoftwareAgent → Organization), COMPETES_WITH (Application|Organization|Product → Application|Organization|Product), CONCERNS (Decision → Application|Organization|Product|Project), CONTACT_PERSON_FOR (Person → Organization), CONTRACT_FOR (Contract → Application|Domain|Host|Product|Project|Service), CONTRACT_OF (Contract → Organization), CONTRACT_WITH (Contract → Organization), CONTRACTOR_OF (Organization → Contract), COVERED_BY (Topic → Application|Contract|Course|CreativeWork|Document|Event|FileResource|Product|Project|Service|Training), CUSTOMER (SalesRelation → Organization|Person), CUSTOMER_IN (Organization|Person → SalesRelation), DECIDED (Person → Decision), DECIDED_BY (Decision → Person), DELIVERED_AS (Application → Product), DELIVERED_BY (Product → Application), DEPENDS_ON (Application|Product → Application|Device|Product), DEPLOYED_TO (Application|Product → Container), DEVELOPED_BY (Application|Product|Project → Agent|Organization|Person|SoftwareAgent), DEVELOPS (Agent|Organization|Person|SoftwareAgent → Application|Product|Project), ENABLES (Application|Device|Product → Application|Product), ENROLLED_IN (Organization|Person → Course|Training), ENROLLMENT_IN (Enrollment → Course|Training), ENROLLMENT_OF (Enrollment → Organization|Person), ENVIRONMENT_OF (Environment → Application), FOLLOWED_BY (Process → Process), FOR_CLIENT (Project|Training → Agent|Organization|Person|SoftwareAgent), FOR_EVENT (Project → Event), FOUNDED (Person → Organization), FOUNDED_BY (Organization → Person), HAS_ALUMNUS (Organization → Person), HAS_ASSIGNED_TASK (Agent|Organization|Person|SoftwareAgent → ActionRecord|Task), HAS_AUTHOR (Course|CreativeWork|Patent → Person), HAS_CHILD (Person → Person), HAS_CLIENT (Organization → Agent|Organization|Person|SoftwareAgent), HAS_CONTACT_PERSON (Organization → Person), HAS_CONTRACT (Application|Domain|Host|Product|Project|Service → Contract), HAS_DIRECT_REPORT (Person → Person), HAS_EMPLOYEE (Organization → Person), HAS_ENROLLMENT (Course|Training → Enrollment), HAS_EVENT_PROJECT (Event → Project), HAS_INVOICE (Contract|Offer|Product|Project|Service → Invoice), HAS_MEMBER (Membership → Organization|Person), HAS_MEMBERSHIP (Organization → Membership), HAS_OPERATED_APPLICATION (Agent|Organization|Person|SoftwareAgent → Application|Host), HAS_PARENT (Person → Person), HAS_PARTICIPANT (Course|Training → Organization|Person), HAS_PREDECESSOR (ActionRecord|Project|Task → ActionRecord|Project|Task), HAS_PROJECT (Agent|Organization|Person|SoftwareAgent → Project|Training), HAS_PROSPECT (Organization → Organization|Person), HAS_QUOTE (Project → Quote), HAS_RELATED_PROJECT (Application|Product → Project), HAS_RESPONSIBLE (Application|CreativeWork|Product|Project → Organization|Person), HAS_ROLE (Person → Role), HAS_SIBLING (Person → Person), HAS_SKILL (Agent|Organization|Person|SoftwareAgent → Skill), HAS_SPEAKER (Event → Person), HAS_SUCCESSOR (ActionRecord|Project|Task → ActionRecord|Project|Task), HOLDS_CONTRACT (Organization → Contract), HOLDS_ENROLLMENT (Organization|Person → Enrollment), HOLDS_MEMBERSHIP (Organization|Person → Membership), HOLDS_TRAINING (Person → Training), HOSTED_ON (Container → Host), HOSTS (Host → Container), HOSTS_APPLICATION (Container → Application|Product), IN_ENVIRONMENT (Application → Environment), IN_ORGANIZATION (Membership → Organization), INCLUDES_MEMBER (Organization → Organization|Person), INFRASTRUCTURE_PROVIDED_BY (Host → Organization), INTEGRATES_WITH (Application|Product → Application|Product), INVOICE_FOR (Invoice → Contract|Offer|Product|Project|Service), IS_BASIS_OF (Application|CreativeWork|Product|Project → Application|CreativeWork|Product|Project), IS_LED_BY (Organization → Person), ISSUED_BY (Invoice → Organization|Person), ISSUED_INVOICE (Organization|Person → Invoice), ISSUED_QUOTE (Organization → Quote), ITEM_OFFERED (Offer|Quote → Product|Service), KNOWN_BY (Topic → Organization|Person), KNOWS (Person → Person), KNOWS_ABOUT (Organization|Person → Topic), LEADS (Person → Organization), MAKES_OFFER (Organization → Offer), MANUFACTURED_BY (Device → Organization), MANUFACTURES (Organization → Device), MEMBER_OF (Organization|Person → Organization), OFFER_MADE_BY (Offer → Organization), OFFERED_BY (Product|Service → Organization), OFFERED_IN (Product|Service → Offer|Quote), OFFERS (Organization → Product|Service), OPERATED_FOR (Application|Host → Agent|Organization|Person|SoftwareAgent), ORGANIZED_BY (Event → Organization), ORGANIZES (Organization → Event), PAID_BY (Agent|Organization|Person|SoftwareAgent → Agent|Organization|Person|SoftwareAgent), PARTNER_OF (Organization → Organization), PATENT_FOR (Patent → Application|Product), PAYS (Agent|Organization|Person|SoftwareAgent → Agent|Organization|Person|SoftwareAgent), PERFORMED_BY (Process → Person|SoftwareAgent), PERFORMS (Person|SoftwareAgent → Process), PRECEDED_BY (Process → Process), PRODUCED_BY (Contract|Document|FileResource → Project), PRODUCES (Project → Contract|Document|FileResource), PRODUCT_USED_BY (Application|Product → Organization|Person), PROJECT_OF (Project → Application|Product), PROSPECT_OF (Organization|Person → Organization), PROTECTED_BY (Application|Product → Patent), PROVIDES_INFRASTRUCTURE (Organization → Host), PROVIDES_SERVICE_TO (Organization → Application|Offer|Product|Service), QUOTED_BY (Quote → Organization), QUOTED_FOR (Quote → Project), QUOTED_TO (Quote → Organization|Person), RECEIVED_INVOICE (Organization|Person → Invoice), RECEIVED_QUOTE (Organization|Person → Quote), REGISTERED_WITH (Domain → Organization), REGISTRAR_OF (Organization → Domain), REPORTS_TO (Person → Person), RESOLVED_FROM (Host → Domain), RESOLVES_TO (Domain → Host), RESPONSIBLE_FOR (Organization|Person → Application|CreativeWork|Product|Project), ROLE_OF (Role → Person), SELLER (SalesRelation → Organization), SELLER_IN (Organization → SalesRelation), SERVED_UNDER (Application|Product → Domain), SERVES (Domain → Application|Product), SKILL_OF (Skill → Agent|Organization|Person|SoftwareAgent), SPEAKS_AT (Person → Event), SPOUSE_OF (Person → Person), SUPPLIED_BY (Agent|Organization|Person|SoftwareAgent → Organization), SUPPLIES (Organization → Agent|Organization|Person|SoftwareAgent), SUPPLIES_TECHNOLOGY (Organization → Technology), SUPPORTED_BY (Contract|Document|FileResource → Contract|Document|FileResource), SUPPORTS (Contract|Document|FileResource → Contract|Document|FileResource), TECHNOLOGY_SUPPLIED_BY (Technology → Organization), TECHNOLOGY_USED_BY (Technology → Application|Product), TRAINING_HELD_BY (Training → Person), USES_APPLICATION (Process → Application|Product), USES_PRODUCT (Organization|Person → Application|Product), USES_SERVICE_OF (Application|Offer|Product|Service → Organization), USES_TECHNOLOGY (Application|Product → Technology), WORKED_ON_BY (Project → Agent|Organization|Person|SoftwareAgent), WORKS_FOR (Person → Organization), WORKS_ON (Agent|Organization|Person|SoftwareAgent → Project)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "predicate": {
+                  "type": "string",
+                  "description": "Edge type in UPPER_SNAKE_CASE from the allowed list."
+                },
+                "object": {
+                  "type": "string",
+                  "description": "Proper name of the counterpart, as it would be written in a document ('Muster GmbH', not 'the client')."
+                },
+                "object_class": {
+                  "type": "string",
+                  "description": "Class of the counterpart (Person, Organization, Application, Host, Technology, ...). Pick it from knowmind_schema."
+                },
+                "object_description": {
+                  "type": "string",
+                  "description": "One sentence about the counterpart, used when its node has to be created. Optional."
+                },
+                "confidence": {
+                  "type": "number",
+                  "description": "Edge confidence in [0..1]; 1.0 for a fact stated verbatim, 0.7 for a clear paraphrase. Below that, leave the edge out."
+                }
+              },
+              "required": [
+                "predicate",
+                "object"
+              ]
+            }
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "annotations": {
+        "title": "Store memory",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_upload_document",
+      "description": "Ingest a longer text as one document into the tenant corpus: chunk splitting, embeddings, vector chunks and graph nodes. Upsert-by-title (server default): if a valid document with the same title exists in the same domain, the new version supersedes it; the old version stays retrievable via knowmind_recall_at_time, and the superseded ids come back in replaced_document_ids. If the same text already exists in another valid document of the same domain, no new document is created and the response carries deduplicated. Use for long-form or multi-fact content (a report, a page, a doc); for a single short fact use knowmind_store_memory. Returns the document id and the number of chunks written. AFTER INGESTING: extract the facts the text states about people, organisations, projects, products, technologies and hosts, and create the corresponding edges via knowmind_link. Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Document title. Unless replace is false, it identifies the document: a valid document with the same title in the same domain is superseded and stays retrievable via knowmind_recall_at_time."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full document text (Markdown or plain); chunked and embedded server-side."
+          },
+          "source": {
+            "type": "string",
+            "description": "Origin, a URL or file path. Free text appended to the content for provenance; it does not decide which document is superseded."
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "Default on knowmind.de: true, supersede the valid document with the same title in the same domain. false: store as a new document next to it."
+          },
+          "relations": {
+            "type": "array",
+            "description": "Edges from this document to the things it talks about - set them HERE, in the same call. Name the counterpart in plain words; the server finds or creates its node and draws the edge. Allowed predicate values: ABOUT (Application|Contract|Course|CreativeWork|Document|Event|FileResource|Product|Project|Service|Training → Topic), AFFECTED_BY_DECISION (Application|Organization|Product|Project → Decision), ALUMNI_OF (Person → Organization), APPLICATION_USED_BY (Application|Product → Process), ASSIGNED_TO (ActionRecord|Task → Agent|Organization|Person|SoftwareAgent), ATTENDED_BY (Event → Organization|Person), ATTENDS (Organization|Person → Event), AUTHOR_OF (Person → Course|CreativeWork|Patent), AUTOMATED_BY (Process → Process), AUTOMATES (Process → Process), BASED_ON (Application|CreativeWork|Product|Project → Application|CreativeWork|Product|Project), BILLED_TO (Invoice → Organization|Person), CLIENT_OF (Agent|Organization|Person|SoftwareAgent → Organization), COMPETES_WITH (Application|Organization|Product → Application|Organization|Product), CONCERNS (Decision → Application|Organization|Product|Project), CONTACT_PERSON_FOR (Person → Organization), CONTRACT_FOR (Contract → Application|Domain|Host|Product|Project|Service), CONTRACT_OF (Contract → Organization), CONTRACT_WITH (Contract → Organization), CONTRACTOR_OF (Organization → Contract), COVERED_BY (Topic → Application|Contract|Course|CreativeWork|Document|Event|FileResource|Product|Project|Service|Training), CUSTOMER (SalesRelation → Organization|Person), CUSTOMER_IN (Organization|Person → SalesRelation), DECIDED (Person → Decision), DECIDED_BY (Decision → Person), DELIVERED_AS (Application → Product), DELIVERED_BY (Product → Application), DEPENDS_ON (Application|Product → Application|Device|Product), DEPLOYED_TO (Application|Product → Container), DEVELOPED_BY (Application|Product|Project → Agent|Organization|Person|SoftwareAgent), DEVELOPS (Agent|Organization|Person|SoftwareAgent → Application|Product|Project), ENABLES (Application|Device|Product → Application|Product), ENROLLED_IN (Organization|Person → Course|Training), ENROLLMENT_IN (Enrollment → Course|Training), ENROLLMENT_OF (Enrollment → Organization|Person), ENVIRONMENT_OF (Environment → Application), FOLLOWED_BY (Process → Process), FOR_CLIENT (Project|Training → Agent|Organization|Person|SoftwareAgent), FOR_EVENT (Project → Event), FOUNDED (Person → Organization), FOUNDED_BY (Organization → Person), HAS_ALUMNUS (Organization → Person), HAS_ASSIGNED_TASK (Agent|Organization|Person|SoftwareAgent → ActionRecord|Task), HAS_AUTHOR (Course|CreativeWork|Patent → Person), HAS_CHILD (Person → Person), HAS_CLIENT (Organization → Agent|Organization|Person|SoftwareAgent), HAS_CONTACT_PERSON (Organization → Person), HAS_CONTRACT (Application|Domain|Host|Product|Project|Service → Contract), HAS_DIRECT_REPORT (Person → Person), HAS_EMPLOYEE (Organization → Person), HAS_ENROLLMENT (Course|Training → Enrollment), HAS_EVENT_PROJECT (Event → Project), HAS_INVOICE (Contract|Offer|Product|Project|Service → Invoice), HAS_MEMBER (Membership → Organization|Person), HAS_MEMBERSHIP (Organization → Membership), HAS_OPERATED_APPLICATION (Agent|Organization|Person|SoftwareAgent → Application|Host), HAS_PARENT (Person → Person), HAS_PARTICIPANT (Course|Training → Organization|Person), HAS_PREDECESSOR (ActionRecord|Project|Task → ActionRecord|Project|Task), HAS_PROJECT (Agent|Organization|Person|SoftwareAgent → Project|Training), HAS_PROSPECT (Organization → Organization|Person), HAS_QUOTE (Project → Quote), HAS_RELATED_PROJECT (Application|Product → Project), HAS_RESPONSIBLE (Application|CreativeWork|Product|Project → Organization|Person), HAS_ROLE (Person → Role), HAS_SIBLING (Person → Person), HAS_SKILL (Agent|Organization|Person|SoftwareAgent → Skill), HAS_SPEAKER (Event → Person), HAS_SUCCESSOR (ActionRecord|Project|Task → ActionRecord|Project|Task), HOLDS_CONTRACT (Organization → Contract), HOLDS_ENROLLMENT (Organization|Person → Enrollment), HOLDS_MEMBERSHIP (Organization|Person → Membership), HOLDS_TRAINING (Person → Training), HOSTED_ON (Container → Host), HOSTS (Host → Container), HOSTS_APPLICATION (Container → Application|Product), IN_ENVIRONMENT (Application → Environment), IN_ORGANIZATION (Membership → Organization), INCLUDES_MEMBER (Organization → Organization|Person), INFRASTRUCTURE_PROVIDED_BY (Host → Organization), INTEGRATES_WITH (Application|Product → Application|Product), INVOICE_FOR (Invoice → Contract|Offer|Product|Project|Service), IS_BASIS_OF (Application|CreativeWork|Product|Project → Application|CreativeWork|Product|Project), IS_LED_BY (Organization → Person), ISSUED_BY (Invoice → Organization|Person), ISSUED_INVOICE (Organization|Person → Invoice), ISSUED_QUOTE (Organization → Quote), ITEM_OFFERED (Offer|Quote → Product|Service), KNOWN_BY (Topic → Organization|Person), KNOWS (Person → Person), KNOWS_ABOUT (Organization|Person → Topic), LEADS (Person → Organization), MAKES_OFFER (Organization → Offer), MANUFACTURED_BY (Device → Organization), MANUFACTURES (Organization → Device), MEMBER_OF (Organization|Person → Organization), OFFER_MADE_BY (Offer → Organization), OFFERED_BY (Product|Service → Organization), OFFERED_IN (Product|Service → Offer|Quote), OFFERS (Organization → Product|Service), OPERATED_FOR (Application|Host → Agent|Organization|Person|SoftwareAgent), ORGANIZED_BY (Event → Organization), ORGANIZES (Organization → Event), PAID_BY (Agent|Organization|Person|SoftwareAgent → Agent|Organization|Person|SoftwareAgent), PARTNER_OF (Organization → Organization), PATENT_FOR (Patent → Application|Product), PAYS (Agent|Organization|Person|SoftwareAgent → Agent|Organization|Person|SoftwareAgent), PERFORMED_BY (Process → Person|SoftwareAgent), PERFORMS (Person|SoftwareAgent → Process), PRECEDED_BY (Process → Process), PRODUCED_BY (Contract|Document|FileResource → Project), PRODUCES (Project → Contract|Document|FileResource), PRODUCT_USED_BY (Application|Product → Organization|Person), PROJECT_OF (Project → Application|Product), PROSPECT_OF (Organization|Person → Organization), PROTECTED_BY (Application|Product → Patent), PROVIDES_INFRASTRUCTURE (Organization → Host), PROVIDES_SERVICE_TO (Organization → Application|Offer|Product|Service), QUOTED_BY (Quote → Organization), QUOTED_FOR (Quote → Project), QUOTED_TO (Quote → Organization|Person), RECEIVED_INVOICE (Organization|Person → Invoice), RECEIVED_QUOTE (Organization|Person → Quote), REGISTERED_WITH (Domain → Organization), REGISTRAR_OF (Organization → Domain), REPORTS_TO (Person → Person), RESOLVED_FROM (Host → Domain), RESOLVES_TO (Domain → Host), RESPONSIBLE_FOR (Organization|Person → Application|CreativeWork|Product|Project), ROLE_OF (Role → Person), SELLER (SalesRelation → Organization), SELLER_IN (Organization → SalesRelation), SERVED_UNDER (Application|Product → Domain), SERVES (Domain → Application|Product), SKILL_OF (Skill → Agent|Organization|Person|SoftwareAgent), SPEAKS_AT (Person → Event), SPOUSE_OF (Person → Person), SUPPLIED_BY (Agent|Organization|Person|SoftwareAgent → Organization), SUPPLIES (Organization → Agent|Organization|Person|SoftwareAgent), SUPPLIES_TECHNOLOGY (Organization → Technology), SUPPORTED_BY (Contract|Document|FileResource → Contract|Document|FileResource), SUPPORTS (Contract|Document|FileResource → Contract|Document|FileResource), TECHNOLOGY_SUPPLIED_BY (Technology → Organization), TECHNOLOGY_USED_BY (Technology → Application|Product), TRAINING_HELD_BY (Training → Person), USES_APPLICATION (Process → Application|Product), USES_PRODUCT (Organization|Person → Application|Product), USES_SERVICE_OF (Application|Offer|Product|Service → Organization), USES_TECHNOLOGY (Application|Product → Technology), WORKED_ON_BY (Project → Agent|Organization|Person|SoftwareAgent), WORKS_FOR (Person → Organization), WORKS_ON (Agent|Organization|Person|SoftwareAgent → Project)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "predicate": {
+                  "type": "string",
+                  "description": "Edge type in UPPER_SNAKE_CASE from the allowed list."
+                },
+                "object": {
+                  "type": "string",
+                  "description": "Proper name of the counterpart."
+                },
+                "object_class": {
+                  "type": "string",
+                  "description": "Class of the counterpart (Person, Organization, Application, Host, Technology, ...)."
+                },
+                "object_description": {
+                  "type": "string",
+                  "description": "One sentence about the counterpart, used when its node has to be created. Optional."
+                },
+                "confidence": {
+                  "type": "number",
+                  "description": "Edge confidence in [0..1]."
+                }
+              },
+              "required": [
+                "predicate",
+                "object"
+              ]
+            }
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "annotations": {
+        "title": "Upload document",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_update_fact",
+      "description": "Supersede a known fact without losing history: the existing memory gets valid_to=now, a new memory with valid_from=now is created and linked via SUPERSEDES. Use this instead of knowmind_store_memory when a fact CHANGES (address moved, contract renewed) - old statements are marked outdated, not deleted, so the timeline stays auditable and queryable via knowmind_recall_at_time. Returns the new memory id. Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_id": {
+            "type": "string",
+            "description": "ID of the memory to supersede; get it via knowmind_recall - never invent it."
+          },
+          "new_title": {
+            "type": "string",
+            "description": "Title of the new, now-valid memory."
+          },
+          "new_content": {
+            "type": "string",
+            "description": "Content of the new memory (the updated fact)."
+          },
+          "update_reason": {
+            "type": "string",
+            "description": "Why it changed (e.g. 'address changed', 'contract renewed'); stored on the SUPERSEDES edge."
+          }
+        },
+        "required": [
+          "target_id",
+          "new_title",
+          "new_content"
+        ]
+      },
+      "annotations": {
+        "title": "Update fact (bi-temporal)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_end_fact",
+      "description": "End an entry that no longer applies and that nothing replaces (a project closed, a source withdrawn): the entry gets valid_to (now, or the given time) and drops out of knowmind_recall, while knowmind_recall_at_time before that time still finds it. Nothing is deleted and no new entry is created. When a newer statement replaces the entry, use knowmind_update_fact instead. Calling it again changes nothing. Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_id": {
+            "type": "string",
+            "description": "ID of the entry to end; get it via knowmind_recall - never invent it."
+          },
+          "valid_to": {
+            "type": "string",
+            "description": "ISO-8601 time with time zone from which the entry no longer applies; defaults to now. Example: '2026-10-11T22:10:00+02:00'."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it ends (e.g. 'source withdrawn'); stored with the entry."
+          }
+        },
+        "required": [
+          "target_id"
+        ]
+      },
+      "annotations": {
+        "title": "End fact",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_recall_at_time",
+      "description": "Time-travel recall: return only memories that were valid at a given instant (valid_from <= as_of <= valid_to, or still open). Answers 'what did the agent know on March 14?'. Use instead of knowmind_recall when the point in time matters; otherwise use knowmind_recall for the current truth. Passages from pages in Open Knowledge Format carry metadata.review_flags (stale, unverified, superseded, drifted); stale and superseded are judged against as_of. When kein_belastbarer_treffer is true, the corpus as of as_of most likely holds no answer; it is judged on the hits visible at as_of. Unless they clearly answer the question, say so. Read scope suffices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural-language question."
+          },
+          "as_of": {
+            "type": "string",
+            "description": "ISO-8601 timestamp to evaluate validity at; defaults to now. Example: '2026-03-14T00:00:00Z'."
+          },
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 5,
+            "description": "Number of chunks to return (1-25, default 5)."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "title": "Recall at time",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_upsert_entity",
+      "description": "Create the node for a thing the corpus talks about - a person, an organisation, an application, a host, a technology - or return the existing one. THE GRAPH NEEDS THESE: memories are texts, and two texts mentioning the same server stay unconnected until that server exists as its own node. Create an entity when a name recurs across memories or when you are about to link something that has no node yet, then connect it with knowmind_link. Same name, same class and same tenant always return the same id, so calling twice creates no duplicate. Give the entity its plain proper name (\"PostgreSQL\", not \"the database we use\"), and pick the class from the catalogue in knowmind_schema. Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Proper name of the thing, as it would be written in a document. No role, no status, no description."
+          },
+          "entity_class": {
+            "type": "string",
+            "description": "Class from the catalogue (knowmind_schema -> entityClasses), e.g. Person, Organization, Application, Host, Technology."
+          },
+          "description": {
+            "type": "string",
+            "description": "One sentence saying what this is. Optional, helps later retrieval."
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Other spellings the same thing appears under. Optional."
+          }
+        },
+        "required": [
+          "name",
+          "entity_class"
+        ]
+      },
+      "annotations": {
+        "title": "Create entity",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_link_entities",
+      "description": "Create a typed relation between two memory nodes (a knowledge-graph edge). THIS IS HOW THE GRAPH IS BUILT: after storing memories, connect them - a corpus without edges answers only what a single note already says. The server checks the edge against the ontology's shapes before writing it: the subject and object must belong to the classes the predicate requires (for entries without a class the check only warns), entity names must carry no role or suffix, and the edge must name its evidence - the id of the entry that states the relation. A rejected edge returns the violated rule. The inverse edge is materialized automatically, and derived edges (RUNS_ON, WORKS_FOR_CLIENT, HOST_SERVES_CLIENT, DEPENDS_ON_SUPPLIER) are computed by the server - never set them by hand. Get both node IDs via knowmind_recall first, and call knowmind_schema for the full catalogue with explanations. Allowed rel_type values: ABOUT (Application|Contract|Course|CreativeWork|Document|Event|FileResource|Product|Project|Service|Training → Topic), AFFECTED_BY_DECISION (Application|Organization|Product|Project → Decision), ALUMNI_OF (Person → Organization), APPLICATION_USED_BY (Application|Product → Process), ASSIGNED_TO (ActionRecord|Task → Agent|Organization|Person|SoftwareAgent), ATTENDED_BY (Event → Organization|Person), ATTENDS (Organization|Person → Event), AUTHOR_OF (Person → Course|CreativeWork|Patent), AUTOMATED_BY (Process → Process), AUTOMATES (Process → Process), BASED_ON (Application|CreativeWork|Product|Project → Application|CreativeWork|Product|Project), BILLED_TO (Invoice → Organization|Person), CLIENT_OF (Agent|Organization|Person|SoftwareAgent → Organization), COMPETES_WITH (Application|Organization|Product → Application|Organization|Product), CONCERNS (Decision → Application|Organization|Product|Project), CONTACT_PERSON_FOR (Person → Organization), CONTRACT_FOR (Contract → Application|Domain|Host|Product|Project|Service), CONTRACT_OF (Contract → Organization), CONTRACT_WITH (Contract → Organization), CONTRACTOR_OF (Organization → Contract), COVERED_BY (Topic → Application|Contract|Course|CreativeWork|Document|Event|FileResource|Product|Project|Service|Training), CUSTOMER (SalesRelation → Organization|Person), CUSTOMER_IN (Organization|Person → SalesRelation), DECIDED (Person → Decision), DECIDED_BY (Decision → Person), DELIVERED_AS (Application → Product), DELIVERED_BY (Product → Application), DEPENDS_ON (Application|Product → Application|Device|Product), DEPLOYED_TO (Application|Product → Container), DEVELOPED_BY (Application|Product|Project → Agent|Organization|Person|SoftwareAgent), DEVELOPS (Agent|Organization|Person|SoftwareAgent → Application|Product|Project), ENABLES (Application|Device|Product → Application|Product), ENROLLED_IN (Organization|Person → Course|Training), ENROLLMENT_IN (Enrollment → Course|Training), ENROLLMENT_OF (Enrollment → Organization|Person), ENVIRONMENT_OF (Environment → Application), FOLLOWED_BY (Process → Process), FOR_CLIENT (Project|Training → Agent|Organization|Person|SoftwareAgent), FOR_EVENT (Project → Event), FOUNDED (Person → Organization), FOUNDED_BY (Organization → Person), HAS_ALUMNUS (Organization → Person), HAS_ASSIGNED_TASK (Agent|Organization|Person|SoftwareAgent → ActionRecord|Task), HAS_AUTHOR (Course|CreativeWork|Patent → Person), HAS_CHILD (Person → Person), HAS_CLIENT (Organization → Agent|Organization|Person|SoftwareAgent), HAS_CONTACT_PERSON (Organization → Person), HAS_CONTRACT (Application|Domain|Host|Product|Project|Service → Contract), HAS_DIRECT_REPORT (Person → Person), HAS_EMPLOYEE (Organization → Person), HAS_ENROLLMENT (Course|Training → Enrollment), HAS_EVENT_PROJECT (Event → Project), HAS_INVOICE (Contract|Offer|Product|Project|Service → Invoice), HAS_MEMBER (Membership → Organization|Person), HAS_MEMBERSHIP (Organization → Membership), HAS_OPERATED_APPLICATION (Agent|Organization|Person|SoftwareAgent → Application|Host), HAS_PARENT (Person → Person), HAS_PARTICIPANT (Course|Training → Organization|Person), HAS_PREDECESSOR (ActionRecord|Project|Task → ActionRecord|Project|Task), HAS_PROJECT (Agent|Organization|Person|SoftwareAgent → Project|Training), HAS_PROSPECT (Organization → Organization|Person), HAS_QUOTE (Project → Quote), HAS_RELATED_PROJECT (Application|Product → Project), HAS_RESPONSIBLE (Application|CreativeWork|Product|Project → Organization|Person), HAS_ROLE (Person → Role), HAS_SIBLING (Person → Person), HAS_SKILL (Agent|Organization|Person|SoftwareAgent → Skill), HAS_SPEAKER (Event → Person), HAS_SUCCESSOR (ActionRecord|Project|Task → ActionRecord|Project|Task), HOLDS_CONTRACT (Organization → Contract), HOLDS_ENROLLMENT (Organization|Person → Enrollment), HOLDS_MEMBERSHIP (Organization|Person → Membership), HOLDS_TRAINING (Person → Training), HOSTED_ON (Container → Host), HOSTS (Host → Container), HOSTS_APPLICATION (Container → Application|Product), IN_ENVIRONMENT (Application → Environment), IN_ORGANIZATION (Membership → Organization), INCLUDES_MEMBER (Organization → Organization|Person), INFRASTRUCTURE_PROVIDED_BY (Host → Organization), INTEGRATES_WITH (Application|Product → Application|Product), INVOICE_FOR (Invoice → Contract|Offer|Product|Project|Service), IS_BASIS_OF (Application|CreativeWork|Product|Project → Application|CreativeWork|Product|Project), IS_LED_BY (Organization → Person), ISSUED_BY (Invoice → Organization|Person), ISSUED_INVOICE (Organization|Person → Invoice), ISSUED_QUOTE (Organization → Quote), ITEM_OFFERED (Offer|Quote → Product|Service), KNOWN_BY (Topic → Organization|Person), KNOWS (Person → Person), KNOWS_ABOUT (Organization|Person → Topic), LEADS (Person → Organization), MAKES_OFFER (Organization → Offer), MANUFACTURED_BY (Device → Organization), MANUFACTURES (Organization → Device), MEMBER_OF (Organization|Person → Organization), OFFER_MADE_BY (Offer → Organization), OFFERED_BY (Product|Service → Organization), OFFERED_IN (Product|Service → Offer|Quote), OFFERS (Organization → Product|Service), OPERATED_FOR (Application|Host → Agent|Organization|Person|SoftwareAgent), ORGANIZED_BY (Event → Organization), ORGANIZES (Organization → Event), PAID_BY (Agent|Organization|Person|SoftwareAgent → Agent|Organization|Person|SoftwareAgent), PARTNER_OF (Organization → Organization), PATENT_FOR (Patent → Application|Product), PAYS (Agent|Organization|Person|SoftwareAgent → Agent|Organization|Person|SoftwareAgent), PERFORMED_BY (Process → Person|SoftwareAgent), PERFORMS (Person|SoftwareAgent → Process), PRECEDED_BY (Process → Process), PRODUCED_BY (Contract|Document|FileResource → Project), PRODUCES (Project → Contract|Document|FileResource), PRODUCT_USED_BY (Application|Product → Organization|Person), PROJECT_OF (Project → Application|Product), PROSPECT_OF (Organization|Person → Organization), PROTECTED_BY (Application|Product → Patent), PROVIDES_INFRASTRUCTURE (Organization → Host), PROVIDES_SERVICE_TO (Organization → Application|Offer|Product|Service), QUOTED_BY (Quote → Organization), QUOTED_FOR (Quote → Project), QUOTED_TO (Quote → Organization|Person), RECEIVED_INVOICE (Organization|Person → Invoice), RECEIVED_QUOTE (Organization|Person → Quote), REGISTERED_WITH (Domain → Organization), REGISTRAR_OF (Organization → Domain), REPORTS_TO (Person → Person), RESOLVED_FROM (Host → Domain), RESOLVES_TO (Domain → Host), RESPONSIBLE_FOR (Organization|Person → Application|CreativeWork|Product|Project), ROLE_OF (Role → Person), SELLER (SalesRelation → Organization), SELLER_IN (Organization → SalesRelation), SERVED_UNDER (Application|Product → Domain), SERVES (Domain → Application|Product), SKILL_OF (Skill → Agent|Organization|Person|SoftwareAgent), SPEAKS_AT (Person → Event), SPOUSE_OF (Person → Person), SUPPLIED_BY (Agent|Organization|Person|SoftwareAgent → Organization), SUPPLIES (Organization → Agent|Organization|Person|SoftwareAgent), SUPPLIES_TECHNOLOGY (Organization → Technology), SUPPORTED_BY (Contract|Document|FileResource → Contract|Document|FileResource), SUPPORTS (Contract|Document|FileResource → Contract|Document|FileResource), TECHNOLOGY_SUPPLIED_BY (Technology → Organization), TECHNOLOGY_USED_BY (Technology → Application|Product), TRAINING_HELD_BY (Training → Person), USES_APPLICATION (Process → Application|Product), USES_PRODUCT (Organization|Person → Application|Product), USES_SERVICE_OF (Application|Offer|Product|Service → Organization), USES_TECHNOLOGY (Application|Product → Technology), WORKED_ON_BY (Project → Agent|Organization|Person|SoftwareAgent), WORKS_FOR (Person → Organization), WORKS_ON (Agent|Organization|Person|SoftwareAgent → Project). Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from_id": {
+            "type": "string",
+            "description": "Memory ID of the source node (get it via knowmind_recall)."
+          },
+          "to_id": {
+            "type": "string",
+            "description": "Memory ID of the target node."
+          },
+          "rel_type": {
+            "type": "string",
+            "description": "Edge type in UPPER_SNAKE_CASE from the allowed list. Must fit the subject and object classes."
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Edge confidence in [0..1]; 1.0 for a fact stated verbatim, 0.7 for a clear paraphrase. Below that, do not create the edge."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Memory ID of the entry that states this relation (often from_id or a note found via knowmind_recall). Required: an edge without evidence is rejected."
+          }
+        },
+        "required": [
+          "from_id",
+          "to_id",
+          "rel_type",
+          "evidence"
+        ]
+      },
+      "annotations": {
+        "title": "Link relation",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_get_schema",
+      "description": "Return the relation catalogue of this tenant's knowledge graph: every allowed edge type with its subject and object classes and an explanation of when to use it. Call this before building edges with knowmind_link, so you pick the right predicate instead of the nearest-sounding one. Read scope suffices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Graph schema",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_unlink_entities",
+      "description": "End a relation between two memories; inverse and inferred edges end with it. It stays in history, where knowmind_recall_at_time finds it. Repeating it does nothing. Fixes a wrong knowmind_link. Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from_id": {
+            "type": "string",
+            "description": "Memory ID of the source node."
+          },
+          "to_id": {
+            "type": "string",
+            "description": "Memory ID of the target node."
+          },
+          "rel_type": {
+            "type": "string",
+            "description": "Edge type to remove (UPPER_SNAKE_CASE, exactly as created)."
+          }
+        },
+        "required": [
+          "from_id",
+          "to_id",
+          "rel_type"
+        ]
+      },
+      "annotations": {
+        "title": "End relation",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_list_relations",
+      "description": "List all relations of one memory (incoming and outgoing), each with its edge type and the connected node. Use to inspect how an entity is connected before adding or removing edges with knowmind_link/knowmind_unlink; find the memory_id first via knowmind_recall. Read scope suffices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "description": "Memory ID whose relations to list (get it via knowmind_recall)."
+          }
+        },
+        "required": [
+          "memory_id"
+        ]
+      },
+      "annotations": {
+        "title": "List relations",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_list_inferred",
+      "description": "List relations that wait for a human decision, each with its review state (open, confirmed, rejected) and its reason: inferred_from_text (knowmind inferred it from a text) or starts_from_document (it starts from a document although its kind needs a person, organisation or similar). Per relation also the two connected entries, where it came from (source), the entry that supports it (evidence), and the counts per state. Open relations do not feed the derivation rules until someone confirms them. Use to review what the graph learned on its own; record a decision with knowmind_review_inferred. Read scope suffices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "confirmed",
+              "rejected"
+            ],
+            "description": "Only relations in this state. Omit for all."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50,
+            "description": "Number of relations to return (1-200, default 50)."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Relations to skip, for paging."
+          }
+        }
+      },
+      "annotations": {
+        "title": "List inferred relations",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_review_inferred",
+      "description": "Record a human decision on one inferred relation from knowmind_list_inferred. confirm: the relation counts as checked and feeds the derivation rules from now on. reject: the relation, its reverse relation and every relation derived from it get valid_to=now; nothing is deleted. undo: takes a rejection back and restores the reverse and derived relations. Pass the edge_id from the list and, if there is one, the id of the entry that supports the decision as evidence. Returns the state before and after and the number of reverse and derived relations affected. Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "edge_id": {
+            "type": "string",
+            "description": "edge_id of the relation, as returned by knowmind_list_inferred."
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "confirm",
+              "reject",
+              "undo"
+            ],
+            "description": "confirm, reject, or undo a rejection."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Id of the entry that supports the decision. Optional."
+          }
+        },
+        "required": [
+          "edge_id",
+          "decision"
+        ]
+      },
+      "annotations": {
+        "title": "Review inferred relation",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_recall",
+      "description": "DEPRECATED, removed on 2027-03-31: use knowmind_recall_memories. This name keeps answering unchanged until then. Retrieve relevant knowledge before answering anything that benefits from prior context - decisions, preferences, project state, people, deadlines, past conversations. Hybrid recall (BM25 + pgvector + knowledge graph) over the tenant corpus; returns the top-k memory chunks, each with a relevance score and source reference. Suitable whenever earlier context would improve the answer; use knowmind_recall_at_time when you need what was valid at a past point in time. Passages from pages in Open Knowledge Format carry metadata.review_flags: stale once stale_after is reached, unverified when no verification is recorded, superseded when the page's status is deprecated or superseded or its valid_to is reached, drifted when code cited by the page's claims changed or was removed since the page was written; an empty list means none applies. When kein_belastbarer_treffer is true, the corpus most likely holds no answer; unless the hits clearly answer the question, say so. Read scope suffices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "One natural-language question about one topic; full sentences retrieve better than keyword lists. For several topics, make several calls."
+          },
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 5,
+            "description": "Number of chunks to return (1-25, default 5)."
+          },
+          "hops": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3,
+            "default": 2,
+            "description": "Accepted for compatibility (0-3, default 2); currently has no effect on recall."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "title": "Recall - retrieve knowledge (deprecated)",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_health",
+      "description": "DEPRECATED, removed on 2027-03-31: use knowmind_get_health. This name keeps answering unchanged until then. Return the health of the knowmind backend (Postgres, memory service, graph). Use before a batch of writes or when calls fail, to tell an outage apart from an empty result. Returns a status object per component. Read scope suffices; takes no parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Service health (deprecated)",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_stats",
+      "description": "DEPRECATED, removed on 2027-03-31: use knowmind_get_stats. This name keeps answering unchanged until then. Return current counts for the tenant corpus: memories, graph edges and vector chunks. Use to gauge how much has been stored; for the actual entries use knowmind_list_recent or knowmind_recall. Read scope suffices; takes no parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Corpus statistics (deprecated)",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_entity",
+      "description": "DEPRECATED, removed on 2027-03-31: use knowmind_upsert_entity. This name keeps answering unchanged until then. Create the node for a thing the corpus talks about - a person, an organisation, an application, a host, a technology - or return the existing one. THE GRAPH NEEDS THESE: memories are texts, and two texts mentioning the same server stay unconnected until that server exists as its own node. Create an entity when a name recurs across memories or when you are about to link something that has no node yet, then connect it with knowmind_link. Same name, same class and same tenant always return the same id, so calling twice creates no duplicate. Give the entity its plain proper name (\"PostgreSQL\", not \"the database we use\"), and pick the class from the catalogue in knowmind_schema. Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Proper name of the thing, as it would be written in a document. No role, no status, no description."
+          },
+          "entity_class": {
+            "type": "string",
+            "description": "Class from the catalogue (knowmind_schema -> entityClasses), e.g. Person, Organization, Application, Host, Technology."
+          },
+          "description": {
+            "type": "string",
+            "description": "One sentence saying what this is. Optional, helps later retrieval."
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Other spellings the same thing appears under. Optional."
+          }
+        },
+        "required": [
+          "name",
+          "entity_class"
+        ]
+      },
+      "annotations": {
+        "title": "Create entity (deprecated)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_link",
+      "description": "DEPRECATED, removed on 2027-03-31: use knowmind_link_entities. This name keeps answering unchanged until then. Create a typed relation between two memory nodes (a knowledge-graph edge). THIS IS HOW THE GRAPH IS BUILT: after storing memories, connect them - a corpus without edges answers only what a single note already says. The server checks the edge against the ontology's shapes before writing it: the subject and object must belong to the classes the predicate requires (for entries without a class the check only warns), entity names must carry no role or suffix, and the edge must name its evidence - the id of the entry that states the relation. A rejected edge returns the violated rule. The inverse edge is materialized automatically, and derived edges (RUNS_ON, WORKS_FOR_CLIENT, HOST_SERVES_CLIENT, DEPENDS_ON_SUPPLIER) are computed by the server - never set them by hand. Get both node IDs via knowmind_recall first, and call knowmind_schema for the full catalogue with explanations. Allowed rel_type values: ABOUT (Application|Contract|Course|CreativeWork|Document|Event|FileResource|Product|Project|Service|Training → Topic), AFFECTED_BY_DECISION (Application|Organization|Product|Project → Decision), ALUMNI_OF (Person → Organization), APPLICATION_USED_BY (Application|Product → Process), ASSIGNED_TO (ActionRecord|Task → Agent|Organization|Person|SoftwareAgent), ATTENDED_BY (Event → Organization|Person), ATTENDS (Organization|Person → Event), AUTHOR_OF (Person → Course|CreativeWork|Patent), AUTOMATED_BY (Process → Process), AUTOMATES (Process → Process), BASED_ON (Application|CreativeWork|Product|Project → Application|CreativeWork|Product|Project), BILLED_TO (Invoice → Organization|Person), CLIENT_OF (Agent|Organization|Person|SoftwareAgent → Organization), COMPETES_WITH (Application|Organization|Product → Application|Organization|Product), CONCERNS (Decision → Application|Organization|Product|Project), CONTACT_PERSON_FOR (Person → Organization), CONTRACT_FOR (Contract → Application|Domain|Host|Product|Project|Service), CONTRACT_OF (Contract → Organization), CONTRACT_WITH (Contract → Organization), CONTRACTOR_OF (Organization → Contract), COVERED_BY (Topic → Application|Contract|Course|CreativeWork|Document|Event|FileResource|Product|Project|Service|Training), CUSTOMER (SalesRelation → Organization|Person), CUSTOMER_IN (Organization|Person → SalesRelation), DECIDED (Person → Decision), DECIDED_BY (Decision → Person), DELIVERED_AS (Application → Product), DELIVERED_BY (Product → Application), DEPENDS_ON (Application|Product → Application|Device|Product), DEPLOYED_TO (Application|Product → Container), DEVELOPED_BY (Application|Product|Project → Agent|Organization|Person|SoftwareAgent), DEVELOPS (Agent|Organization|Person|SoftwareAgent → Application|Product|Project), ENABLES (Application|Device|Product → Application|Product), ENROLLED_IN (Organization|Person → Course|Training), ENROLLMENT_IN (Enrollment → Course|Training), ENROLLMENT_OF (Enrollment → Organization|Person), ENVIRONMENT_OF (Environment → Application), FOLLOWED_BY (Process → Process), FOR_CLIENT (Project|Training → Agent|Organization|Person|SoftwareAgent), FOR_EVENT (Project → Event), FOUNDED (Person → Organization), FOUNDED_BY (Organization → Person), HAS_ALUMNUS (Organization → Person), HAS_ASSIGNED_TASK (Agent|Organization|Person|SoftwareAgent → ActionRecord|Task), HAS_AUTHOR (Course|CreativeWork|Patent → Person), HAS_CHILD (Person → Person), HAS_CLIENT (Organization → Agent|Organization|Person|SoftwareAgent), HAS_CONTACT_PERSON (Organization → Person), HAS_CONTRACT (Application|Domain|Host|Product|Project|Service → Contract), HAS_DIRECT_REPORT (Person → Person), HAS_EMPLOYEE (Organization → Person), HAS_ENROLLMENT (Course|Training → Enrollment), HAS_EVENT_PROJECT (Event → Project), HAS_INVOICE (Contract|Offer|Product|Project|Service → Invoice), HAS_MEMBER (Membership → Organization|Person), HAS_MEMBERSHIP (Organization → Membership), HAS_OPERATED_APPLICATION (Agent|Organization|Person|SoftwareAgent → Application|Host), HAS_PARENT (Person → Person), HAS_PARTICIPANT (Course|Training → Organization|Person), HAS_PREDECESSOR (ActionRecord|Project|Task → ActionRecord|Project|Task), HAS_PROJECT (Agent|Organization|Person|SoftwareAgent → Project|Training), HAS_PROSPECT (Organization → Organization|Person), HAS_QUOTE (Project → Quote), HAS_RELATED_PROJECT (Application|Product → Project), HAS_RESPONSIBLE (Application|CreativeWork|Product|Project → Organization|Person), HAS_ROLE (Person → Role), HAS_SIBLING (Person → Person), HAS_SKILL (Agent|Organization|Person|SoftwareAgent → Skill), HAS_SPEAKER (Event → Person), HAS_SUCCESSOR (ActionRecord|Project|Task → ActionRecord|Project|Task), HOLDS_CONTRACT (Organization → Contract), HOLDS_ENROLLMENT (Organization|Person → Enrollment), HOLDS_MEMBERSHIP (Organization|Person → Membership), HOLDS_TRAINING (Person → Training), HOSTED_ON (Container → Host), HOSTS (Host → Container), HOSTS_APPLICATION (Container → Application|Product), IN_ENVIRONMENT (Application → Environment), IN_ORGANIZATION (Membership → Organization), INCLUDES_MEMBER (Organization → Organization|Person), INFRASTRUCTURE_PROVIDED_BY (Host → Organization), INTEGRATES_WITH (Application|Product → Application|Product), INVOICE_FOR (Invoice → Contract|Offer|Product|Project|Service), IS_BASIS_OF (Application|CreativeWork|Product|Project → Application|CreativeWork|Product|Project), IS_LED_BY (Organization → Person), ISSUED_BY (Invoice → Organization|Person), ISSUED_INVOICE (Organization|Person → Invoice), ISSUED_QUOTE (Organization → Quote), ITEM_OFFERED (Offer|Quote → Product|Service), KNOWN_BY (Topic → Organization|Person), KNOWS (Person → Person), KNOWS_ABOUT (Organization|Person → Topic), LEADS (Person → Organization), MAKES_OFFER (Organization → Offer), MANUFACTURED_BY (Device → Organization), MANUFACTURES (Organization → Device), MEMBER_OF (Organization|Person → Organization), OFFER_MADE_BY (Offer → Organization), OFFERED_BY (Product|Service → Organization), OFFERED_IN (Product|Service → Offer|Quote), OFFERS (Organization → Product|Service), OPERATED_FOR (Application|Host → Agent|Organization|Person|SoftwareAgent), ORGANIZED_BY (Event → Organization), ORGANIZES (Organization → Event), PAID_BY (Agent|Organization|Person|SoftwareAgent → Agent|Organization|Person|SoftwareAgent), PARTNER_OF (Organization → Organization), PATENT_FOR (Patent → Application|Product), PAYS (Agent|Organization|Person|SoftwareAgent → Agent|Organization|Person|SoftwareAgent), PERFORMED_BY (Process → Person|SoftwareAgent), PERFORMS (Person|SoftwareAgent → Process), PRECEDED_BY (Process → Process), PRODUCED_BY (Contract|Document|FileResource → Project), PRODUCES (Project → Contract|Document|FileResource), PRODUCT_USED_BY (Application|Product → Organization|Person), PROJECT_OF (Project → Application|Product), PROSPECT_OF (Organization|Person → Organization), PROTECTED_BY (Application|Product → Patent), PROVIDES_INFRASTRUCTURE (Organization → Host), PROVIDES_SERVICE_TO (Organization → Application|Offer|Product|Service), QUOTED_BY (Quote → Organization), QUOTED_FOR (Quote → Project), QUOTED_TO (Quote → Organization|Person), RECEIVED_INVOICE (Organization|Person → Invoice), RECEIVED_QUOTE (Organization|Person → Quote), REGISTERED_WITH (Domain → Organization), REGISTRAR_OF (Organization → Domain), REPORTS_TO (Person → Person), RESOLVED_FROM (Host → Domain), RESOLVES_TO (Domain → Host), RESPONSIBLE_FOR (Organization|Person → Application|CreativeWork|Product|Project), ROLE_OF (Role → Person), SELLER (SalesRelation → Organization), SELLER_IN (Organization → SalesRelation), SERVED_UNDER (Application|Product → Domain), SERVES (Domain → Application|Product), SKILL_OF (Skill → Agent|Organization|Person|SoftwareAgent), SPEAKS_AT (Person → Event), SPOUSE_OF (Person → Person), SUPPLIED_BY (Agent|Organization|Person|SoftwareAgent → Organization), SUPPLIES (Organization → Agent|Organization|Person|SoftwareAgent), SUPPLIES_TECHNOLOGY (Organization → Technology), SUPPORTED_BY (Contract|Document|FileResource → Contract|Document|FileResource), SUPPORTS (Contract|Document|FileResource → Contract|Document|FileResource), TECHNOLOGY_SUPPLIED_BY (Technology → Organization), TECHNOLOGY_USED_BY (Technology → Application|Product), TRAINING_HELD_BY (Training → Person), USES_APPLICATION (Process → Application|Product), USES_PRODUCT (Organization|Person → Application|Product), USES_SERVICE_OF (Application|Offer|Product|Service → Organization), USES_TECHNOLOGY (Application|Product → Technology), WORKED_ON_BY (Project → Agent|Organization|Person|SoftwareAgent), WORKS_FOR (Person → Organization), WORKS_ON (Agent|Organization|Person|SoftwareAgent → Project). Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from_id": {
+            "type": "string",
+            "description": "Memory ID of the source node (get it via knowmind_recall)."
+          },
+          "to_id": {
+            "type": "string",
+            "description": "Memory ID of the target node."
+          },
+          "rel_type": {
+            "type": "string",
+            "description": "Edge type in UPPER_SNAKE_CASE from the allowed list. Must fit the subject and object classes."
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Edge confidence in [0..1]; 1.0 for a fact stated verbatim, 0.7 for a clear paraphrase. Below that, do not create the edge."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Memory ID of the entry that states this relation (often from_id or a note found via knowmind_recall). Required: an edge without evidence is rejected."
+          }
+        },
+        "required": [
+          "from_id",
+          "to_id",
+          "rel_type",
+          "evidence"
+        ]
+      },
+      "annotations": {
+        "title": "Link relation (deprecated)",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_schema",
+      "description": "DEPRECATED, removed on 2027-03-31: use knowmind_get_schema. This name keeps answering unchanged until then. Return the relation catalogue of this tenant's knowledge graph: every allowed edge type with its subject and object classes and an explanation of when to use it. Call this before building edges with knowmind_link, so you pick the right predicate instead of the nearest-sounding one. Read scope suffices.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Graph schema (deprecated)",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "knowmind_unlink",
+      "description": "DEPRECATED, removed on 2027-03-31: use knowmind_unlink_entities. This name keeps answering unchanged until then. End a relation between two memories; inverse and inferred edges end with it. It stays in history, where knowmind_recall_at_time finds it. Repeating it does nothing. Fixes a wrong knowmind_link. Requires write scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from_id": {
+            "type": "string",
+            "description": "Memory ID of the source node."
+          },
+          "to_id": {
+            "type": "string",
+            "description": "Memory ID of the target node."
+          },
+          "rel_type": {
+            "type": "string",
+            "description": "Edge type to remove (UPPER_SNAKE_CASE, exactly as created)."
+          }
+        },
+        "required": [
+          "from_id",
+          "to_id",
+          "rel_type"
+        ]
+      },
+      "annotations": {
+        "title": "End relation (deprecated)",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "knowmind",
+    "version": "0.4.10"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 10070,
+  "stderr": "[knowmind] Kein Token — Discovery-Modus: initialize/tools/list öffentlich, tools/call erfordert `knowmind login`.\nknowmind: Discovery nicht erreichbar (fetch failed), nutze die mitgelieferte Werkzeugliste (23 Werkzeuge, Stand 2026-11-17).\n"
+}

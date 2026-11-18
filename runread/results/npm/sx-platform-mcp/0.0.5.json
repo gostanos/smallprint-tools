@@ -1,0 +1,684 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "sx-platform-mcp",
+  "version": "0.0.5",
+  "integrity": {
+    "dist": "sha512-/Go7tvDUT+wFXX4q4XkGE1laLvq+282EM4Kj9rct6Oince5k1U/rRVdPNbSDRTGnuLm8/galYf1ZVmNgQtPfvw==",
+    "installed": "sha512-/Go7tvDUT+wFXX4q4XkGE1laLvq+282EM4Kj9rct6Oince5k1U/rRVdPNbSDRTGnuLm8/galYf1ZVmNgQtPfvw=="
+  },
+  "bin": "node_modules/sx-platform-mcp/dist/index.js",
+  "main": "dist/index.js",
+  "resolved": {
+    "zod": null,
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.5",
+    "sdk": "1.32.1",
+    "at": "2026-11-17T12:29:24.212Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "sx_status",
+      "description": "返回当前平台地址、租户、登录态与写操作开关。排障时先调它：能区分「配置不对」「连不上」「没登录」三类问题。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_dynamic",
+      "description": "动态数据查询。何时用：查任意业务数据；写用 sx_dynamic_save。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "page",
+              "list",
+              "get",
+              "search",
+              "datasource",
+              "change_log",
+              "formula"
+            ],
+            "description": "查什么：page / list / get / search / datasource / change_log / formula"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "表单编码，如 ALTER_FORM。**传它则只返回表单里的字段**；与 modelName 同时传时，表单优先生效。SX_ 开头的系统表单存放在 000000 管理租户，按编码会自动路由过去"
+          },
+          "formId": {
+            "type": "string",
+            "description": "表单 ID，语义同 formCode"
+          },
+          "modelName": {
+            "type": "string",
+            "description": "模型编码，如 SX_USER。**传它则返回模型全部字段**（含未放进表单的）。最常用的定位方式。SX_ 开头的系统模型存放在 000000 管理租户，按编码会自动路由过去"
+          },
+          "modelId": {
+            "type": "string",
+            "description": "模型 ID（SX_MODEL_TABLE.ID），语义同 modelName"
+          },
+          "current": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "action=page 必填：页码，从 1 开始"
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "action=page 必填：每页条数（建议 ≤100）"
+          },
+          "maxRows": {
+            "type": "integer",
+            "description": "仅 action=page：total 会被夹到 maxRows（不是每页条数）；/dynamic/list 不支持"
+          },
+          "queryValue": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "简单等值过滤（仅 AND）。值语义：标量=等值；\"A,B\" 或数组=IN；\"NULL\"=IS NULL；含 % =LIKE"
+          },
+          "queryParam": {
+            "type": "string",
+            "description": "简易查询串（仅 AND，& 连接，无空格无引号）。如 \"MODEL_NAME=SX_USER\"。等号取值支持 %(LIKE)、NULL、逗号(IN)；不等号 <> 表示 IS NOT NULL / NOT IN。"
+          },
+          "queryList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "字段名（物理列名，如 MODEL_NAME）"
+                },
+                "controlType": {
+                  "type": "string",
+                  "description": "控件类型，如 input / select / date / number，影响取值解析"
+                },
+                "dataType": {
+                  "type": "string",
+                  "description": "数据类型，如 string / int / date"
+                },
+                "fuzzySearch": {
+                  "type": "string",
+                  "description": "是否模糊匹配"
+                },
+                "list": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "operator": {
+                        "type": "string",
+                        "description": "操作符：EQ NE GT GE LT LE LIKE NLIKE BT(区间) NULL NOTNULL IN NIN 等"
+                      },
+                      "lowerValue": {
+                        "description": "主值 / 区间下界"
+                      },
+                      "upperValue": {
+                        "description": "区间上界（仅 BT 用）"
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "条件列表；同一项内多个条件之间是 OR"
+                }
+              },
+              "required": [
+                "field",
+                "list"
+              ],
+              "additionalProperties": false
+            },
+            "description": "结构化查询条件，项与项之间是 AND。示例：[{field:\"STATUS\",list:[{operator:\"EQ\",lowerValue:\"1\"}]}]"
+          },
+          "compoundQuery": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "字段名（物理列名）"
+                },
+                "controlType": {
+                  "type": "string",
+                  "description": "控件类型：input / select / date / number，影响取值解析"
+                },
+                "dataType": {
+                  "type": "string",
+                  "description": "数据类型。**过滤日期时必须传 \"Date\"**，否则报 ORA-01861"
+                },
+                "operator": {
+                  "type": "string",
+                  "description": "操作符：EQ NE GT GE LT LE LIKE NLIKE BT NBT NULL NNULL"
+                },
+                "lowerValue": {
+                  "description": "主值 / 区间下界（单边操作符只读这个）"
+                },
+                "upperValue": {
+                  "description": "区间上界（仅 BT / NBT 用）"
+                },
+                "relation": {
+                  "type": "string",
+                  "description": "分组内条件关系：AND / OR"
+                },
+                "children": {
+                  "type": "array",
+                  "description": "子条件，配合 relation 表达 (a OR b) 这类分组"
+                }
+              },
+              "required": [
+                "field"
+              ],
+              "additionalProperties": false
+            },
+            "description": "组合查询条件（扁平结构）。**优先用 queryList**；compoundQuery 对复杂嵌套表达式的支持不稳定。"
+          },
+          "compoundExpr": {
+            "type": "string",
+            "description": "组合查询公式，编号对应 compoundQuery 第 N 条。⚠️ 实测不生效"
+          },
+          "orderList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "prop": {
+                  "type": "string"
+                },
+                "order": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "prop"
+              ],
+              "additionalProperties": false
+            },
+            "description": "排序：[{prop:\"ID\",order:\"1\"}]。**注意 order 语义**：字符串 \"1\" 表示倒序(DESC)，其它值（含 \"0\"）表示升序(ASC) —— 与直觉相反，实测确认。省略 order 默认升序。"
+          },
+          "sumColumns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "action=page：需要求和的列名，结果在 sumData 中"
+          },
+          "distinct": {
+            "type": "string",
+            "description": "传 \"1\" 时对结果去重"
+          },
+          "allField": {
+            "type": "string",
+            "description": "传 \"1\" 返回模型全部字段（优先于 formCode 的字段范围限制）"
+          },
+          "noSystemField": {
+            "type": "string",
+            "description": "⚠️ 实测无效，不影响返回字段（保留仅为兼容）"
+          },
+          "subData": {
+            "type": "string",
+            "description": "page/list 传 \"2\" 连带返回子模型数据、\"3\" 再带孙数据；get 为递归层数（默认 2）。\n子模型数据以「模型名数组」挂在每条记录上（如 XZGZXC_MX），子记录 PID = 主记录 ID。\n**不要通过解析表单 jsonText 推断关联模型。**"
+          },
+          "tree": {
+            "type": "string",
+            "description": "传 \"1\" 时按模型的树形字段返回嵌套树"
+          },
+          "sxNewFlag": {
+            "type": "string",
+            "description": "传 \"1\" 取变更模型的最新版本数据"
+          },
+          "search": {
+            "type": "string",
+            "description": "page/list：快速模糊搜索文本（作用于表单配置的移动端搜索字段）；action=search 时是下拉的模糊搜索词"
+          },
+          "sxKey": {
+            "type": "string",
+            "description": "记录键：各主键字段值以 | 拼接（单主键即该值）。取自 page/list 返回的 SX_KEY"
+          },
+          "actionType": {
+            "type": "string",
+            "enum": [
+              "ADD",
+              "EDIT",
+              "VIEW",
+              "COPY_ADD",
+              "CHANGE"
+            ],
+            "description": "action=get 用，默认 VIEW；ADD 返回带新增默认值的记录（不需要 sxKey）"
+          },
+          "fieldDictTable": {
+            "type": "string",
+            "description": "action=search 必填：模型编码（如 SX_USER），或 SX_DICT / SX_DICT_BIZ 表示平台字典"
+          },
+          "fieldDictField": {
+            "type": "string",
+            "description": "action=search 必填：作为选项 VALUE 的列，如 ID"
+          },
+          "fieldDictRemark": {
+            "type": "string",
+            "description": "action=search：作为选项 LABEL 的列，如 NAME"
+          },
+          "fieldDictDesc": {
+            "type": "string",
+            "description": "action=search：作为选项描述的列"
+          },
+          "fieldDictTableId": {
+            "type": "string"
+          },
+          "valueList": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "action=search：限定结果只取 fieldDictField 的这些值（IN）"
+          },
+          "queryOther": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "字段名（物理列名）"
+                },
+                "controlType": {
+                  "type": "string",
+                  "description": "控件类型：日期用 date/datetime/year/month/quarter/time，其它如 input/select"
+                },
+                "dataType": {
+                  "type": "string",
+                  "description": "数据类型，如 string / int / Date"
+                },
+                "operator": {
+                  "type": "string",
+                  "enum": [
+                    "EQ",
+                    "NE",
+                    "GT",
+                    "GE",
+                    "LT",
+                    "LE",
+                    "LIKE",
+                    "NLIKE",
+                    "BT",
+                    "NBT",
+                    "NULL",
+                    "NNULL",
+                    "TRUE",
+                    "FALSE",
+                    "IN",
+                    "NIN"
+                  ],
+                  "description": "操作符，省略时后端按 EQ 处理"
+                },
+                "lowerValue": {
+                  "description": "主值 / 区间下界"
+                },
+                "upperValue": {
+                  "description": "区间上界（仅 BT/NBT 用）"
+                }
+              },
+              "required": [
+                "field"
+              ],
+              "additionalProperties": false
+            },
+            "description": "action=search：扁平条件数组 [{field, operator, lowerValue}]（后端 ColumnQuery）。与 queryList 的嵌套 {field,list:[]} 不同，别再传嵌套结构，否则条件会被静默丢弃"
+          },
+          "databaseName": {
+            "type": "string",
+            "description": "action=search：外部数据源名称，用于直接搜原始表"
+          },
+          "dicData": {
+            "type": "string",
+            "description": "action=search：内联字典的 JSON 字符串，如 [{\"dictKey\":\"1\",\"dictValue\":\"启用\"}]"
+          },
+          "dataSourceType": {
+            "type": "string",
+            "enum": [
+              "model",
+              "sql"
+            ],
+            "description": "action=datasource 必填：model=按模型名取数；sql=按 SQL 编码（多表关联用这个）"
+          },
+          "queryMode": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2"
+            ],
+            "description": "action=datasource 必填：1=分组汇总（需 groupSumFieldList）；2=列表明细"
+          },
+          "dataAuth": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2",
+              "99"
+            ],
+            "description": "权限控制：model 默认 1、sql 默认 2；管理员做看板可传 99（不控权限）"
+          },
+          "extQueryColumnList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fieldName": {
+                  "type": "string",
+                  "description": "结果列名"
+                },
+                "fieldRemark": {
+                  "type": "string",
+                  "description": "中文名"
+                },
+                "sqlField": {
+                  "type": "string",
+                  "description": "CASE WHEN / 表达式；原样拼 SQL"
+                }
+              },
+              "required": [
+                "fieldName"
+              ],
+              "additionalProperties": false
+            },
+            "description": "action=datasource + queryMode=2：额外扩展列（如 CASE WHEN）"
+          },
+          "sqlCode": {
+            "type": "string",
+            "description": "action=datasource + dataSourceType=sql 必填：SQL 编码"
+          },
+          "groupSumFieldList": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fieldName": {
+                  "type": "string",
+                  "description": "结果列名（分组字段用真实列名，统计列可自定义如 CNT）"
+                },
+                "fieldRemark": {
+                  "type": "string",
+                  "description": "中文名"
+                },
+                "groupSum": {
+                  "type": "string",
+                  "description": "1=分组字段；3=COUNT；其他（常用 2）=SUM"
+                },
+                "sqlField": {
+                  "type": "string",
+                  "description": "参与聚合的真实列（如 ID / TOTAL_AMOUNT）；分组字段若填则用其表达式"
+                }
+              },
+              "required": [
+                "fieldName",
+                "groupSum"
+              ],
+              "additionalProperties": false
+            },
+            "description": "action=datasource + queryMode=1 必填：分组汇总字段清单"
+          },
+          "queryColumns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "action=datasource：指定返回列（列表模式）"
+          },
+          "formData": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=datasource：SQL 里 ${...} 的取值来源"
+          },
+          "sqlAllField": {
+            "type": "string",
+            "description": "action=datasource：SQL 取数返回全部字段，传 \"1\""
+          },
+          "formula": {
+            "type": "string",
+            "description": "action=formula：单个公式（ValueLogic JSON 配置或表达式）"
+          },
+          "formulaList": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "action=formula：批量公式，返回以公式原文为键的映射"
+          },
+          "rowData": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=formula：行数据，公式中通过 $rowData 访问"
+          },
+          "mainData": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "action=formula：主表数据，作为公式变量顶层作用域"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_form",
+      "description": "表单查询入口。何时用：查表单清单/字段/详情；写用 sx_form_save。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "tenant",
+              "by_app",
+              "by_model"
+            ],
+            "description": "范围，默认 tenant"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "按表单编码/名称本地模糊过滤"
+          },
+          "appId": {
+            "type": "string",
+            "description": "scope=by_app 时必填：应用 ID"
+          },
+          "modelName": {
+            "type": "string",
+            "description": "scope=by_model 时必填：模型编码，如 ALTER"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_form_get",
+      "description": "读表单完整 JSON。何时用：改表单前必须先读。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "enum": [
+              "full",
+              "raw",
+              "public",
+              "auth",
+              "extensions",
+              "user_layout",
+              "ueditor"
+            ],
+            "description": "要哪一部分，默认 full"
+          },
+          "by": {
+            "type": "string",
+            "enum": [
+              "code",
+              "id"
+            ],
+            "description": "寻址方式，默认 code（推荐）"
+          },
+          "formCode": {
+            "type": "string",
+            "description": "表单编码，如 ALTER_FORM。系统表单以 SX_ 开头（在 000000 管理租户），按编码会自动路由"
+          },
+          "formId": {
+            "type": "string",
+            "description": "表单 ID。仅适用于当前租户自己的表单"
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "detail=public 时必填（目标租户）；其它 detail 下用于读其它租户的公共表单"
+          },
+          "action": {
+            "type": "string",
+            "description": "detail=ueditor 专用：平台预留参数，当前无效果"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_docs",
+      "description": "统一的本地文档入口，先查再动手。\naction：catalog（目录）/ search（关键词）/ read（按文档和小节读全文）。\ndoc：form-builder / platform / form / flow / integration / standalone。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "catalog",
+              "search",
+              "read"
+            ],
+            "description": "默认 search"
+          },
+          "query": {
+            "type": "string",
+            "description": "search：关键词，如 \"表单 脚本 按钮\""
+          },
+          "doc": {
+            "type": "string",
+            "description": "search 限定文档；read 必填文档 id"
+          },
+          "section": {
+            "type": "string",
+            "description": "read：小节 id；form-builder 的组件用 component:input"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "search：默认 5，最大 20"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_platform",
+      "description": "平台问题先查这里，不要猜、不要为了确认去调用接口。\n覆盖：后端接口与参数、dataAuth/租户、表单查询与写入、前端脚本 API、SYS 参数、事件规则、组件规则。\naction：catalog / search / get。tag：backend-core / backend-platform / frontend-rule。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "catalog",
+              "search",
+              "get"
+            ],
+            "description": "默认 search"
+          },
+          "query": {
+            "type": "string",
+            "description": "search：关键词"
+          },
+          "id": {
+            "type": "string",
+            "description": "get：小节 id 或标题关键词"
+          },
+          "tag": {
+            "type": "string",
+            "description": "限定 tag"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "search：默认 5，最大 20"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "sx_tool",
+      "description": "当前工具不够时再查：先 search → describe → call。\n何时用：常驻工具无法满足需求，或不知道有没有合适的工具。\n何时不要用：普通问答、闲聊、sx_status / sx_docs / sx_platform 能直接解决时，不要先查目录。\nsearch 只返回当前用户可用的工具；普通用户看不到管理员工具，也不能绕过权限。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "search",
+              "describe",
+              "call"
+            ],
+            "description": "search 找 / describe 看参数 / call 执行"
+          },
+          "query": {
+            "type": "string",
+            "description": "search：意图关键词，如 \"表单 预填\"、\"查询 数据\""
+          },
+          "name": {
+            "type": "string",
+            "description": "describe/call：工具名"
+          },
+          "args": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "call：目标工具入参"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "search：条数，默认 5，最大 10"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "sx-platform-mcp",
+    "version": "1.0.0"
+  },
+  "protocolVersion": null,
+  "instructions": "━━━━ sx-platform 低代码平台 · 通用操作规则 ━━━━\n\n【做看板/数据分析先找全数据源】不要只查模型设计。\n\n  1. 先用 sx_model 找模型；\n  2. 再用 sx_sql { action:\"list\" } 查 SQL 设计，看有没有现成的 SQL 数据源；\n  3. 选 SQL 时用 sx_sql { action:\"get\" } 读 SQL_EXPR 和 SQL_OTHER；\n  4. SQL_OTHER 含 sqlFileList / orderList / fieldList 三个键；\n     fieldList 是字段说明表，做报表/看板前先读，确认字段中文名和类型。\n\n【查询接口选择】默认分页，不要用 list 拉全量。\n\n  · 模型数据：优先 sx_dynamic { action:\"page\", current:1, size:20 }；\n    需要总数、翻页、大表查询，一律用 page。\n  · SQL 数据：优先平台的 sqlPage（分页）接口；不要用 sqlList 拉全量。\n  · sx_dynamic { action:\"list\" } 只适合确定很小的数据（字典/配置/少量候选）；\n    它不分页、没有 total，maxRows 也不生效；没有过滤条件时平台会返回全部行。\n  · 用户说“全部/所有”时，先确认数据量；大表要用 page 分页循环，不要一次 list。\n\n【工具选择顺序】先用已有工具，不够再查路由。\n\n  1. 先根据对话内容和当前上下文判断：常驻工具能不能直接满足？\n     能直接回答/处理的，就直接做，不要为了“看看有什么工具”去调 sx_tool。\n  2. 常驻工具不够、或不知道用哪个工具时，才调用：\n       sx_tool { action:\"search\", query:\"意图关键词\" }\n     看当前用户还有哪些可用工具。\n  3. 找到候选后：\n       sx_tool { action:\"describe\", name:\"工具名\" }   看参数和边界\n       sx_tool { action:\"call\", name:\"工具名\", args:{...} }   执行\n  4. 普通问答、闲聊、sx_status / sx_docs / sx_platform 能解决的事情，\n     不要每次聊天都先查工具目录。\n  5. sx_tool 只返回当前用户可用的工具；普通用户看不到管理员工具，\n     也不要尝试通过 sx_tool 绕过权限。\n  6. 不确定参数时先 describe，不要猜；写操作先读完整数据再调用。\n\n【铁律 1】凡是「修改」，一律：先查出来 → 在完整数据上调属性 → 再保存。\n\n  绝不可以用「只传要改的字段」的方式去改已有记录。\n  写接口（sx_dynamic_save / sx_form_save / sx_model_save 等）是**整条记录覆盖保存**，\n  不是字段级 patch：没传的字段会按默认值落库，**等价于把旧值清空**。\n\n  ✅ 正确流程：\n     1. 查出完整记录：\n          · 表单   → sx_form_get（detail:\"raw\" 可拿到最新）\n          · 模型   → sx_model_config（模型头 + 字段 + 引用 + 验证 + 排序 + 索引 + 关系）\n          · 任意数据 → sx_dynamic {action:\"get\"}（或 {action:\"list\"} 取整行）\n     2. 在查出来的完整数据上，只改需要改的属性，其余字段**原样保留**；\n     3. 带回主键（ID / 原 id）保存；\n     4. 回读校验：关键字段与预期一致，且未改字段没有被清空。\n\n  ⚠️ 真实事故：给菜单改名时只传 { ID, NAME }，结果 PARENT_ID 变成 \"0\"、\n     ANCESTORS 变成 \"0\"，菜单直接从「系统配置」下掉到顶层 —— 接口照样返回「保存成功」。\n     任何「局部字段一把梭」的写法都有同样的风险。\n\n【铁律 2】不允许「删除后重建」已有对象。\n\n  表单 / 模型 / 菜单凡是已存在，就必须走「读出 → 改 → 带原 id 回存」。\n  删除重建会让 id 变化，导致引用它的菜单、按钮、外链、流程全部失效，\n  历史版本链断裂，用户自定义布局与权限一并丢失。\n\n【铁律 3】「保存成功」不等于「写进去了」，必须回读断言。\n\n  以下情况都出现过，且接口都返回 200 / 保存成功：\n    · 未传 jsonText → 平台建出空壳表单（jsonText=null、fieldList=[]），打开一片空白；\n    · token 失效 / 未登录 → 写入被静默丢弃，内容根本没变；\n    · 只传部分字段 → 其余字段被清空（见铁律 1）。\n\n  ✅ 回读时用**语义断言**，不要只比长度或看有没有报错：\n     · 断言目标内容真的存在（如标题文字、某个字段值）；\n     · 断言 id 未变、updateTime 已更新；\n     · 断言未改字段仍然是原值。\n     长度对比只能发现「内容变了」，等长替换（如改一个字）会漏判。\n\n【铁律 4】写操作前先确认身份与环境。\n\n    · 先调 sx_status 看 hasToken / baseUrl / tenantId / allowWrites；\n    · hasToken=false 时任何写操作都会被静默丢弃或返回 401，先补凭据再动手；\n    · 成片 401 先怀疑「没登录 / 凭据丢失」，不要误判成权限或数据问题。\n\n【铁律 4.1】写权限由**角色**决定，不是所有人都能改数据。\n\n    · 只有令牌里 isAdmin=true（或角色含 administrator）的账号是管理员；\n    · 管理员：可建/改/删模型、表单、数据等全部写操作；\n    · 普通用户：**只有读取权限**，所有 mutating 工具会被直接拒绝；\n    · 被拒时的提示是「当前身份为普通用户」—— 这不是 bug，也不是权限配置错误，\n      换具备 administrator 角色的账号即可，不要去改 SX_ALLOW_WRITES；\n    · 两个开关都要满足才放行：角色是「这个人能否写」，SX_ALLOW_WRITES 是「这台服务能否写」。\n\n【铁律 5】先查事实，再下结论。\n\n    · 字段含义、状态取值必须先查证（拉一条真实数据 / 查字典），不要凭字段名猜；\n    · 遇到「工具报 unknown tool」或「schema 与文档不一致」→ 先怀疑连到了旧构建，\n      核对 DSH 的 MCP 配置里 args / cwd 指向的 dist 是否真实存在；\n    · 不要把自己的实现错误归因于平台或文档。\n\n【铁律 5.1】写脚本 / 公式时优先保证**可读性** —— 该换行就换行。\n\n    适用范围：表单脚本（changeEvent / updateEvent / initScript / callbackScript /\n    props.script / calculator 的 formula）、集成流 Groovy 脚本、SQL、\n    API 的 beforeScript / returnBody / errorBody 等一切写进 JSON 的代码。\n\n    · 多语句不要挤成一行：每条语句一行，逻辑块之间留空行；\n    · 复杂条件拆成多个 if / 中间变量，而不是一层嵌一层的三元表达式；\n    · JSON 字符串里用 `\\n` 表示换行即可（脚本按字符串存，换行是合法内容）；\n      手写 JSON 时不要为了「看着短」把整段逻辑压成一行；\n    · 集成流计算公式同理：先取数、再计算、最后赋值，分步写清楚。\n\n    ⚠️ 代价可以接受：JSON 里的 `\\n` 只是两个字符，不会让接口变慢；\n       但压成一行的脚本在回读、评审、排错时几乎无法维护 ——\n       平台前端编辑器也是按多行代码呈现的，写成一行反而不像人配的。\n\n【铁律 6】查数据必须带 dataAuth，否则数据权限**完全失效**。\n\n    调 `/api/dynamic/datasourceList` 时，`dataAuth` 必须按**数据源类型**给：\n      · dataSourceType = \"model\" → dataAuth = \"1\"（模型数据权限）\n      · dataSourceType = \"sql\"   → dataAuth = \"2\"（SQL 数据权限）\n\n    平台源码里是两条互不相干的判断：\n      if (Func.equalsOne(dto.getDataAuth())) { queryDataAuth(...) }   // 模型\n      if (Func.equalsTwo(dto.getDataAuth())) { sqlAuthToQueryWrapper(...) }  // SQL\n    不传的话两个分支都不成立 —— 引擎**不会**应用任何数据权限，\n    普通用户会直接看到全量数据（越权）。这是最容易漏、后果最重的参数。\n\n    管理员不受影响：两个方法开头都有\n      `if (AuthUtil.isAdministrator() || isBusinessAdmin()) return;`\n    所以一律按类型带上即可，不必先判断角色。\n    `sx_dynamic {action:\"datasource\"}` 已内置这条规则，直接用它就不会漏。\n\n    【实测（test2 / TEST 租户，普通用户 test01，模型 TEST_ONE）】\n      不传 dataAuth           → 1000 条（全量，越权）\n      dataAuth=\"1\"（model）   → 4 条  ← 权限真正生效\n      dataAuth=\"2\" 或 \"0\"     → 1000 条（对 model 数据源无效）\n    同一个 token、同一张表，只改这一个参数，可见数据量差 250 倍。\n    注：全程用管理员身份测试**看不出任何问题** —— 越权只发生在普通用户身上。\n\n  ⚠️ **/api/dynamic/page 与 /api/dynamic/list 不看 dataAuth，但它们照样过滤**。\n     这两个接口走 `page(dto, tenantId)`（DynamicQueryServiceImpl:424），\n     `queryDataAuth` 是**无条件调用**的 —— 不需要传任何参数，默认就走模型权限。\n     （`sqlPage(sqlCode,dto,tenantId)` 才是受 `if (modelAuth==\"1\")` 控制，别混。）\n\n  ⚠️ 所以 page 与 datasourceList 的结果**本来就应该一样**。\n     实测 test01 两者不一致（page 4 条 / datasourceList 带 dataAuth 4 条 /\n     不带 dataAuth 1000 条）时，先别急着下「page 不过滤」的结论 ——\n     那次 4 条的真因是表单 apiBody 里写死了 compoundQuery，与权限无关。\n     判断权限是否生效，唯一可靠的对照是：**同一接口、同一条件、只切 dataAuth**。\n\n  ⚠️ 排查「数据权限没生效」时，先分清是哪一层：\n     ① 接口层：datasourceList 有没有传 dataAuth（model→\"1\"、sql→\"2\"）；\n        page/list 不用传，但会被过滤\n     ② 配置层：下面 4 种入口里，该模型到底开了哪一种（见下方详表）\n     ③ 角色层：administrator / 业务管理员 / 模型管理员一律跳过权限\n     ④ 租户层：普通用户没有 sx_data_org 记录时，数据组织权限对它不生效\n    四层都排除后仍不对，才是 bug。\n\n  ━━ 数据权限的 4 种配置入口（没有统一总开关，四处各自独立）━━\n\n  ① 模型字段「控制权限」—— 配了即开启数据权限控制\n     SX_MODEL_FIELD.AUTH_USER 取值：\n       EQ        字段 = 当前用户\n       LIKE      字段包含当前用户（逗号分隔多值）\n       DEPT_EQ   字段 = 当前用户部门\n       DEPT_LIKE 字段包含当前用户部门\n       空        该字段不参与\n     配了 AUTH_USER 的字段进 authFields；只有 authFields 非空时，\n     模型的「默认授权」SUB_AUTH 才被读取：1=本人及下属，2/3=部门负责人，\n     4/5=分管领导，ALL=全部。\n     新建模型时 CREATE_USER/OWNER_ID 会自动带 EQ，CREATE_DEPT/OWNER_DEPT 带 DEPT_EQ。\n\n  ② 权限对象管控 —— SX_AUTH_RELATION\n     通过 objectCode 关联权限对象，按 controlType 细分\n     query / add / update / delete；查询时只取含 query 的配置。\n\n  ③ 模型开关（两个独立开关，注意作用不同）\n     · 启用操作权限 OPERATION_AUTH：校验**新增/修改/删除**，不作用于查询\n     · 启用团队权限 TEAM_AUTH=1：查 SX_AUTH_TEAM，只放行我作为团队成员的数据\n\n  ④ 角色管理 →「模型授权」—— SX_AUTH_MODEL\n     按角色给模型配 QUERY_AUTH：\n       10=本人  20=本人及下属  30=本部门  40=本部门及下级  ALL=全部\n     对应 OWNER_ID / OWNER_DEPT 两列过滤。\n     ⚠️ 此路径的实际生效条件未完全验证：源码里要先置 ownerUserFlag/ownerDeptFlag\n        （遍历模型字段、字段名为 OWNER_ID/OWNER_DEPT 时置真）才拼条件；\n        实测 TEST_ONE 两个字段都在、也配了 10/30，但查询未按其过滤。\n        遇到「角色模型授权不生效」时，先按此排查，不要假设一定生效。\n\n  四条路径是**并列**的：命中任意一条就会拼条件，最终用 OR 连起来。\n  所以「配了不生效」通常意味着四条都没命中，而不是某一条配错。\n\n【补充】做看板 / 报表前，先读 sx_dashboard_guide / sx_report_guide。\n  里面记录了 14 类实测坑（空壳表单、层级清空、趋势聚合取数、失败显示成 0 等）。",
+  "durationMs": 1373,
+  "stderr": "▲ warn   未初始身份：可设置 SX_ACCOUNT + SX_PASSWORD，或在会话里调用 sx_local_login\n  ______  __  __  __  ____ ____  \n / ___\\ \\/ / |  \\/  |/ ___|  _ \\ \n \\___ \\\\  /  | |\\/| | |   | |_) |\n  ___) /  \\  | |  | | |___|  __/ \n |____/_/\\_\\ |_|  |_|\\____|_|    \n                                 \n\n  sx-platform 集成平台 · MCP 工具服务  v1.0.0\n\n  stdio 传输（stdout 为协议通道，日志走 stderr）\n\n  平台 http://127.0.0.1:8000\n\n▲ warn   stdio 模式没有可用身份：请配 SX_TOKEN，或 SX_ACCOUNT + SX_PASSWORD。否则写工具会因「普通用户」被拒。\n› info   已注册 7 个工具，写操作 已开启\n› info   stdio 传输已就绪\n"
+}
