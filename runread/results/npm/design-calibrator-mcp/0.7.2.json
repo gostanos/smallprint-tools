@@ -1,0 +1,302 @@
+{
+  "format": "smallprint-runread/1",
+  "registry": "npm",
+  "name": "design-calibrator-mcp",
+  "version": "0.7.2",
+  "integrity": {
+    "dist": "sha512-TH/PWBcTMBXpXnaj95TydmeQSY0iCT6w5h6+3OoccHu1CJnV4sfMD6M88xeOpYrf03Xog5nITchvvz2Utnh0Xg==",
+    "installed": "sha512-TH/PWBcTMBXpXnaj95TydmeQSY0iCT6w5h6+3OoccHu1CJnV4sfMD6M88xeOpYrf03Xog5nITchvvz2Utnh0Xg=="
+  },
+  "bin": "node_modules/design-calibrator-mcp/dist/cli.js",
+  "main": null,
+  "resolved": {
+    "zod": "4.6.7",
+    "sdk": null,
+    "ajv": null,
+    "typebox": null
+  },
+  "installScriptsRan": false,
+  "envNames": [],
+  "args": [],
+  "run": {
+    "host": "es-backend",
+    "container": "podman",
+    "image": "docker.io/library/node:22-bookworm-slim",
+    "node": "v22.23.5",
+    "sdk": "1.32.1",
+    "at": "2026-11-19T16:55:39.807Z"
+  },
+  "status": "tools",
+  "tools": [
+    {
+      "name": "choose_system",
+      "description": "【第 0 步，只读】判断这个页面该按哪一套设计系统校准，并输出「这次要校准什么」的方案。先判平台：页面是 iPhone/iPad 就锁 iOS，是 Android 就锁 Material，是 Web 才在 Web 系里选。锁定后其他平台的系统连候选都不进——否则顶栏 44 与 64 这种冲突会凭空出现。再从真实渲染里抽身份特征（组件 class 前缀、CSS 变量前缀、官方主色、字号阶梯覆盖率、控件高度、圆角、字族、移动端特征）排序候选。返回里的 plan 就是校准方案：像素维度（命中区/字号阶梯/元素间距/圆角档位/顶栏/标签栏/文本容器/横向溢出）与色值维度（对比度/按钮色一致性/文字灰阶层级/语义色一致性/主色是否在调色板内）逐项列出期望值、实测值、预计问题数、以及哪些项目明确不校。多选评估：用户纠结几套时传 candidates（如 [\"antd\",\"tdesign\"]），会给出同一页面在每套口径下各有多少问题，用数据帮用户定。组件可以混用：页面里混了别家组件只会记录在 mixed 里，不改变像素基准。不传 target：只返回系统清单。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "description": "省略则只列出可用系统清单，不识别页面",
+            "type": "object",
+            "properties": {
+              "file": {
+                "description": "本地 HTML 文件绝对路径（推荐）",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "html": {
+                "description": "直接传 HTML 文本；会落临时文件后渲染",
+                "type": "string",
+                "maxLength": 5242880
+              },
+              "url": {
+                "description": "http(s) 地址",
+                "type": "string",
+                "maxLength": 4096,
+                "format": "uri"
+              }
+            },
+            "additionalProperties": false
+          },
+          "suite": {
+            "description": "识别时使用的视口组合，默认 essentials",
+            "type": "string",
+            "pattern": "^[a-z]{2,20}$"
+          },
+          "platform": {
+            "description": "显式锁定平台。页面是 iPhone App 就传 ios，之后只按 iOS 口径量，不再把 Android 规范拉进来",
+            "type": "string",
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ]
+          },
+          "candidates": {
+            "description": "多选评估：只比这几套（例如用户在纠结 [\"antd\",\"tdesign\"]）。不传则评估该平台下的全部系统",
+            "maxItems": 6,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{2,30}$"
+            }
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "choose_system",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "calibrate",
+      "description": "【第 1 步，只读】按指定的一套设计系统校准界面：该系统的平台视口真实渲染 → 像素级量测 → 逐条对照 → 出报告。必须传 system（先调 choose_system 得到）。设备范围自动跟着 system 走：选 ios-hig 就只量 iOS 视口，不会混跑 Android 与桌面。所有系统类结论只取自这一套；对比度、重排、命中区下限等按「通用硬底线」判定，报告中单独标注来源。生成 HTML + JSON 报告，返回编号（R01、R02…）。**不修改任何文件**。每条问题带：定位选择器、实测值、期望值、规范出处、结构化最小改法；需要人决定的（如背景就是官方主色导致对比度不足）标为 manual，不会自动改品牌色。硬边界：只评估表现形式（尺寸/字号/间距/圆角/色值/对比度/溢出/栏高），不新增删除文案与字段、不改信息架构、不做发散设计。流程要求：先出报告给用户看，用户同意哪些要改，再调 apply。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "description": "本地 HTML 文件绝对路径（推荐）",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "html": {
+                "description": "直接传 HTML 文本；会落临时文件后渲染",
+                "type": "string",
+                "maxLength": 5242880
+              },
+              "url": {
+                "description": "http(s) 地址",
+                "type": "string",
+                "maxLength": 4096,
+                "format": "uri"
+              }
+            },
+            "additionalProperties": false
+          },
+          "system": {
+            "description": "本次校准唯一采用的设计系统 id（必填，先调 choose_system 得到）。整套用这一套，绝不跨系统取值。留空会直接被拒绝并提示",
+            "type": "string",
+            "pattern": "^[a-z0-9-]{2,30}$"
+          },
+          "suite": {
+            "description": "设备组合：essentials|mobile|foldable|desktop|tablet|all，默认 essentials",
+            "type": "string",
+            "pattern": "^[a-z]{2,20}$"
+          },
+          "devices": {
+            "description": "精确指定设备 id，优先于 suite",
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{2,40}$"
+            }
+          },
+          "platform": {
+            "description": "覆盖平台锁定。一般不用传——设备范围会跟着 system 自动收窄",
+            "type": "string",
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ]
+          },
+          "maxIssues": {
+            "default": 60,
+            "description": "返回问题上限（报告文件里是全量）",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "includeShould": {
+            "default": true,
+            "description": "是否包含建议级（should）问题",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "calibrate",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "apply",
+      "description": "【第 2 步，写文件】把用户已批准的编号应用为一段 CSS 补丁，注入目标 HTML 的 <head>，然后自动复检。必须带 confirm:true —— 用户没看过报告并点头之前绝不要调用。只改表现层（CSS 覆盖），不动 DOM、不动文案，所以内容指纹必然一致；仍会复检一次，若出现必须级回归或内容变化会自动回滚并还原备份。改前自动备份为 <文件名>.bak-<时间戳>，可用 undo 字段里的路径回滚。dryRun:true 只返回 CSS 不写文件。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 8,
+            "description": "calibrate 返回的 runId，必须是用户已看过报告的那一次"
+          },
+          "issues": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "description": "要执行的编号，如 [\"R01\",\"R03\"]，也接受 issueId"
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "必须为 true。仅在用户看过报告并明确同意修改后传"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "只返回将要注入的 CSS，不写文件",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "runId",
+          "issues",
+          "confirm"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "apply",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "recheck",
+      "description": "复检：传基线 runId 与改动后的产物（省略则沿用基线目标），沿用基线的同一套设计系统重跑，返回 已修 / 仍存在 / 新引入 三组问题，并比对内容指纹。内容指纹一旦变化（改文案、增删字段、调整区块），判定超出校准范围，结论作废并列出差异。同时检查回归：交互元素显著减少、原本无横向溢出变成有、必须级问题变多。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 8,
+            "description": "基线 runId；会沿用该 run 的设计系统"
+          },
+          "suite": {
+            "description": "设备组合：essentials|mobile|foldable|desktop|tablet|all，默认 essentials",
+            "type": "string",
+            "pattern": "^[a-z]{2,20}$"
+          },
+          "devices": {
+            "description": "精确指定设备 id，优先于 suite",
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{2,40}$"
+            }
+          },
+          "target": {
+            "description": "改动后的产物；省略则沿用基线目标",
+            "type": "object",
+            "properties": {
+              "file": {
+                "description": "本地 HTML 文件绝对路径（推荐）",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "html": {
+                "description": "直接传 HTML 文本；会落临时文件后渲染",
+                "type": "string",
+                "maxLength": 5242880
+              },
+              "url": {
+                "description": "http(s) 地址",
+                "type": "string",
+                "maxLength": 4096,
+                "format": "uri"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "recheck",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "serverInfo": {
+    "name": "design-calibrator-mcp",
+    "version": "0.7.2"
+  },
+  "protocolVersion": null,
+  "instructions": null,
+  "durationMs": 2400,
+  "stderr": ""
+}
